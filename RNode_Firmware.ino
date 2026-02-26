@@ -89,6 +89,12 @@ void setup() {
       pinMode(PIN_LED_BLUE, OUTPUT);
       delay(200);
     #endif
+    #if BOARD_MODEL == BOARD_PROMICRO
+      delay(200);
+      pinMode(PIN_VEXT_EN, OUTPUT);
+      digitalWrite(PIN_VEXT_EN, HIGH);
+      delay(200);
+    #endif
 
     if (!eeprom_begin()) { Serial.write("EEPROM initialisation failed.\r\n"); }
   #endif
@@ -129,7 +135,7 @@ void setup() {
     boot_seq();
   #endif
 
-  #if BOARD_MODEL != BOARD_RAK4631 && BOARD_MODEL != BOARD_HELTEC_T114 && BOARD_MODEL != BOARD_TECHO && BOARD_MODEL != BOARD_T3S3 && BOARD_MODEL != BOARD_TBEAM_S_V1 && BOARD_MODEL != BOARD_HELTEC32_V4
+  #if BOARD_MODEL != BOARD_RAK4631 && BOARD_MODEL != BOARD_HELTEC_T114 && BOARD_MODEL != BOARD_PROMICRO && BOARD_MODEL != BOARD_TECHO && BOARD_MODEL != BOARD_T3S3 && BOARD_MODEL != BOARD_TBEAM_S_V1 && BOARD_MODEL != BOARD_HELTEC32_V4
     // Some boards need to wait until the hardware UART is set up before booting
     // the full firmware. In the case of the RAK4631 and Heltec T114, the line below will wait
     // until a serial connection is actually established with a master. Thus, it
@@ -535,7 +541,9 @@ bool startRadio() {
         // Flash an info pattern to indicate
         // that the radio is now on
         kiss_indicate_radiostate();
-        led_indicate_info(3);
+        if (!display_blanked) {
+          led_indicate_info(3);
+        }
         return true;
       }
 
@@ -575,7 +583,7 @@ volatile bool queue_flushing = false;
 void flush_queue(void) {
   if (!queue_flushing) {
     queue_flushing = true;
-    led_tx_on();
+    if (!display_blanked) { led_tx_on(); }
 
     #if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
     while (!fifo16_isempty(&packet_starts)) {
@@ -596,7 +604,7 @@ void flush_queue(void) {
       }
     }
 
-    lora_receive(); led_tx_off();
+    lora_receive(); if (!display_blanked) { led_tx_off(); }
   }
 
   queue_height = 0;
@@ -615,7 +623,8 @@ void flush_queue(void) {
 
 void pop_queue() {
   if (!queue_flushing) {
-    queue_flushing = true; led_tx_on();
+    queue_flushing = true;
+    if (!display_blanked) { led_tx_on(); }
 
     #if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
     if (!fifo16_isempty(&packet_starts)) {
@@ -637,7 +646,8 @@ void pop_queue() {
       queued_bytes -= length;
     }
 
-    lora_receive(); led_tx_off();
+    lora_receive();
+    if (!display_blanked) { led_tx_off(); }
   }
 
   #if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
@@ -751,7 +761,7 @@ void transmit(uint16_t size) {
       add_airtime(written);
 
     } else {
-      led_tx_on(); uint16_t written = 0;
+      if (!display_blanked) { led_tx_on(); } uint16_t written = 0;
       if (size > SINGLE_MTU) { size = SINGLE_MTU; }
       if (!implicit) { LoRa->beginPacket(); }
       else           { LoRa->beginPacket(size); }
@@ -984,7 +994,7 @@ void serial_callback(uint8_t sbyte) {
     } else if (command == CMD_RADIO_LOCK) {
       update_radio_lock();
       kiss_indicate_radio_lock();
-    } else if (command == CMD_BLINK) {
+    } else if (command == CMD_BLINK && !display_blanked) {
       led_indicate_info(sbyte);
     } else if (command == CMD_RANDOM) {
       kiss_indicate_random(getRandom());
@@ -1431,13 +1441,15 @@ void update_modem_status() {
   if (carrier_detected) { dcd = true; } else { dcd = false; }
 
   dcd_led = dcd;
-  if (dcd_led) { led_rx_on(); }
+  if (!display_blanked && dcd_led) { led_rx_on(); }
   else {
     if (interference_detected) {
-      if (led_id_filter >= LED_ID_TRIG && noise_floor_sampled) { led_id_on(); }
+      if (led_id_filter >= LED_ID_TRIG && noise_floor_sampled && !display_blanked) { led_id_on(); }
     } else {
-      if (airtime_lock) { led_indicate_airtime_lock(); }
-      else              { led_rx_off(); led_id_off(); }
+      if (airtime_lock && !display_blanked) { led_indicate_airtime_lock(); }
+      else { 
+        if (!display_blanked) { led_rx_off(); led_id_off(); }
+      }
     }
   }
 }
@@ -1707,7 +1719,9 @@ void loop() {
           console_loop();
         #endif
       } else {
-        led_indicate_standby();
+        if (!display_blanked) {
+          led_indicate_standby();
+        }
       }
     } else {
 

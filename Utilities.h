@@ -135,7 +135,7 @@ uint8_t boot_vector = 0x00;
 	#define NUMPIXELS 1
 	Adafruit_NeoPixel pixels(NUMPIXELS, pin_np, NEO_GRB + NEO_KHZ800);
 
-	uint8_t npr = 0;
+  uint8_t npr = 0;
   uint8_t npg = 0;
   uint8_t npb = 0;
   float npi = NP_M;
@@ -340,6 +340,20 @@ uint8_t boot_vector = 0x00;
 		void led_tx_off() { digitalWrite(pin_led_tx, LOW); }
 		void led_id_on()  { }
 		void led_id_off() { }
+	#elif BOARD_MODEL == BOARD_AETHERNODE
+		void led_rx_on()  { digitalWrite(pin_led_rx, HIGH); }
+		void led_rx_off() {	digitalWrite(pin_led_rx, LOW); }
+		void led_tx_on()  { digitalWrite(pin_led_tx, HIGH); }
+		void led_tx_off() { digitalWrite(pin_led_tx, LOW); }
+		void led_id_on()  { }
+		void led_id_off() { }
+	#elif BOARD_MODEL == BOARD_MESHADVENTURER
+		void led_rx_on()  { digitalWrite(pin_led_rx, HIGH); }
+		void led_rx_off() {	digitalWrite(pin_led_rx, LOW); }
+		void led_tx_on()  { digitalWrite(pin_led_tx, HIGH); }
+		void led_tx_off() { digitalWrite(pin_led_tx, LOW); }
+		void led_id_on()  { }
+		void led_id_off() { }
 	#endif
 #elif MCU_VARIANT == MCU_NRF52
     #if HAS_NP == true
@@ -356,7 +370,14 @@ uint8_t boot_vector = 0x00;
 		void led_tx_off() { digitalWrite(pin_led_tx, LOW); }
 		void led_id_on()  { }
 		void led_id_off() { }
-	#elif BOARD_MODEL == BOARD_HELTEC_T114
+  #elif BOARD_MODEL == BOARD_PROMICRO
+	void led_rx_on()  { digitalWrite(pin_led_rx, LED_ON); }
+	void led_rx_off() {	digitalWrite(pin_led_rx, LED_OFF); }
+	void led_tx_on()  { digitalWrite(pin_led_tx, LED_ON); }
+	void led_tx_off() { digitalWrite(pin_led_tx, LED_OFF); }
+	void led_id_on()  { }
+	void led_id_off() { }
+  #elif BOARD_MODEL == BOARD_HELTEC_T114
     // Heltec T114 pulls pins LOW to turn on
     void led_rx_on()  { digitalWrite(pin_led_rx, LOW); }
     void led_rx_off() {	digitalWrite(pin_led_rx, HIGH); }
@@ -1362,7 +1383,7 @@ void setTXPower() {
 		if (model == MODEL_12) LoRa->setTxPower(mapped_lora_txp, PA_OUTPUT_RFO_PIN);
 
 		if (model == MODEL_C6) LoRa->setTxPower(mapped_lora_txp, PA_OUTPUT_RFO_PIN);
-    if (model == MODEL_C7) LoRa->setTxPower(mapped_lora_txp, PA_OUTPUT_RFO_PIN);
+		if (model == MODEL_C7) LoRa->setTxPower(mapped_lora_txp, PA_OUTPUT_RFO_PIN);
 
 		if (model == MODEL_A1) LoRa->setTxPower(mapped_lora_txp, PA_OUTPUT_PA_BOOST_PIN);
 		if (model == MODEL_A2) LoRa->setTxPower(mapped_lora_txp, PA_OUTPUT_PA_BOOST_PIN);
@@ -1674,6 +1695,12 @@ bool eeprom_model_valid() {
 	#elif BOARD_MODEL == BOARD_HUZZAH32
 	if (model == MODEL_FF) {
 	#elif BOARD_MODEL == BOARD_GENERIC_ESP32
+	if (model == MODEL_FF || model == MODEL_FE) {
+	#elif BOARD_MODEL == BOARD_AETHERNODE
+	if (model == MODEL_FF || model == MODEL_FE) {
+	#elif BOARD_MODEL == BOARD_MESHADVENTURER
+	if (model == MODEL_FF || model == MODEL_FE) {
+	#elif BOARD_MODEL == BOARD_PROMICRO
 	if (model == MODEL_FF || model == MODEL_FE) {
 	#else
 	if (false) {

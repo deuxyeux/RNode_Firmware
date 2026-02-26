@@ -17,7 +17,7 @@
 ARDUINO_ESP_CORE_VER = 2.0.17
 
 # Version 3.2.0 of the Arduino ESP core is based on ESP-IDF v5.4.1
-# ARDUINO_ESP_CORE_VER = 3.2.0
+#ARDUINO_ESP_CORE_VER = 3.3.7
 
 all: release
 
@@ -50,10 +50,12 @@ prep-nrf:
 	arduino-cli core install rakwireless:nrf52 --config-file arduino-cli.yaml
 	arduino-cli core install Heltec_nRF52:Heltec_nRF52 --config-file arduino-cli.yaml
 	arduino-cli core install adafruit:nrf52 --config-file arduino-cli.yaml
+	arduino-cli core install "promicro:nrf52" --config-file arduino-cli.yaml
+	sed -i.bak 's/nicenanov2\.build\.ldscript=nrf52840_s140_v7\.ld/nicenanov2.build.ldscript=nrf52840_s140_v6.ld/' ~/.arduino15/packages/promicro/hardware/nrf52/1.0.2/boards.txt
 	arduino-cli lib install "GxEPD2"
 	arduino-cli config set library.enable_unsafe_install true
 	arduino-cli lib install --git-url https://github.com/liamcottle/esp8266-oled-ssd1306#e16cee124fe26490cb14880c679321ad8ac89c95
-	pip install adafruit-nrfutil --upgrade
+	pip install adafruit-nrfutil --upgrade --break-system-packages
 
 console-site:
 	make -C Console clean site
@@ -139,11 +141,20 @@ firmware-featheresp32: check_bt_buffers
 firmware-genericesp32: check_bt_buffers
 	arduino-cli compile --log --fqbn esp32:esp32:esp32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x35\""
 
+firmware-meshadventurer: check_bt_buffers
+	arduino-cli compile --log --fqbn esp32:esp32:esp32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF4\""
+
+firmware-aethernode: check_bt_buffers
+	arduino-cli compile --log --fqbn esp32:esp32:esp32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x35\""
+
 firmware-rak4631:
 	arduino-cli compile --log --fqbn rakwireless:nrf52:WisCoreRAK4631Board -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x51\""
 
 firmware-heltec_t114:
 	arduino-cli compile --log --fqbn Heltec_nRF52:Heltec_nRF52:HT-n5262 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x3C\""
+
+firmware-promicro:
+	arduino-cli compile --log --fqbn promicro:nrf52:nicenanov2:softdevice=s140v6 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF5\""
 
 firmware-techo:
 	arduino-cli compile --log --fqbn adafruit:nrf52:pca10056 -e --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x44\""
@@ -153,6 +164,27 @@ firmware-xiao_s3:
 
 upload:
 	arduino-cli upload -p /dev/ttyUSB0 --fqbn unsignedio:avr:rnode
+
+upload-genericesp32:
+	arduino-cli upload -p /dev/ttyUSB0 --fqbn esp32:esp32:esp32
+	@sleep 1
+	rnodeconf /dev/ttyUSB0 --firmware-hash $$(./partition_hashes ./build/esp32.esp32.esp32/RNode_Firmware.ino.bin)
+	@sleep 3
+	python ./Release/esptool/esptool.py --chip esp32 --port /dev/ttyACM0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 80m --flash_size 4MB 0x210000 ./Release/console_image.bin
+
+upload-meshadventurer:
+	arduino-cli upload -p /dev/ttyUSB0 --fqbn esp32:esp32:esp32
+	@sleep 1
+	rnodeconf /dev/ttyUSB0 --firmware-hash $$(./partition_hashes ./build/esp32.esp32.esp32/RNode_Firmware.ino.bin)
+	@sleep 3
+	python ./Release/esptool/esptool.py --chip esp32 --port /dev/ttyUSB0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 80m --flash_size 4MB 0x210000 ./Release/console_image.bin
+
+upload-aethernode:
+	arduino-cli upload -p /dev/ttyUSB0 --fqbn esp32:esp32:esp32
+	@sleep 1
+	rnodeconf /dev/ttyUSB0 --firmware-hash $$(./partition_hashes ./build/esp32.esp32.esp32/RNode_Firmware.ino.bin)
+	@sleep 3
+	python ./Release/esptool/esptool.py --chip esp32 --port /dev/ttyACM0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 80m --flash_size 4MB 0x210000 ./Release/console_image.bin
 
 upload-mega2560:
 	arduino-cli upload -p /dev/ttyACM0 --fqbn arduino:avr:mega
@@ -197,7 +229,7 @@ upload-heltec32_v2:
 	@sleep 1
 	rnodeconf /dev/ttyUSB0 --firmware-hash $$(./partition_hashes ./build/esp32.esp32.heltec_wifi_lora_32_V2/RNode_Firmware.ino.bin)
 	@sleep 3
-	python ./Release/esptool/esptool.py --chip esp32 --port /dev/ttyUSB1 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 80m --flash_size 4MB 0x210000 ./Release/console_image.bin
+	python ./Release/esptool/esptool.py --chip esp32 --port /dev/ttyUSB0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 80m --flash_size 4MB 0x210000 ./Release/console_image.bin
 
 upload-heltec32_v3:
 	arduino-cli upload -p /dev/ttyUSB0 --fqbn esp32:esp32:heltec_wifi_lora_32_V3
@@ -263,6 +295,11 @@ upload-rak4631:
 upload-heltec_t114:
 	arduino-cli upload -p /dev/ttyACM0 --fqbn Heltec_nRF52:Heltec_nRF52:HT-n5262
 	@sleep 1
+	rnodeconf /dev/ttyACM0 --firmware-hash $$(./partition_hashes from_device /dev/ttyACM0)
+
+upload-promicro:
+	arduino-cli upload -p /dev/ttyACM0 --fqbn promicro:nrf52:nicenanov2:softdevice=s140v6
+	@sleep 6
 	rnodeconf /dev/ttyACM0 --firmware-hash $$(./partition_hashes from_device /dev/ttyACM0)
 
 upload-techo:
@@ -487,6 +524,24 @@ release-genericesp32: check_bt_buffers
 	zip --junk-paths ./Release/rnode_firmware_esp32_generic.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_esp32_generic.boot_app0 build/rnode_firmware_esp32_generic.bin build/rnode_firmware_esp32_generic.bootloader build/rnode_firmware_esp32_generic.partitions
 	rm -r build
 
+release-meshadventurer: check_bt_buffers
+	arduino-cli compile --fqbn esp32:esp32:esp32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF4\""
+	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_meshadventurer.boot_app0
+	cp build/esp32.esp32.esp32/RNode_Firmware.ino.bin build/rnode_firmware_meshadventurer.bin
+	cp build/esp32.esp32.esp32/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_meshadventurer.bootloader
+	cp build/esp32.esp32.esp32/RNode_Firmware.ino.partitions.bin build/rnode_firmware_meshadventurer.partitions
+	zip --junk-paths ./Release/rnode_firmware_meshadventurer.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_meshadventurer.boot_app0 build/rnode_firmware_meshadventurer.bin build/rnode_firmware_meshadventurer.bootloader build/rnode_firmware_meshadventurer.partitions
+	rm -r build
+
+release-aethernode: check_bt_buffers
+	arduino-cli compile --fqbn esp32:esp32:esp32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x35\""
+	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_aethernode.boot_app0
+	cp build/esp32.esp32.esp32/RNode_Firmware.ino.bin build/rnode_firmware_aethernode.bin
+	cp build/esp32.esp32.esp32/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_aethernode.bootloader
+	cp build/esp32.esp32.esp32/RNode_Firmware.ino.partitions.bin build/rnode_firmware_aethernode.partitions
+	zip --junk-paths ./Release/rnode_firmware_aethernode.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_aethernode.boot_app0 build/rnode_firmware_aethernode.bin build/rnode_firmware_aethernode.bootloader build/rnode_firmware_aethernode.partitions
+	rm -r build
+
 release-mega2560:
 	arduino-cli compile --fqbn arduino:avr:mega -e --build-property "compiler.cpp.extra_flags=\"-DMODEM=0x01\""
 	cp build/arduino.avr.mega/RNode_Firmware.ino.hex Release/rnode_firmware_m2560.hex
@@ -501,6 +556,11 @@ release-heltec_t114:
 	arduino-cli compile --fqbn Heltec_nRF52:Heltec_nRF52:HT-n5262 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x3C\""
 	cp build/Heltec_nRF52.Heltec_nRF52.HT-n5262/RNode_Firmware.ino.hex build/rnode_firmware_heltec_t114.hex
 	adafruit-nrfutil dfu genpkg --dev-type 0x0052 --application build/rnode_firmware_heltec_t114.hex Release/rnode_firmware_heltec_t114.zip
+
+release-promicro:
+	arduino-cli compile --log --fqbn promicro:nrf52:nicenanov2:softdevice=s140v6 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF5\""
+	cp build/promicro.nrf52.nicenanov2/RNode_Firmware.ino.hex build/rnode_firmware_promicro.hex
+	adafruit-nrfutil dfu genpkg --dev-type 0x0052 --application build/rnode_firmware_promicro.hex Release/rnode_firmware_promicro.zip
 
 release-techo:
 	arduino-cli compile --log --fqbn adafruit:nrf52:pca10056 -e --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x44\""

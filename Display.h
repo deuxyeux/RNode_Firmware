@@ -65,6 +65,26 @@
   #define DISP_ADDR 0x3C
   #define SCL_OLED 18
   #define SDA_OLED 17
+#elif BOARD_MODEL == BOARD_GENERIC_ESP32
+  #define DISP_RST -1
+  #define DISP_ADDR 0x3C
+  #define SCL_OLED 22
+  #define SDA_OLED 11
+#elif BOARD_MODEL == BOARD_MESHADVENTURER
+  #define DISP_RST -1
+  #define DISP_ADDR 0x3C
+  #define SCL_OLED 22
+  #define SDA_OLED 21
+#elif BOARD_MODEL == BOARD_AETHERNODE
+  #define DISP_RST -1
+  #define DISP_ADDR 0x3C
+  #define SCL_OLED 22
+  #define SDA_OLED 21
+#elif BOARD_MODEL == BOARD_PROMICRO
+  #define DISP_RST -1
+  #define DISP_ADDR 0x3C
+  #define SCL_OLED 7
+  #define SDA_OLED 8
 #elif BOARD_MODEL == BOARD_RAK4631
   // RAK1921/SSD1306
   #define DISP_RST -1
@@ -311,6 +331,9 @@ bool display_init() {
     #elif BOARD_MODEL == BOARD_HELTEC_T114
       pinMode(PIN_T114_TFT_EN, OUTPUT);
       digitalWrite(PIN_T114_TFT_EN, LOW);
+    #elif BOARD_MODEL == BOARD_PROMICRO
+      Wire.setPins(SDA_OLED, SCL_OLED);
+      Wire.begin();
     #elif BOARD_MODEL == BOARD_TECHO
       display.init(0, true, 10, false, displaySPI, SPISettings(4000000, MSBFIRST, SPI_MODE0));
       display.setPartialWindow(0, 0, DISP_W, DISP_H);
@@ -434,6 +457,15 @@ bool display_init() {
         #elif BOARD_MODEL == BOARD_TECHO
           disp_mode = DISP_MODE_PORTRAIT;
           display.setRotation(3);
+        #elif BOARD_MODEL == BOARD_MESHADVENTURER
+          disp_mode = DISP_MODE_LANDSCAPE;
+          display.setRotation(0);
+        #elif BOARD_MODEL == BOARD_AETHERNODE
+          disp_mode = DISP_MODE_LANDSCAPE;
+          display.setRotation(0);
+        #elif BOARD_MODEL == BOARD_PROMICRO
+          disp_mode = DISP_MODE_LANDSCAPE;
+          display.setRotation(0);
         #else
           disp_mode = DISP_MODE_PORTRAIT;
           display.setRotation(3);
@@ -1130,6 +1162,9 @@ void update_display(bool blank = false) {
 
 void display_unblank() {
   last_unblank_event = millis();
+  #if BOARD_MODEL == BOARD_HELTEC_T114  
+    digitalWrite(PIN_T114_TFT_BLGT, LOW);  
+  #endif
 }
 
 void ext_fb_enable() {

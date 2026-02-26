@@ -87,7 +87,7 @@
 #define FREQ_DIV_6X  (double)pow(2.0, 25.0)
 #define FREQ_STEP_6X (double)(XTAL_FREQ_6X / FREQ_DIV_6X)
 
-#if BOARD_MODEL == BOARD_TECHO
+#if BOARD_MODEL == BOARD_TECHO || BOARD_MODEL == BOARD_PROMICRO
   SPIClass spim3 = SPIClass(NRF_SPIM3, pin_miso, pin_sclk, pin_mosi) ;
   #define SPI spim3
 
@@ -133,7 +133,7 @@ bool sx126x::preInit() {
   pinMode(_ss, OUTPUT);
   digitalWrite(_ss, HIGH);
   
-  #if BOARD_MODEL == BOARD_T3S3 || BOARD_MODEL == BOARD_HELTEC32_V3 || BOARD_MODEL == BOARD_HELTEC32_V4 || BOARD_MODEL == BOARD_TDECK || BOARD_MODEL == BOARD_XIAO_S3
+  #if BOARD_MODEL == BOARD_T3S3 || BOARD_MODEL == BOARD_HELTEC32_V3 || BOARD_MODEL == BOARD_HELTEC32_V4 || BOARD_MODEL == BOARD_TDECK || BOARD_MODEL == BOARD_XIAO_S3 || BOARD_MODEL == BOARD_GENERIC_ESP32 || BOARD_MODEL == BOARD_MESHADVENTURER || BOARD_MODEL == BOARD_AETHERNODE
     SPI.begin(pin_sclk, pin_miso, pin_mosi, pin_cs);
   #elif BOARD_MODEL == BOARD_TECHO
     SPI.setPins(pin_miso, pin_sclk, pin_mosi);
@@ -308,6 +308,22 @@ void sx126x::reset(void) {
   }
 }
 
+void sx126x::setDCDCRegulator(void) {
+  // Documentation
+  // 5. Power Distribution -> 5.1 Selecting DC-DC Converter or LDO Regulation
+  // 13.1.11 SetRegulatorMode
+
+  uint8_t mode_byte = MODE_STDBY_RC_6X;
+  executeOpcode(OP_STANDBY_6X, &mode_byte, 1);
+
+  // Enable DC-DC regulator for high power operation
+  uint8_t reg_mode = 0x01; // 0x00 = LDO, 0x01 = DC-DC
+  executeOpcode(OP_REGULATOR_MODE_6X, &reg_mode, 1);
+
+  delay(5);
+  waitOnBusy();
+}
+
 void sx126x::calibrate(void) {
   // Put in STDBY_RC mode before calibration
   uint8_t mode_byte = MODE_STDBY_RC_6X;
@@ -339,9 +355,19 @@ int sx126x::begin(long frequency) {
   if (!_preinit_done) { if (!preInit()) { return false; } }
   if (_rxen != -1) { pinMode(_rxen, OUTPUT); }
 
+  //TODO: if it works, make it optional
+  //#ifdef SX1262_USE_DCDC_REGULATOR
+    setDCDCRegulator();
+  //#endif
+
   calibrate();
   calibrate_image(frequency);
-  enableTCXO();
+  #if HAS_TCXO
+    enableTCXO();
+    //13.1.15 SetRxTxFallbackMode to STDBY_XOSC
+    uint8_t fallback_mode = 0x30; // STDBY_XOSC after TX/RX
+    executeOpcode(OP_RX_TX_FALLBACK_MODE_6X, &fallback_mode, 1);
+  #endif
   loraMode();
   standby();
 
@@ -459,6 +485,9 @@ int sx126x::beginPacket(int implicitHeader) {
 
 int sx126x::endPacket() {
   setPacketParams(_preambleLength, _implicitHeaderMode, _payloadLength, _crcMode);
+
+  if (_rxen != -1) { digitalWrite(_rxen, LOW); } //Set RXen low when transmitting
+
   uint8_t timeout[3] = {0}; // Put in single TX mode
   executeOpcode(OP_TX_6X, timeout, 3);
 
@@ -702,6 +731,14 @@ void sx126x::enableTCXO() {
     #elif BOARD_MODEL == BOARD_TECHO
       uint8_t buf[4] = {MODE_TCXO_1_8V_6X, 0x00, 0x00, 0xFF};
     #elif BOARD_MODEL == BOARD_HELTEC32_V4
+      uint8_t buf[4] = {MODE_TCXO_1_8V_6X, 0x00, 0x00, 0xFF};
+    #elif BOARD_MODEL == BOARD_GENERIC_ESP32
+      uint8_t buf[4] = {MODE_TCXO_1_8V_6X, 0x00, 0x00, 0xFF};
+    #elif BOARD_MODEL == BOARD_MESHADVENTURER
+      uint8_t buf[4] = {MODE_TCXO_1_8V_6X, 0x00, 0x00, 0xFF};
+    #elif BOARD_MODEL == BOARD_AETHERNODE
+      uint8_t buf[4] = {MODE_TCXO_1_8V_6X, 0x00, 0x00, 0xFF};
+    #elif BOARD_MODEL == BOARD_PROMICRO
       uint8_t buf[4] = {MODE_TCXO_1_8V_6X, 0x00, 0x00, 0xFF};
     #endif
     executeOpcode(OP_DIO3_TCXO_CTRL_6X, buf, 4);

@@ -1,0 +1,133 @@
+diff --git a/Display.h b/Display.h
+index 7d903b9..882af8d 100644
+--- a/Display.h
++++ b/Display.h
+@@ -1071,6 +1071,7 @@ void update_display(bool blank = false) {
+       #if BOARD_MODEL == BOARD_HELTEC_T114
+         display.clear();
+         display.display();
++        digitalWrite(PIN_T114_TFT_BLGT, HIGH);
+       #elif BOARD_MODEL != BOARD_TDECK && BOARD_MODEL != BOARD_TECHO
+         display.clearDisplay();
+         display.display();
+@@ -1128,6 +1129,9 @@ void update_display(bool blank = false) {
+ 
+ void display_unblank() {
+   last_unblank_event = millis();
++  #if BOARD_MODEL == BOARD_HELTEC_T114  
++    digitalWrite(PIN_T114_TFT_BLGT, LOW);  
++  #endif
+ }
+ 
+ void ext_fb_enable() {
+diff --git a/RNode_Firmware.ino b/RNode_Firmware.ino
+index 5649206..ba157e6 100644
+--- a/RNode_Firmware.ino
++++ b/RNode_Firmware.ino
+@@ -535,7 +535,9 @@ bool startRadio() {
+         // Flash an info pattern to indicate
+         // that the radio is now on
+         kiss_indicate_radiostate();
+-        led_indicate_info(3);
++        if (!display_blanked) {
++          led_indicate_info(3);
++        }
+         return true;
+       }
+ 
+@@ -575,7 +577,7 @@ volatile bool queue_flushing = false;
+ void flush_queue(void) {
+   if (!queue_flushing) {
+     queue_flushing = true;
+-    led_tx_on();
++    if (!display_blanked) { led_tx_on(); }
+ 
+     #if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
+     while (!fifo16_isempty(&packet_starts)) {
+@@ -596,7 +598,7 @@ void flush_queue(void) {
+       }
+     }
+ 
+-    lora_receive(); led_tx_off();
++    lora_receive(); if (!display_blanked) { led_tx_off(); }
+   }
+ 
+   queue_height = 0;
+@@ -615,7 +617,8 @@ void flush_queue(void) {
+ 
+ void pop_queue() {
+   if (!queue_flushing) {
+-    queue_flushing = true; led_tx_on();
++    queue_flushing = true;
++    if (!display_blanked) { led_tx_on(); }
+ 
+     #if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
+     if (!fifo16_isempty(&packet_starts)) {
+@@ -637,7 +640,8 @@ void pop_queue() {
+       queued_bytes -= length;
+     }
+ 
+-    lora_receive(); led_tx_off();
++    lora_receive();
++    if (!display_blanked) { led_tx_off(); }
+   }
+ 
+   #if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
+@@ -751,7 +755,7 @@ void transmit(uint16_t size) {
+       add_airtime(written);
+ 
+     } else {
+-      led_tx_on(); uint16_t written = 0;
++      if (!display_blanked) { led_tx_on(); } uint16_t written = 0;
+       if (size > SINGLE_MTU) { size = SINGLE_MTU; }
+       if (!implicit) { LoRa->beginPacket(); }
+       else           { LoRa->beginPacket(size); }
+@@ -984,7 +988,7 @@ void serial_callback(uint8_t sbyte) {
+     } else if (command == CMD_RADIO_LOCK) {
+       update_radio_lock();
+       kiss_indicate_radio_lock();
+-    } else if (command == CMD_BLINK) {
++    } else if (command == CMD_BLINK && !display_blanked) {
+       led_indicate_info(sbyte);
+     } else if (command == CMD_RANDOM) {
+       kiss_indicate_random(getRandom());
+@@ -1431,13 +1435,15 @@ void update_modem_status() {
+   if (carrier_detected) { dcd = true; } else { dcd = false; }
+ 
+   dcd_led = dcd;
+-  if (dcd_led) { led_rx_on(); }
++  if (!display_blanked && dcd_led) { led_rx_on(); }
+   else {
+     if (interference_detected) {
+-      if (led_id_filter >= LED_ID_TRIG && noise_floor_sampled) { led_id_on(); }
++      if (led_id_filter >= LED_ID_TRIG && noise_floor_sampled && !display_blanked) { led_id_on(); }
+     } else {
+-      if (airtime_lock) { led_indicate_airtime_lock(); }
+-      else              { led_rx_off(); led_id_off(); }
++      if (airtime_lock && !display_blanked) { led_indicate_airtime_lock(); }
++      else { 
++        if (!display_blanked) { led_rx_off(); led_id_off(); }
++      }
+     }
+   }
+ }
+@@ -1707,7 +1713,9 @@ void loop() {
+           console_loop();
+         #endif
+       } else {
+-        led_indicate_standby();
++        if (!display_blanked) {
++          led_indicate_standby();
++        }
+       }
+     } else {
+ 
+diff --git a/arduino-cli.yaml b/arduino-cli.yaml
+index 6dd5f8d..d358070 100644
+--- a/arduino-cli.yaml
++++ b/arduino-cli.yaml
+@@ -4,4 +4,3 @@ board_manager:
+   - https://raw.githubusercontent.com/RAKwireless/RAKwireless-Arduino-BSP-Index/main/package_rakwireless_index.json
+   - https://github.com/HelTecAutomation/Heltec_nRF52/releases/download/1.7.0/package_heltec_nrf_index.json
+   - https://adafruit.github.io/arduino-board-index/package_adafruit_index.json
+-  - http://unsigned.io/arduino/package_unsignedio_UnsignedBoards_index.json
