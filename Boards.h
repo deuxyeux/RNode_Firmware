@@ -122,9 +122,11 @@
   #define MODEL_FE            0xFE // Homebrew board, max 17dBm output power
   #define MODEL_FF            0xFF // Homebrew board, max 14dBm output power
 
-  #define BOARD_AETHERNODE     0xF3 // Aethernode
-  #define BOARD_MESHADVENTURER 0xF4 // Meshadventurer
-  #define BOARD_PROMICRO       0xF5 // FakeTec (Promicro)
+  #define BOARD_MESHADVENTURER_S3 0xF2 // MeshAdventurer-S3
+  #define BOARD_AETHERNODE        0xF3 // Aethernode
+  #define BOARD_MESHADVENTURER    0xF4 // MeshAdventurer
+  #define BOARD_PROMICRO          0xF5 // FakeTec (Promicro)
+  #define BOARD_DIY_V1            0xF6 // DIY-V1
 
   #if defined(__AVR_ATmega1284P__)
     #define PLATFORM PLATFORM_AVR
@@ -253,7 +255,72 @@
       const int pin_led_rx = 2;
       const int pin_led_tx = 4;
 
+    #elif BOARD_MODEL == BOARD_MESHADVENTURER_S3
+      #define HAS_DISPLAY true
+      #define HAS_NP true
+      #define HAS_BLUETOOTH false
+      #define HAS_BLE true
+      #define HAS_WIFI true
+      #define HAS_CONSOLE true
+      #define HAS_EEPROM true
+      #define HAS_BUSY true
+      #define HAS_INPUT true
+      #define HAS_TCXO true
+      #define MODEM SX1262
+      #define DIO2_AS_RF_SWITCH false
+      #define HAS_RF_SWITCH_RX_TX true
+      #define HAS_LORA_LNA true
+      #define LORA_LNA_GAIN  17
+      #define LORA_LNA_GVT   12
+
+      const int pin_cs = 39;
+      const int pin_sclk = 38;
+      const int pin_miso = 40;
+      const int pin_mosi = 18;
+      const int pin_busy = 7;
+      const int pin_reset = 43;
+      const int pin_dio = 15;
+      const int pin_txen = 9;
+      const int pin_rxen = 8;
+      const int pin_tcxo_enable = -1;
+
+      const int pin_btn_usr1 = 4;
+      const int pin_led_rx = 11;
+      const int pin_led_tx = 12;
+      const int pin_np = 48;
+
     #elif BOARD_MODEL == BOARD_MESHADVENTURER
+      #define HAS_DISPLAY true
+      #define HAS_BLUETOOTH true
+      #define HAS_WIFI true
+      #define HAS_CONSOLE true
+      #define HAS_EEPROM true
+      #define HAS_BUSY true
+      #define HAS_INPUT true
+      #define HAS_TCXO true
+      #define MODEM SX1262
+      #define DIO2_AS_RF_SWITCH false
+      #define HAS_RF_SWITCH_RX_TX true
+      #define HAS_LORA_LNA true
+      #define LORA_LNA_GAIN  17
+      #define LORA_LNA_GVT   12
+
+      const int pin_cs = 18;
+      const int pin_sclk = 5;
+      const int pin_miso = 19;
+      const int pin_mosi = 27;
+      const int pin_busy = 32;
+      const int pin_reset = 23;
+      const int pin_dio = 33;
+      const int pin_txen = 13;
+      const int pin_rxen = 14;
+      const int pin_tcxo_enable = -1;
+
+      const int pin_btn_usr1 = 39;
+      const int pin_led_rx = 2;
+      const int pin_led_tx = 4;
+
+    #elif BOARD_MODEL == BOARD_DIY_V1
       #define HAS_DISPLAY true
       #define HAS_BLUETOOTH true
       #define HAS_WIFI true
