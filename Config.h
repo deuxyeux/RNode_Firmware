@@ -110,7 +110,16 @@
 	#define CSMA_CW_PER_BAND_WINDOWS   15
 	#define CSMA_BAND_1_MAX_AIRTIME    7
 	#define CSMA_BAND_N_MIN_AIRTIME    85
-	#define CSMA_INFR_THRESHOLD_DB     11
+
+	// Increase threshold for specific boards
+	#if BOARD_MODEL == BOARD_MESHADVENTURER_S3 || BOARD_MODEL == BOARD_MESHADVENTURER
+		#define CSMA_INFR_THRESHOLD_DB     14
+	#elif BOARD_MODEL == BOARD_PROMICRO
+		#define CSMA_INFR_THRESHOLD_DB     13
+	#else
+		#define CSMA_INFR_THRESHOLD_DB     11
+	#endif
+
 	#define CSMA_RFENV_RECAL_MS        2500
 	#define CSMA_RFENV_RECAL_LIMIT_DB -83
 	bool interference_detected      =  false;

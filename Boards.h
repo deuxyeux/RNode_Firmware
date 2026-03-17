@@ -256,6 +256,7 @@
       const int pin_led_tx = 4;
 
     #elif BOARD_MODEL == BOARD_MESHADVENTURER_S3
+      #define IS_ESP32S3 true
       #define HAS_DISPLAY true
       #define HAS_NP true
       #define HAS_BLUETOOTH false
@@ -270,8 +271,8 @@
       #define DIO2_AS_RF_SWITCH false
       #define HAS_RF_SWITCH_RX_TX true
       #define HAS_LORA_LNA true
-      #define LORA_LNA_GAIN  17
-      #define LORA_LNA_GVT   12
+      #define LORA_LNA_GAIN  30
+      #define LORA_LNA_GVT   14
 
       const int pin_cs = 39;
       const int pin_sclk = 38;
@@ -285,9 +286,17 @@
       const int pin_tcxo_enable = -1;
 
       const int pin_btn_usr1 = 4;
-      const int pin_led_rx = 11;
-      const int pin_led_tx = 12;
       const int pin_np = 48;
+
+      #if HAS_NP == false
+        #if defined(EXTERNAL_LEDS)
+          const int pin_led_rx = 48;
+          const int pin_led_tx = 48;
+        #else
+          const int pin_led_rx = 48;
+          const int pin_led_tx = 48;
+        #endif
+      #endif
 
     #elif BOARD_MODEL == BOARD_MESHADVENTURER
       #define HAS_DISPLAY true
@@ -302,8 +311,8 @@
       #define DIO2_AS_RF_SWITCH false
       #define HAS_RF_SWITCH_RX_TX true
       #define HAS_LORA_LNA true
-      #define LORA_LNA_GAIN  17
-      #define LORA_LNA_GVT   12
+      #define LORA_LNA_GAIN  30
+      #define LORA_LNA_GVT   14
 
       const int pin_cs = 18;
       const int pin_sclk = 5;
@@ -1051,7 +1060,7 @@
       #define HAS_BLUETOOTH false
       #define HAS_BLE true
       #define HAS_CONSOLE false
-      #define HAS_PMU false
+      #define HAS_PMU true
       #define HAS_NP false
       #define HAS_SD false
       #define HAS_TCXO true
@@ -1078,8 +1087,6 @@
       #define I2C_SDA 8 //P1.04
       #define I2C_SCL 7 //P0.11
 
-      #define LED_ON LOW
-      #define LED_OFF HIGH
       #define PIN_LED_RED   22 //P0.15
       const int pin_led_rx = PIN_LED_RED;
       const int pin_led_tx = PIN_LED_RED;
@@ -1094,10 +1101,10 @@
       const int pin_mosi  = 14; //P1.15
       const int pin_miso  = 15; //P0.02
       const int pin_busy  = 16; //P0.29
-      const int pin_dio   = 11; //P0.10 
+      const int pin_dio   = 11; //P0.10
+      const int pin_rxen  = 2;  //P0.17
+      const int pin_txen  = -1;
       const int pin_tcxo_enable = -1;
-      const int pin_rxen = 2; //P0.17
-      const int pin_txen = -1;
 
     #else
       #error An unsupported nRF board was selected. Cannot compile RNode firmware.

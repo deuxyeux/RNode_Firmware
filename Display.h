@@ -53,7 +53,7 @@
 #elif BOARD_MODEL == BOARD_HELTEC32_V2 || BOARD_MODEL == BOARD_LORA32_V1_0
   #define DISP_RST 16
   #define DISP_ADDR 0x3C
-  #define SCL_OLED 15
+  #define OBSCL_OLED 15
   #define SDA_OLED 4
 #elif BOARD_MODEL == BOARD_HELTEC32_V3
   #define DISP_RST 21
@@ -73,7 +73,7 @@
 #elif BOARD_MODEL == BOARD_MESHADVENTURER_S3
   #define DISP_RST -1
   #define DISP_ADDR 0x3C
-  #define SCL_OLED 0
+  #define SCL_OLED 44
   #define SDA_OLED 42
 #elif BOARD_MODEL == BOARD_MESHADVENTURER
   #define DISP_RST -1
