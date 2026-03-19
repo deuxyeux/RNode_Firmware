@@ -391,6 +391,7 @@
       #define HAS_DISPLAY true
       #define HAS_PMU true
       #define HAS_BLUETOOTH true
+      #define HAS_WIFI true
       #define HAS_CONSOLE true
       #define HAS_SD false
       #define HAS_EEPROM true
