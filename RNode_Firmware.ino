@@ -183,7 +183,7 @@ void setup() {
   #if MODEM == SX1276 || MODEM == SX1278
   LoRa->setPins(pin_cs, pin_reset, pin_dio, pin_busy);
   #elif MODEM == SX1262
-  LoRa->setPins(pin_cs, pin_reset, pin_dio, pin_busy, pin_rxen);
+  LoRa->setPins(pin_cs, pin_reset, pin_dio, pin_busy, pin_rxen, pin_txen);
   #elif MODEM == SX1280
   LoRa->setPins(pin_cs, pin_reset, pin_dio, pin_busy, pin_rxen, pin_txen);
   #endif
@@ -882,7 +882,7 @@ void serial_callback(uint8_t sbyte) {
             if (txp > 13) txp = 13;
           #endif
         #else
-          if (txp > 17) txp = 17;
+          if (txp > 20) txp = 20;
         #endif
 
         lora_txp = txp;
