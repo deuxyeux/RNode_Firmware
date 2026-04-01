@@ -110,7 +110,7 @@ extern SPIClass SPI;
 
 sx126x::sx126x() :
   _spiSettings(16E6, MSBFIRST, SPI_MODE0),
-  _ss(LORA_DEFAULT_SS_PIN), _reset(LORA_DEFAULT_RESET_PIN), _dio0(LORA_DEFAULT_DIO0_PIN), _busy(LORA_DEFAULT_BUSY_PIN), _rxen(LORA_DEFAULT_RXEN_PIN),
+  _ss(LORA_DEFAULT_SS_PIN), _reset(LORA_DEFAULT_RESET_PIN), _dio0(LORA_DEFAULT_DIO0_PIN), _busy(LORA_DEFAULT_BUSY_PIN), _rxen(LORA_DEFAULT_RXEN_PIN), _txen(LORA_DEFAULT_TXEN_PIN),
   _frequency(0),
   _txp(0),
   _sf(0x07),
@@ -191,6 +191,7 @@ uint8_t ISR_VECT sx126x::singleTransfer(uint8_t opcode, uint16_t address, uint8_
 
 void sx126x::rxAntEnable() {
   if (_rxen != -1) { digitalWrite(_rxen, HIGH); }
+  if (_txen != -1) { digitalWrite(_txen, LOW); }
 }
 
 void sx126x::loraMode() {
@@ -354,6 +355,7 @@ int sx126x::begin(long frequency) {
   if (_busy != -1) { pinMode(_busy, INPUT); }
   if (!_preinit_done) { if (!preInit()) { return false; } }
   if (_rxen != -1) { pinMode(_rxen, OUTPUT); }
+  if (_txen != -1) { pinMode(_txen, OUTPUT); }
 
   //TODO: if it works, make it optional
   //#ifdef SX1262_USE_DCDC_REGULATOR
@@ -471,6 +473,8 @@ int sx126x::beginPacket(int implicitHeader) {
       digitalWrite(LORA_PA_CTX, HIGH);
     }
   #endif
+
+  if (_txen != -1) { digitalWrite(_txen, HIGH); } //Set TXen high when transmitting
 
   standby();
   if (implicitHeader) { implicitHeaderMode(); }
@@ -881,12 +885,13 @@ void sx126x::setSyncWord(uint16_t sw) {
   writeRegister(REG_SYNC_WORD_LSB_6X, 0x24);
 }
 
-void sx126x::setPins(int ss, int reset, int dio0, int busy, int rxen) {
+void sx126x::setPins(int ss, int reset, int dio0, int busy, int rxen, int txen) {
   _ss = ss;
   _reset = reset;
   _dio0 = dio0;
   _busy = busy;
   _rxen = rxen;
+  _txen = txen;
 }
 
 void sx126x::dumpRegisters(Stream& out) {

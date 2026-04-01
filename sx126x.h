@@ -93,7 +93,7 @@ public:
 
   byte random();
 
-  void setPins(int ss = LORA_DEFAULT_SS_PIN, int reset = LORA_DEFAULT_RESET_PIN, int dio0 = LORA_DEFAULT_DIO0_PIN, int busy = LORA_DEFAULT_BUSY_PIN, int rxen = LORA_DEFAULT_RXEN_PIN);
+  void setPins(int ss = LORA_DEFAULT_SS_PIN, int reset = LORA_DEFAULT_RESET_PIN, int dio0 = LORA_DEFAULT_DIO0_PIN, int busy = LORA_DEFAULT_BUSY_PIN, int rxen = LORA_DEFAULT_RXEN_PIN, int txen = LORA_DEFAULT_TXEN_PIN);
   void setSPIFrequency(uint32_t frequency);
 
   void dumpRegisters(Stream& out);
@@ -122,6 +122,7 @@ private:
   int _reset;
   int _dio0;
   int _rxen;
+  int _txen;
   int _busy;
   long _frequency;
   int _txp;
