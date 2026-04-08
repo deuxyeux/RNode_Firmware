@@ -1322,13 +1322,13 @@ int getTxPower() {
 }
 
 #if HAS_LORA_PA
-	#if BOARD_MODEL == BOARD_HELTEC32_V4
-		bool pa_values_determined = false;
-		int tx_gain[PA_GAIN_POINTS] = {100};
-	#else
-		bool pa_values_determined = true;
-		const int tx_gain[PA_GAIN_POINTS] = {PA_GAIN_VALUES};
-	#endif
+    #if BOARD_MODEL == BOARD_HELTEC32_V4
+	bool pa_values_determined = false;
+	int tx_gain[PA_GAIN_POINTS] = {100};
+    #else
+	bool pa_values_determined = true;
+	const int tx_gain[PA_GAIN_POINTS] = {PA_GAIN_VALUES};
+    #endif
 #endif
 
 extern uint8_t lora_pa_model;

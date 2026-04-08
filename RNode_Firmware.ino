@@ -1781,7 +1781,13 @@ void sleep_now() {
         #endif
       #endif
       #if BOARD_MODEL == BOARD_HELTEC32_V4
-          digitalWrite(LORA_PA_CPS, LOW);
+          #if LORA_PA_AUTO_DETECT
+            if (sx126x_modem.isKCT8103L()) {
+              digitalWrite(LORA_PA_CTX, LOW);
+            } else {
+              digitalWrite(LORA_PA_CPS, LOW);
+            }
+          #endif
           digitalWrite(LORA_PA_CSD, LOW);
           digitalWrite(LORA_PA_PWR_EN, LOW);
           digitalWrite(Vext, HIGH);

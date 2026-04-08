@@ -377,10 +377,10 @@
       const int pin_miso = 19;
       const int pin_mosi = 23;
       const int pin_busy = 32;
-      const int pin_reset = 34;
+      const int pin_reset = 25;
       const int pin_dio = 33;
-      const int pin_txen = -1;
-      const int pin_rxen = -1;
+      const int pin_txen = 16;
+      const int pin_rxen = 17;
       const int pin_tcxo_enable = -1;
 
       const int pin_btn_usr1 = 39;
