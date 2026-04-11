@@ -250,6 +250,13 @@ uint8_t boot_vector = 0x00;
 		void led_tx_off() { }
 		void led_id_on()  { }
 		void led_id_off() { }
+	#elif BOARD_MODEL == BOARD_TBEAM_S_V3
+		void led_rx_on()  { }
+		void led_rx_off() {	}
+		void led_tx_on()  { }
+		void led_tx_off() { }
+		void led_id_on()  { }
+		void led_id_off() { }
 	#elif BOARD_MODEL == BOARD_LORA32_V1_0
 		#if defined(EXTERNAL_LEDS)
 			void led_rx_on()  { digitalWrite(pin_led_rx, HIGH); }

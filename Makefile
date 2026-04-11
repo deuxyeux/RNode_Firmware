@@ -153,6 +153,9 @@ firmware-tbeam: check_bt_buffers
 firmware-tbeam_supreme:
 	arduino-cli compile --log --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=-DBOARD_MODEL=0x3D"
 
+firmware-tbeam_supreme_v3:
+	arduino-cli compile --log --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=-DBOARD_MODEL=0x43"
+
 firmware-tbeam_sx126x: check_bt_buffers
 	arduino-cli compile --log --fqbn esp32:esp32:t-beam -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x33\" \"-DMODEM=0x03\""
 
@@ -289,6 +292,13 @@ upload-tbeam_supreme:
 	@sleep 3
 	python ./Release/esptool/esptool.py --chip esp32s3 --port /dev/ttyACM0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 80m --flash_size 4MB 0x210000 ./Release/console_image.bin
 
+upload-tbeam_supreme_v3:
+	arduino-cli upload -p /dev/ttyACM0 --fqbn esp32:esp32:esp32s3
+	@sleep 1
+	rnodeconf /dev/ttyACM0 --firmware-hash $$(./partition_hashes ./build/esp32.esp32.esp32s3/RNode_Firmware.ino.bin)
+	@sleep 3
+	python ./Release/esptool/esptool.py --chip esp32s3 --port /dev/ttyACM0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 80m --flash_size 4MB 0x210000 ./Release/console_image.bin
+
 upload-rnode_ng_20:
 	arduino-cli upload -p /dev/ttyUSB0 --fqbn esp32:esp32:ttgo-lora32
 	@sleep 1
@@ -346,7 +356,7 @@ upload-xiao_s3:
 
 release: release-all
 
-release-all: console-site spiffs-image release-tbeam release-tbeam_sx1262 release-lora32_v10 release-lora32_v20 release-lora32_v21 release-lora32_v10_extled release-lora32_v20_extled release-lora32_v21_extled release-lora32_v21_tcxo release-featheresp32 release-genericesp32 release-heltec32_v2 release-heltec32_v3 release-heltec32_v4 release-heltec32_v2_extled release-heltec_t114 release-techo release-rnode_ng_20 release-rnode_ng_21 release-t3s3 release-t3s3_sx127x release-t3s3_sx1280_pa release-tdeck release-tbeam_supreme release-rak4631 release-xiao_s3 release-hashes
+release-all: console-site spiffs-image release-tbeam release-tbeam_sx1262 release-lora32_v10 release-lora32_v20 release-lora32_v21 release-lora32_v10_extled release-lora32_v20_extled release-lora32_v21_extled release-lora32_v21_tcxo release-featheresp32 release-genericesp32 release-heltec32_v2 release-heltec32_v3 release-heltec32_v4 release-heltec32_v2_extled release-heltec_t114 release-techo release-rnode_ng_20 release-rnode_ng_21 release-t3s3 release-t3s3_sx127x release-t3s3_sx1280_pa release-tdeck release-tbeam_supreme release-tbeam_supreme_v3 release-rak4631 release-xiao_s3 release-hashes
 
 release-hashes:
 	python ./release_hashes.py > ./Release/release.json
@@ -536,6 +546,15 @@ release-tbeam_supreme:
 	zip --junk-paths ./Release/rnode_firmware_tbeam_supreme.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_tbeam_supreme.boot_app0 build/rnode_firmware_tbeam_supreme.bin build/rnode_firmware_tbeam_supreme.bootloader build/rnode_firmware_tbeam_supreme.partitions
 	rm -r build
 
+release-tbeam_supreme_v3:
+	arduino-cli compile --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x43\""
+	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_tbeam_supreme_v3.boot_app0
+	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bin build/rnode_firmware_tbeam_supreme_v3.bin
+	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_tbeam_supreme_v3.bootloader
+	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.partitions.bin build/rnode_firmware_tbeam_supreme_v3.partitions
+	zip --junk-paths ./Release/rnode_firmware_tbeam_supreme_v3.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_tbeam_supreme_v3.boot_app0 build/rnode_firmware_tbeam_supreme_v3.bin build/rnode_firmware_tbeam_supreme_v3.bootloader build/rnode_firmware_tbeam_supreme_v3.partitions
+	rm -r build
+
 release-featheresp32: check_bt_buffers
 	arduino-cli compile --fqbn esp32:esp32:featheresp32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x34\""
 	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_featheresp32.boot_app0
@@ -579,6 +598,16 @@ release-diy_v1: check_bt_buffers
 	cp build/esp32.esp32.esp32/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_diy_v1.bootloader
 	cp build/esp32.esp32.esp32/RNode_Firmware.ino.partitions.bin build/rnode_firmware_diy_v1.partitions
 	zip --junk-paths ./Release/rnode_firmware_diy_v1.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_diy_v1.boot_app0 build/rnode_firmware_diy_v1.bin build/rnode_firmware_diy_v1.bootloader build/rnode_firmware_diy_v1.partitions
+	rm -r build
+
+release-merged-diy_v1: check_bt_buffers
+	arduino-cli compile --fqbn esp32:esp32:esp32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF6\""
+	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_diy_v1.boot_app0
+	cp build/esp32.esp32.esp32/RNode_Firmware.ino.bin build/rnode_firmware_diy_v1.bin
+	cp build/esp32.esp32.esp32/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_diy_v1.bootloader
+	cp build/esp32.esp32.esp32/RNode_Firmware.ino.partitions.bin build/rnode_firmware_diy_v1.partitions
+	python ./Release/esptool/esptool.py --chip esp32 merge_bin -o build/rnode_firmware_diy_v1.merged.bin --flash_mode dio --flash_freq 40m --flash_size 4MB 0x1000 build/rnode_firmware_diy_v1.bootloader 0x8000 build/rnode_firmware_diy_v1.partitions 0xe000 build/rnode_firmware_diy_v1.boot_app0 0x10000 build/rnode_firmware_diy_v1.bin
+	cp build/rnode_firmware_diy_v1.merged.bin ./Release/rnode_firmware_diy_v1.merged.bin
 	rm -r build
 
 release-aethernode: check_bt_buffers
