@@ -370,8 +370,8 @@
       #define HAS_INPUT true
       #define HAS_TCXO true
       #define MODEM SX1262
-      #define DIO2_AS_RF_SWITCH true
-      #define HAS_RF_SWITCH_RX_TX false
+      #define DIO2_AS_RF_SWITCH false
+      #define HAS_RF_SWITCH_RX_TX true
       const int pin_cs = 5;
       const int pin_sclk = 18;
       const int pin_miso = 19;
@@ -379,8 +379,8 @@
       const int pin_busy = 32;
       const int pin_reset = 25;
       const int pin_dio = 33;
-      const int pin_txen = 16;
-      const int pin_rxen = 17;
+      const int pin_rxen = 16;
+      const int pin_txen = 17;
       const int pin_tcxo_enable = -1;
 
       const int pin_btn_usr1 = 39;
