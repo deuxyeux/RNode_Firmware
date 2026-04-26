@@ -70,6 +70,11 @@
   #define DISP_ADDR 0x3C
   #define SCL_OLED 22
   #define SDA_OLED 11
+#elif BOARD_MODEL == BOARD_MESHPOE_S3
+  #define DISP_RST -1
+  #define DISP_ADDR 0x3C
+  #define SCL_OLED 1
+  #define SDA_OLED 0
 #elif BOARD_MODEL == BOARD_MESHADVENTURER_S3
   #define DISP_RST -1
   #define DISP_ADDR 0x3C

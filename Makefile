@@ -120,6 +120,9 @@ firmware-lora32_v21_tcxo: check_bt_buffers
 firmware-meshadventurer: check_bt_buffers
 	arduino-cli compile --log --fqbn esp32:esp32:esp32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF4\""
 
+firmware-meshpoe_s3: check_bt_buffers
+	arduino-cli compile --log --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF1\""
+
 firmware-meshadventurer_s3: check_bt_buffers
 	arduino-cli compile --log --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF2\""
 
@@ -183,6 +186,13 @@ upload-genericesp32:
 	rnodeconf /dev/ttyUSB0 --firmware-hash $$(./partition_hashes ./build/esp32.esp32.esp32/RNode_Firmware.ino.bin)
 	@sleep 3
 	python ./Release/esptool/esptool.py --chip esp32 --port /dev/ttyACM0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 80m --flash_size 4MB 0x210000 ./Release/console_image.bin
+
+upload-meshpoe_s3:
+	arduino-cli upload -p /dev/ttyACM0 --fqbn esp32:esp32:esp32s3
+#	@sleep 1
+#	rnodeconf /dev/ttyACM0 --firmware-hash $$(./partition_hashes ./build/esp32.esp32.esp32s3/RNode_Firmware.ino.bin)
+	@sleep 3
+	python ./Release/esptool/esptool.py --chip esp32s3 --port /dev/ttyACM0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 80m --flash_size 4MB 0x210000 ./Release/console_image.bin
 
 upload-meshadventurer_s3:
 	arduino-cli upload -p /dev/ttyACM0 --fqbn esp32:esp32:esp32s3
@@ -573,6 +583,15 @@ release-genericesp32: check_bt_buffers
 	zip --junk-paths ./Release/rnode_firmware_esp32_generic.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_esp32_generic.boot_app0 build/rnode_firmware_esp32_generic.bin build/rnode_firmware_esp32_generic.bootloader build/rnode_firmware_esp32_generic.partitions
 	rm -r build
 
+release-meshpoe_s3: check_bt_buffers
+	arduino-cli compile --fqbn esp32:esp32:esp32s3 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF1\""
+	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_meshpoe_s3.boot_app0
+	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bin build/rnode_firmware_meshpoe_s3.bin
+	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_meshpoe_s3.bootloader
+	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.partitions.bin build/rnode_firmware_meshpoe_s3.partitions
+	zip --junk-paths ./Release/rnode_firmware_meshpoe_s3.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_meshpoe_s3.boot_app0 build/rnode_firmware_meshpoe_s3.bin build/rnode_firmware_meshpoe_s3.bootloader build/rnode_firmware_meshpoe_s3.partitions
+	rm -r build
+
 release-meshadventurer_s3: check_bt_buffers
 	arduino-cli compile --fqbn esp32:esp32:esp32s3 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF2\""
 	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_meshadventurer_s3.boot_app0
@@ -608,6 +627,16 @@ release-merged-diy_v1: check_bt_buffers
 	cp build/esp32.esp32.esp32/RNode_Firmware.ino.partitions.bin build/rnode_firmware_diy_v1.partitions
 	python ./Release/esptool/esptool.py --chip esp32 merge_bin -o build/rnode_firmware_diy_v1.merged.bin --flash_mode dio --flash_freq 40m --flash_size 4MB 0x1000 build/rnode_firmware_diy_v1.bootloader 0x8000 build/rnode_firmware_diy_v1.partitions 0xe000 build/rnode_firmware_diy_v1.boot_app0 0x10000 build/rnode_firmware_diy_v1.bin
 	cp build/rnode_firmware_diy_v1.merged.bin ./Release/rnode_firmware_diy_v1.merged.bin
+	rm -r build
+
+release-merged-meshadventurer: check_bt_buffers
+	arduino-cli compile --fqbn esp32:esp32:esp32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF4\""
+	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_meshadventurer.boot_app0
+	cp build/esp32.esp32.esp32/RNode_Firmware.ino.bin build/rnode_firmware_meshadventurer.bin
+	cp build/esp32.esp32.esp32/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_meshadventurer.bootloader
+	cp build/esp32.esp32.esp32/RNode_Firmware.ino.partitions.bin build/rnode_firmware_meshadventurer.partitions
+	python ./Release/esptool/esptool.py --chip esp32 merge_bin -o build/rnode_firmware_meshadventurer.merged.bin --flash_mode dio --flash_freq 40m --flash_size 4MB 0x1000 build/rnode_firmware_meshadventurer.bootloader 0x8000 build/rnode_firmware_meshadventurer.partitions 0xe000 build/rnode_firmware_meshadventurer.boot_app0 0x10000 build/rnode_firmware_meshadventurer.bin
+	cp build/rnode_firmware_meshadventurer.merged.bin ./Release/rnode_firmware_meshadventurer.merged.bin
 	rm -r build
 
 release-aethernode: check_bt_buffers

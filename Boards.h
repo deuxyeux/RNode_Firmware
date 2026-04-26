@@ -124,6 +124,7 @@
   #define MODEL_FE            0xFE // Homebrew board, max 17dBm output power
   #define MODEL_FF            0xFF // Homebrew board, max 14dBm output power
 
+  #define BOARD_MESHPOE_S3        0xF1 // MeshPoE-S3
   #define BOARD_MESHADVENTURER_S3 0xF2 // MeshAdventurer-S3
   #define BOARD_AETHERNODE        0xF3 // Aethernode
   #define BOARD_MESHADVENTURER    0xF4 // MeshAdventurer
@@ -256,6 +257,49 @@
       const int pin_btn_usr1 = 39;
       const int pin_led_rx = 2;
       const int pin_led_tx = 4;
+
+    #elif BOARD_MODEL == BOARD_MESHPOE_S3
+      #define IS_ESP32S3 true
+      #define HAS_DISPLAY true
+      #define HAS_NP true
+      #define HAS_BLUETOOTH false
+      #define HAS_BLE true
+      #define HAS_WIFI true
+      #define HAS_CONSOLE true
+      #define HAS_EEPROM true
+      #define HAS_BUSY true
+      #define HAS_INPUT true
+      #define HAS_TCXO true
+      #define MODEM SX1262
+      #define DIO2_AS_RF_SWITCH true
+      #define HAS_RF_SWITCH_RX_TX false
+      #define HAS_LORA_LNA true
+      #define LORA_LNA_GAIN  30
+      #define LORA_LNA_GVT   14
+
+      const int pin_cs = 39;
+      const int pin_sclk = 38;
+      const int pin_miso = 36;
+      const int pin_mosi = 37;
+      const int pin_busy = 34;
+      const int pin_reset = 35;
+      const int pin_dio = 33;
+      const int pin_txen = 43;
+      const int pin_rxen = 44;
+      const int pin_tcxo_enable = -1;
+
+      const int pin_btn_usr1 = 40;
+      const int pin_np = 48;
+
+      #if HAS_NP == false
+        #if defined(EXTERNAL_LEDS)
+          const int pin_led_rx = 48;
+          const int pin_led_tx = 48;
+        #else
+          const int pin_led_rx = 48;
+          const int pin_led_tx = 48;
+        #endif
+      #endif
 
     #elif BOARD_MODEL == BOARD_MESHADVENTURER_S3
       #define IS_ESP32S3 true
