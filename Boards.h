@@ -121,6 +121,7 @@
   #define BOARD_HUZZAH32      0x34
   #define BOARD_GENERIC_ESP32 0x35
   #define BOARD_GENERIC_NRF52 0x50
+  #define MODEL_FD            0xFD // Homebrew board with E22-xxxM33S, max 33dBm output power (clamped max txpower to 8)
   #define MODEL_FE            0xFE // Homebrew board, max 17dBm output power
   #define MODEL_FF            0xFF // Homebrew board, max 14dBm output power
 
@@ -416,8 +417,8 @@
       #define HAS_INPUT true
       #define HAS_TCXO true
       #define MODEM SX1262
-      #define DIO2_AS_RF_SWITCH false
-      #define HAS_RF_SWITCH_RX_TX true
+      #define DIO2_AS_RF_SWITCH true
+      #define HAS_RF_SWITCH_RX_TX false
       const int pin_cs = 5;
       const int pin_sclk = 18;
       const int pin_miso = 19;
