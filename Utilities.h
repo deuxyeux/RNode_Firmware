@@ -1407,6 +1407,10 @@ void setTXPower() {
 			lora_txp = real_lora_txp;
 		#endif
 
+		if (model == MODEL_FD && mapped_lora_txp > 8) {
+			mapped_lora_txp = 8;
+		}
+
 		if (model == MODEL_11) LoRa->setTxPower(mapped_lora_txp, PA_OUTPUT_RFO_PIN);
 		if (model == MODEL_12) LoRa->setTxPower(mapped_lora_txp, PA_OUTPUT_RFO_PIN);
 
@@ -1452,6 +1456,7 @@ void setTXPower() {
 		if (model == MODEL_E3) LoRa->setTxPower(mapped_lora_txp, PA_OUTPUT_PA_BOOST_PIN);
 		if (model == MODEL_E8) LoRa->setTxPower(mapped_lora_txp, PA_OUTPUT_PA_BOOST_PIN);
 
+		if (model == MODEL_FD) LoRa->setTxPower(mapped_lora_txp, PA_OUTPUT_PA_BOOST_PIN);
 		if (model == MODEL_FE) LoRa->setTxPower(mapped_lora_txp, PA_OUTPUT_PA_BOOST_PIN);
 		if (model == MODEL_FF) LoRa->setTxPower(mapped_lora_txp, PA_OUTPUT_RFO_PIN);
 	}
@@ -1693,7 +1698,7 @@ bool eeprom_model_valid() {
 	#elif BOARD_MODEL == BOARD_T3S3
 	if (model == MODEL_A1 || model == MODEL_A6 || model == MODEL_A5 || model == MODEL_AA || model == MODEL_AC) {
 	#elif BOARD_MODEL == BOARD_HMBRW
-	if (model == MODEL_FF || model == MODEL_FE) {
+	if (model == MODEL_FF || model == MODEL_FE || model = MODEL_FD) {
 	#elif BOARD_MODEL == BOARD_TBEAM
 	if (model == MODEL_E4 || model == MODEL_E9 || model == MODEL_E3 || model == MODEL_E8) {
 	#elif BOARD_MODEL == BOARD_TDECK
@@ -1725,15 +1730,15 @@ bool eeprom_model_valid() {
 	#elif BOARD_MODEL == BOARD_GENERIC_ESP32
 	if (model == MODEL_FF || model == MODEL_FE) {
 	#elif BOARD_MODEL == BOARD_MESHPOE_S3
-	if (model == MODEL_FF || model == MODEL_FE) {
+	if (model == MODEL_FF || model == MODEL_FE || model == MODEL_FD) {
 	#elif BOARD_MODEL == BOARD_MESHADVENTURER_S3
-	if (model == MODEL_FF || model == MODEL_FE) {
+	if (model == MODEL_FF || model == MODEL_FE || model == MODEL_FD) {
 	#elif BOARD_MODEL == BOARD_MESHADVENTURER
-	if (model == MODEL_FF || model == MODEL_FE) {
+	if (model == MODEL_FF || model == MODEL_FE || model == MODEL_FD) {
 	#elif BOARD_MODEL == BOARD_DIY_V1
-	if (model == MODEL_FF || model == MODEL_FE) {
+	if (model == MODEL_FF || model == MODEL_FE || model == MODEL_FD) {
 	#elif BOARD_MODEL == BOARD_AETHERNODE
-	if (model == MODEL_FF || model == MODEL_FE) {
+	if (model == MODEL_FF || model == MODEL_FE || model == MODEL_FD) {
 	#elif BOARD_MODEL == BOARD_PROMICRO
 	if (model == MODEL_FF || model == MODEL_FE) {
 	#else
