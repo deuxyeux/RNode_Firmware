@@ -374,7 +374,7 @@
 
       const int pin_btn_usr1 = 39;
       const int pin_led_rx = 2;
-      const int pin_led_tx = 4;
+      const int pin_led_tx = 2;
 
     #elif BOARD_MODEL == BOARD_DIY_V1
       #define HAS_DISPLAY true
@@ -405,7 +405,7 @@
 
       const int pin_btn_usr1 = 39;
       const int pin_led_rx = 2;
-      const int pin_led_tx = 4;
+      const int pin_led_tx = 2;
 
     #elif BOARD_MODEL == BOARD_AETHERNODE
       #define HAS_DISPLAY true
@@ -432,7 +432,7 @@
 
       const int pin_btn_usr1 = 39;
       const int pin_led_rx = 2;
-      const int pin_led_tx = 4;
+      const int pin_led_tx = 2;
 
     #elif BOARD_MODEL == BOARD_TBEAM
       #define HAS_DISPLAY true
@@ -452,7 +452,7 @@
       const int pin_cs = 18;
       const int pin_reset = 23;
       const int pin_led_rx = 2;
-      const int pin_led_tx = 4;
+      const int pin_led_tx = 2;
 
       #if MODEM == SX1262
         #define HAS_TCXO true
@@ -479,6 +479,7 @@
     #elif BOARD_MODEL == BOARD_LORA32_V1_0
       #define HAS_DISPLAY true
       #define HAS_BLUETOOTH true
+      #define HAS_WIFI true
       #define HAS_CONSOLE true
       #define HAS_EEPROM true
       const int pin_cs = 18;
@@ -495,6 +496,7 @@
     #elif BOARD_MODEL == BOARD_LORA32_V2_0
       #define HAS_DISPLAY true
       #define HAS_BLUETOOTH true
+      #define HAS_WIFI true
       #define HAS_CONSOLE true
       #define HAS_EEPROM true
       const int pin_cs = 18;
@@ -511,6 +513,7 @@
     #elif BOARD_MODEL == BOARD_LORA32_V2_1
       #define HAS_DISPLAY true
       #define HAS_BLUETOOTH true
+      #define HAS_WIFI true
       #define HAS_PMU true
       #define HAS_CONSOLE true
       #define HAS_EEPROM true
@@ -945,21 +948,18 @@
       #define HAS_SD false
       #define HAS_EEPROM true
 
-      #define HAS_INPUT true
-      #define HAS_SLEEP true
-      #define PIN_WAKEUP GPIO_NUM_21
-      #define WAKEUP_LEVEL 0
+      #define HAS_INPUT false
+      #define HAS_SLEEP false
 
-      const int pin_btn_usr1 = 21;
-      const int pin_cs = 41;
-      const int pin_reset = 42;
+      const int pin_dio = 2;
+      const int pin_reset = 3;
+      const int pin_busy = 4;
+      const int pin_cs = 5;
       const int pin_sclk = 7;
-      const int pin_mosi = 9;
       const int pin_miso = 8;
+      const int pin_mosi = 9;
       const int pin_tcxo_enable = -1;
-      const int pin_dio = 39;
-      const int pin_busy = 40;
-      
+
       #if HAS_NP == false
         #if defined(EXTERNAL_LEDS)
           const int pin_led_rx = 48;
