@@ -1169,7 +1169,7 @@
       #define HAS_RF_SWITCH_RX_TX true
       #define DIO2_AS_RF_SWITCH true
       #define OCP_TUNED 0x38
-      #define HAS_SLEEP false
+      #define HAS_SLEEP true
       #define BLE_MANUFACTURER "DIY"
       #define BLE_MODEL "ProMicro"
 

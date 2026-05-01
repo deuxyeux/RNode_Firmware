@@ -1816,6 +1816,12 @@ void sleep_now() {
         delay(2000);
         analogWrite(PIN_VEXT_EN, 0);
         delay(100);
+      #elif BOARD_MODEL == BOARD_PROMICRO
+        #if HAS_DISPLAY
+          display_intensity = 0;
+          update_display(true);
+        #endif
+        delay(100);
       #endif
       sd_power_gpregret_set(0, 0x6d);
       nrf_gpio_cfg_sense_input(pin_btn_usr1, NRF_GPIO_PIN_PULLUP, NRF_GPIO_PIN_SENSE_LOW);
