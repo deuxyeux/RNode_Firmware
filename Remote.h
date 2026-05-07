@@ -320,12 +320,10 @@ void wifi_update_status() {
   if (wifi_mode == WR_WIFI_AP && wifi_initialized) { wr_device_ip = WiFi.softAPIP(); wr_wifi_status = WL_CONNECTED; }
   #if HAS_ETHERNET == true
     if (ethernet_initialized && ethernet_handle != NULL && ethernet_netif != NULL) {
-      eth_link_t link = ETH_LINK_DOWN;
       esp_netif_ip_info_t ip_info;
       memset(&ip_info, 0, sizeof(ip_info));
-      esp_eth_ioctl(ethernet_handle, ETH_CMD_G_LINK, &link);
       esp_netif_get_ip_info(ethernet_netif, &ip_info);
-      ethernet_connected = (link == ETH_LINK_UP && ip_info.ip.addr != 0);
+      ethernet_connected = (esp_netif_is_netif_up(ethernet_netif) && ip_info.ip.addr != 0);
       if (ethernet_connected) { wr_device_ip = IPAddress(ip_info.ip.addr); }
     } else {
       ethernet_connected = false;
