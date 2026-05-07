@@ -17,18 +17,6 @@
 
 #if HAS_ETHERNET == true
   #include <ETH.h>
-  #if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
-    #define HAS_ETHERNET_ARDUINO_W5500 1
-  #else
-    #define HAS_ETHERNET_ARDUINO_W5500 0
-    #include "esp_eth.h"
-    #include "esp_eth_mac.h"
-    #include "esp_eth_phy.h"
-    #include "esp_netif.h"
-    #include "esp_system.h"
-    #include "driver/gpio.h"
-    #include "driver/spi_master.h"
-  #endif
 #endif
 
 #if CONFIG_IDF_TARGET_ESP32
@@ -72,14 +60,6 @@ bool ethernet_connected = false;
   #define ETH_W5500_PHY_ADDR 1
   #define ETH_W5500_SPI_HOST SPI3_HOST
   #define ETH_W5500_SPI_CLOCK_MHZ 20
-
-  #if HAS_ETHERNET_ARDUINO_W5500 == 0
-    esp_eth_handle_t ethernet_handle = NULL;
-    esp_netif_t *ethernet_netif = NULL;
-    spi_device_handle_t ethernet_spi = NULL;
-
-    extern void tcpipInit();
-  #endif
 #endif
 
 char wr_ssid[33];
@@ -147,18 +127,8 @@ void wifi_remote_stop() {
 }
 
 #if HAS_ETHERNET == true
-  #if HAS_ETHERNET_ARDUINO_W5500 == 0
-    void ethernet_set_mac_address() {
-      uint8_t mac[6] = {0};
-      if (esp_read_mac(mac, ESP_MAC_ETH) != ESP_OK) {
-        esp_read_mac(mac, ESP_MAC_WIFI_STA);
-        mac[0] |= 0x02;
-      }
-      esp_eth_ioctl(ethernet_handle, ETH_CMD_S_MAC_ADDR, mac);
-    }
-  #endif
-
   bool ethernet_remote_start() {
+  void ethernet_remote_start() {
     ethernet_initialized = false;
     ethernet_connected = false;
 
@@ -168,75 +138,26 @@ void wifi_remote_stop() {
     digitalWrite(pin_eth_rst, HIGH);
     delay(150);
 
-    #if HAS_ETHERNET_ARDUINO_W5500 == 1
-      ETH.setHostname(wr_hostname);
-      ethernet_initialized = ETH.begin(
-        ETH_PHY_W5500,
-        ETH_W5500_PHY_ADDR,
-        pin_eth_cs,
-        pin_eth_int,
-        pin_eth_rst,
-        ETH_W5500_SPI_HOST,
-        pin_eth_sclk,
-        pin_eth_miso,
-        pin_eth_mosi,
-        ETH_W5500_SPI_CLOCK_MHZ
-      );
+    ETH.setHostname(wr_hostname);
+    ethernet_initialized = ETH.begin(
+      ETH_PHY_W5500,
+      ETH_W5500_PHY_ADDR,
+      pin_eth_cs,
+      pin_eth_int,
+      pin_eth_rst,
+      ETH_W5500_SPI_HOST,
+      pin_eth_sclk,
+      pin_eth_miso,
+      pin_eth_mosi,
+      ETH_W5500_SPI_CLOCK_MHZ
+    );
+    SPI.begin(pin_eth_sclk, pin_eth_miso, pin_eth_mosi);
+    ETH.setHostname(wr_hostname);
+
+    #if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
+      ethernet_initialized = ETH.begin(ETH_PHY_W5500, 1, pin_eth_cs, pin_eth_int, pin_eth_rst, SPI);
     #else
-      tcpipInit();
-      esp_err_t isr_result = gpio_install_isr_service(0);
-      if (isr_result != ESP_OK && isr_result != ESP_ERR_INVALID_STATE) { return false; }
-
-      #if defined(CONFIG_ETH_SPI_ETHERNET_W5500) && CONFIG_ETH_SPI_ETHERNET_W5500
-        if (ethernet_netif == NULL) {
-          esp_netif_config_t netif_config = ESP_NETIF_DEFAULT_ETH();
-          ethernet_netif = esp_netif_new(&netif_config);
-          if (ethernet_netif == NULL) { return false; }
-          esp_netif_set_hostname(ethernet_netif, wr_hostname);
-        }
-
-        if (ethernet_spi == NULL) {
-          spi_bus_config_t bus_config;
-          memset(&bus_config, 0, sizeof(bus_config));
-          bus_config.miso_io_num = pin_eth_miso;
-          bus_config.mosi_io_num = pin_eth_mosi;
-          bus_config.sclk_io_num = pin_eth_sclk;
-          bus_config.quadwp_io_num = -1;
-          bus_config.quadhd_io_num = -1;
-
-          esp_err_t bus_result = spi_bus_initialize(ETH_W5500_SPI_HOST, &bus_config, SPI_DMA_CH_AUTO);
-          if (bus_result != ESP_OK && bus_result != ESP_ERR_INVALID_STATE) { return false; }
-
-          spi_device_interface_config_t spi_config;
-          memset(&spi_config, 0, sizeof(spi_config));
-          spi_config.command_bits = 16;
-          spi_config.address_bits = 8;
-          spi_config.mode = 0;
-          spi_config.clock_speed_hz = ETH_W5500_SPI_CLOCK_MHZ * 1000 * 1000;
-          spi_config.queue_size = 20;
-          spi_config.spics_io_num = pin_eth_cs;
-
-          if (spi_bus_add_device(ETH_W5500_SPI_HOST, &spi_config, &ethernet_spi) != ESP_OK) { return false; }
-        }
-
-        eth_mac_config_t mac_config = ETH_MAC_DEFAULT_CONFIG();
-        eth_phy_config_t phy_config = ETH_PHY_DEFAULT_CONFIG();
-        eth_w5500_config_t w5500_config = ETH_W5500_DEFAULT_CONFIG(ethernet_spi);
-        w5500_config.int_gpio_num = pin_eth_int;
-        phy_config.phy_addr = ETH_W5500_PHY_ADDR;
-        phy_config.reset_gpio_num = pin_eth_rst;
-
-        esp_eth_mac_t *mac = esp_eth_mac_new_w5500(&w5500_config, &mac_config);
-        esp_eth_phy_t *phy = esp_eth_phy_new_w5500(&phy_config);
-        if (mac == NULL || phy == NULL) { return false; }
-
-        esp_eth_config_t eth_config = ETH_DEFAULT_CONFIG(mac, phy);
-        if (esp_eth_driver_install(&eth_config, &ethernet_handle) != ESP_OK || ethernet_handle == NULL) { return false; }
-        ethernet_set_mac_address();
-        if (esp_netif_attach(ethernet_netif, esp_eth_new_netif_glue(ethernet_handle)) != ESP_OK) { return false; }
-        if (esp_eth_start(ethernet_handle) != ESP_OK) { return false; }
-        ethernet_initialized = true;
-      #endif
+      ethernet_initialized = false;
     #endif
 
     if (ethernet_initialized == true) {
@@ -345,22 +266,8 @@ void wifi_update_status() {
   if (wr_wifi_status == WL_CONNECTED) { wr_device_ip = WiFi.localIP(); }
   if (wifi_mode == WR_WIFI_AP && wifi_initialized) { wr_device_ip = WiFi.softAPIP(); wr_wifi_status = WL_CONNECTED; }
   #if HAS_ETHERNET == true
-    #if HAS_ETHERNET_ARDUINO_W5500 == 1
-      ethernet_connected = (ethernet_initialized && ETH.linkUp() && ETH.localIP() != IPAddress(0, 0, 0, 0));
-      if (ethernet_connected) { wr_device_ip = ETH.localIP(); }
-    #else
-      if (ethernet_initialized && ethernet_handle != NULL && ethernet_netif != NULL) {
-        eth_link_t link = ETH_LINK_DOWN;
-        esp_netif_ip_info_t ip_info;
-        memset(&ip_info, 0, sizeof(ip_info));
-        esp_eth_ioctl(ethernet_handle, ETH_CMD_G_LINK, &link);
-        esp_netif_get_ip_info(ethernet_netif, &ip_info);
-        ethernet_connected = (link == ETH_LINK_UP && ip_info.ip.addr != 0);
-        if (ethernet_connected) { wr_device_ip = IPAddress(ip_info.ip.addr); }
-      } else {
-        ethernet_connected = false;
-      }
-    #endif
+    ethernet_connected = (ethernet_initialized && ETH.linkUp() && ETH.localIP() != IPAddress(0, 0, 0, 0));
+    if (ethernet_connected) { wr_device_ip = ETH.localIP(); }
   #endif
   if (wifi_init_ran && wifi_mode == WR_WIFI_STA && wr_wifi_status != WL_CONNECTED) {
     if (millis()-wr_last_connect_try >= WR_RECONNECT_INTERVAL_MS) { wifi_remote_init(); }
