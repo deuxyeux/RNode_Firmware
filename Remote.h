@@ -128,6 +128,7 @@ void wifi_remote_stop() {
 
 #if HAS_ETHERNET == true
   bool ethernet_remote_start() {
+  void ethernet_remote_start() {
     ethernet_initialized = false;
     ethernet_connected = false;
 
@@ -150,6 +151,14 @@ void wifi_remote_stop() {
       pin_eth_mosi,
       ETH_W5500_SPI_CLOCK_MHZ
     );
+    SPI.begin(pin_eth_sclk, pin_eth_miso, pin_eth_mosi);
+    ETH.setHostname(wr_hostname);
+
+    #if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
+      ethernet_initialized = ETH.begin(ETH_PHY_W5500, 1, pin_eth_cs, pin_eth_int, pin_eth_rst, SPI);
+    #else
+      ethernet_initialized = false;
+    #endif
 
     if (ethernet_initialized == true) {
       remote_listener.begin();
