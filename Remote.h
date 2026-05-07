@@ -56,6 +56,12 @@ bool ethernet_init_ran = false;
 bool ethernet_initialized = false;
 bool ethernet_connected = false;
 
+#if HAS_ETHERNET == true
+  #define ETH_W5500_PHY_ADDR 1
+  #define ETH_W5500_SPI_HOST SPI3_HOST
+  #define ETH_W5500_SPI_CLOCK_MHZ 20
+#endif
+
 char wr_ssid[33];
 char wr_psk[33];
 
@@ -121,6 +127,7 @@ void wifi_remote_stop() {
 }
 
 #if HAS_ETHERNET == true
+  bool ethernet_remote_start() {
   void ethernet_remote_start() {
     ethernet_initialized = false;
     ethernet_connected = false;
@@ -131,6 +138,19 @@ void wifi_remote_stop() {
     digitalWrite(pin_eth_rst, HIGH);
     delay(150);
 
+    ETH.setHostname(wr_hostname);
+    ethernet_initialized = ETH.begin(
+      ETH_PHY_W5500,
+      ETH_W5500_PHY_ADDR,
+      pin_eth_cs,
+      pin_eth_int,
+      pin_eth_rst,
+      ETH_W5500_SPI_HOST,
+      pin_eth_sclk,
+      pin_eth_miso,
+      pin_eth_mosi,
+      ETH_W5500_SPI_CLOCK_MHZ
+    );
     SPI.begin(pin_eth_sclk, pin_eth_miso, pin_eth_mosi);
     ETH.setHostname(wr_hostname);
 
@@ -145,6 +165,8 @@ void wifi_remote_stop() {
       remote_listener.setTimeout(WR_SOCKET_TIMEOUT);
       wr_state = WR_STATE_ON;
     }
+
+    return ethernet_initialized;
   }
 
   void ethernet_remote_init() {

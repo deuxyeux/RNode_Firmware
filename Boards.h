@@ -270,6 +270,8 @@
       #define HAS_BLUETOOTH false
       #define HAS_BLE true
       #define HAS_WIFI true
+      #undef HAS_ETHERNET
+      #define HAS_ETHERNET true
       #define HAS_CONSOLE true
       #define HAS_EEPROM true
       #define HAS_BUSY true
