@@ -16,6 +16,7 @@
 #include <WiFi.h>
 
 #if HAS_ETHERNET == true
+<<<<<<< codex/add-wired-ethernet-support-to-rnode_firmware-mwqvaq
   #include "esp_eth.h"
   #include "esp_eth_mac.h"
   #include "esp_eth_phy.h"
@@ -23,6 +24,9 @@
   #include "esp_system.h"
   #include "driver/gpio.h"
   #include "driver/spi_master.h"
+=======
+  #include <ETH.h>
+>>>>>>> master
 #endif
 
 #if CONFIG_IDF_TARGET_ESP32
@@ -64,6 +68,7 @@ bool ethernet_connected = false;
 
 #if HAS_ETHERNET == true
   #define ETH_W5500_PHY_ADDR 1
+<<<<<<< codex/add-wired-ethernet-support-to-rnode_firmware-mwqvaq
   #define ETH_W5500_SPI_HOST ((spi_host_device_t)2)
   #define ETH_W5500_SPI_CLOCK_MHZ 20
 
@@ -72,6 +77,10 @@ bool ethernet_connected = false;
   spi_device_handle_t ethernet_spi = NULL;
 
   extern void tcpipInit();
+=======
+  #define ETH_W5500_SPI_HOST SPI3_HOST
+  #define ETH_W5500_SPI_CLOCK_MHZ 20
+>>>>>>> master
 #endif
 
 char wr_ssid[33];
@@ -139,6 +148,7 @@ void wifi_remote_stop() {
 }
 
 #if HAS_ETHERNET == true
+<<<<<<< codex/add-wired-ethernet-support-to-rnode_firmware-mwqvaq
   void ethernet_set_mac_address() {
     uint8_t mac[6] = {0};
     if (esp_read_mac(mac, ESP_MAC_ETH) != ESP_OK) {
@@ -149,6 +159,10 @@ void wifi_remote_stop() {
   }
 
   bool ethernet_remote_start() {
+=======
+  bool ethernet_remote_start() {
+  void ethernet_remote_start() {
+>>>>>>> master
     ethernet_initialized = false;
     ethernet_connected = false;
 
@@ -158,6 +172,7 @@ void wifi_remote_stop() {
     digitalWrite(pin_eth_rst, HIGH);
     delay(150);
 
+<<<<<<< codex/add-wired-ethernet-support-to-rnode_firmware-mwqvaq
     tcpipInit();
     esp_err_t isr_result = gpio_install_isr_service(0);
     if (isr_result != ESP_OK && isr_result != ESP_ERR_INVALID_STATE) { return false; }
@@ -211,6 +226,28 @@ void wifi_remote_stop() {
       if (esp_netif_attach(ethernet_netif, esp_eth_new_netif_glue(ethernet_handle)) != ESP_OK) { return false; }
       if (esp_eth_start(ethernet_handle) != ESP_OK) { return false; }
       ethernet_initialized = true;
+=======
+    ETH.setHostname(wr_hostname);
+    ethernet_initialized = ETH.begin(
+      ETH_PHY_W5500,
+      ETH_W5500_PHY_ADDR,
+      pin_eth_cs,
+      pin_eth_int,
+      pin_eth_rst,
+      ETH_W5500_SPI_HOST,
+      pin_eth_sclk,
+      pin_eth_miso,
+      pin_eth_mosi,
+      ETH_W5500_SPI_CLOCK_MHZ
+    );
+    SPI.begin(pin_eth_sclk, pin_eth_miso, pin_eth_mosi);
+    ETH.setHostname(wr_hostname);
+
+    #if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
+      ethernet_initialized = ETH.begin(ETH_PHY_W5500, 1, pin_eth_cs, pin_eth_int, pin_eth_rst, SPI);
+    #else
+      ethernet_initialized = false;
+>>>>>>> master
     #endif
 
     if (ethernet_initialized == true) {
@@ -319,6 +356,7 @@ void wifi_update_status() {
   if (wr_wifi_status == WL_CONNECTED) { wr_device_ip = WiFi.localIP(); }
   if (wifi_mode == WR_WIFI_AP && wifi_initialized) { wr_device_ip = WiFi.softAPIP(); wr_wifi_status = WL_CONNECTED; }
   #if HAS_ETHERNET == true
+<<<<<<< codex/add-wired-ethernet-support-to-rnode_firmware-mwqvaq
     if (ethernet_initialized && ethernet_handle != NULL && ethernet_netif != NULL) {
       eth_link_t link = ETH_LINK_DOWN;
       esp_netif_ip_info_t ip_info;
@@ -330,6 +368,10 @@ void wifi_update_status() {
     } else {
       ethernet_connected = false;
     }
+=======
+    ethernet_connected = (ethernet_initialized && ETH.linkUp() && ETH.localIP() != IPAddress(0, 0, 0, 0));
+    if (ethernet_connected) { wr_device_ip = ETH.localIP(); }
+>>>>>>> master
   #endif
   if (wifi_init_ran && wifi_mode == WR_WIFI_STA && wr_wifi_status != WL_CONNECTED) {
     if (millis()-wr_last_connect_try >= WR_RECONNECT_INTERVAL_MS) { wifi_remote_init(); }
