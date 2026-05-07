@@ -281,6 +281,9 @@ void setup() {
       #if HAS_WIFI
         wifi_mode = EEPROM.read(eeprom_addr(ADDR_CONF_WIFI));
         if (wifi_mode == WR_WIFI_STA || wifi_mode == WR_WIFI_AP) { wifi_remote_init(); }
+        #if HAS_ETHERNET
+          ethernet_remote_init();
+        #endif
       #endif
       kiss_indicate_reset();
     }
@@ -1750,7 +1753,7 @@ void loop() {
   #endif
 
   #if HAS_WIFI
-    if (wifi_initialized) update_wifi();
+    if (wifi_initialized || ethernet_initialized) update_wifi();
   #endif
 
   #if HAS_INPUT
