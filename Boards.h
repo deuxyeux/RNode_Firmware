@@ -131,6 +131,7 @@
   #define BOARD_MESHADVENTURER    0xF4 // MeshAdventurer
   #define BOARD_PROMICRO          0xF5 // FakeTec (Promicro)
   #define BOARD_DIY_V1            0xF6 // DIY-V1
+  #define BOARD_AETHERNODE_S3     0xF7 // Aethernode-S3
 
   #if defined(__AVR_ATmega1284P__)
     #define PLATFORM PLATFORM_AVR
@@ -262,7 +263,7 @@
     #elif BOARD_MODEL == BOARD_MESHPOE_S3
       #define IS_ESP32S3 true
       #define HAS_DISPLAY true
-      #define HAS_NP true
+      #define HAS_NP false
       #define HAS_BLUETOOTH false
       #define HAS_BLE true
       #define HAS_WIFI true
@@ -272,32 +273,32 @@
       #define HAS_INPUT true
       #define HAS_TCXO true
       #define MODEM SX1262
-      #define DIO2_AS_RF_SWITCH true
-      #define HAS_RF_SWITCH_RX_TX false
+      #define DIO2_AS_RF_SWITCH false
+      #define HAS_RF_SWITCH_RX_TX true
       #define HAS_LORA_LNA true
       #define LORA_LNA_GAIN  30
       #define LORA_LNA_GVT   14
 
-      const int pin_cs = 39;
-      const int pin_sclk = 38;
-      const int pin_miso = 36;
-      const int pin_mosi = 37;
-      const int pin_busy = 34;
-      const int pin_reset = 35;
-      const int pin_dio = 33;
-      const int pin_txen = 43;
-      const int pin_rxen = 44;
+      const int pin_cs = 16;
+      const int pin_sclk = 18;
+      const int pin_mosi = 15;
+      const int pin_miso = 3;
+      const int pin_reset = 2;
+      const int pin_busy = 1;
+      const int pin_dio = 46;
+      const int pin_txen = 34;
+      const int pin_rxen = 35;
       const int pin_tcxo_enable = -1;
 
-      const int pin_btn_usr1 = 40;
-      const int pin_np = 48;
+      const int pin_btn_usr1 = 36;
+      const int pin_np = -1;
 
       #if HAS_NP == false
         #if defined(EXTERNAL_LEDS)
-          const int pin_led_rx = 48;
+          const int pin_led_rx = 47;
           const int pin_led_tx = 48;
         #else
-          const int pin_led_rx = 48;
+          const int pin_led_rx = 47;
           const int pin_led_tx = 48;
         #endif
       #endif
@@ -332,7 +333,7 @@
       const int pin_rxen = 8;
       const int pin_tcxo_enable = -1;
 
-      const int pin_btn_usr1 = 4;
+      const int pin_btn_usr1 = 36
       const int pin_np = 48;
 
       #if HAS_NP == false
@@ -433,6 +434,49 @@
       const int pin_btn_usr1 = 39;
       const int pin_led_rx = 2;
       const int pin_led_tx = 2;
+
+    #elif BOARD_MODEL == BOARD_AETHERNODE_S3
+      #define IS_ESP32S3 true
+      #define HAS_DISPLAY true
+      #define HAS_NP true
+      #define HAS_BLUETOOTH false
+      #define HAS_BLE true
+      #define HAS_WIFI true
+      #define HAS_CONSOLE true
+      #define HAS_EEPROM true
+      #define HAS_BUSY true
+      #define HAS_INPUT false
+      #define HAS_TCXO true
+      #define MODEM SX1262
+      #define DIO2_AS_RF_SWITCH true
+      #define HAS_RF_SWITCH_RX_TX false
+      #define HAS_LORA_LNA true
+      #define LORA_LNA_GAIN  30
+      #define LORA_LNA_GVT   14
+
+      const int pin_cs = 10;
+      const int pin_sclk = 13;
+      const int pin_miso = 12;
+      const int pin_mosi = 11;
+      const int pin_busy = 37;
+      const int pin_reset = 35;
+      const int pin_dio = 36;
+      const int pin_txen = 38;
+      const int pin_rxen = 39;
+      const int pin_tcxo_enable = -1;
+
+      const int pin_btn_usr1 = -1;
+      const int pin_np = 48;
+
+      #if HAS_NP == false
+        #if defined(EXTERNAL_LEDS)
+          const int pin_led_rx = 48;
+          const int pin_led_tx = 48;
+        #else
+          const int pin_led_rx = 48;
+          const int pin_led_tx = 48;
+        #endif
+      #endif
 
     #elif BOARD_MODEL == BOARD_TBEAM
       #define HAS_DISPLAY true

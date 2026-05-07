@@ -78,6 +78,9 @@ firmware:
 firmware-aethernode: check_bt_buffers
 	arduino-cli compile --log --fqbn esp32:esp32:esp32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x35\""
 
+firmware-aethernode_s3: check_bt_buffers
+	arduino-cli compile --log --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF7\""
+
 firmware-diy_v1: check_bt_buffers
 	arduino-cli compile --log --fqbn esp32:esp32:esp32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF6\""
 
@@ -121,13 +124,10 @@ firmware-meshadventurer: check_bt_buffers
 	arduino-cli compile --log --fqbn esp32:esp32:esp32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF4\""
 
 firmware-meshpoe_s3: check_bt_buffers
-	arduino-cli compile --log --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF1\""
+	arduino-cli compile --log --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DARDUINO_USB_MODE=1\" \"-DARDUINO_USB_CDC_ON_BOOT=1\" \"-DBOARD_MODEL=0xF1\""
 
 firmware-meshadventurer_s3: check_bt_buffers
 	arduino-cli compile --log --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF2\""
-
-firmware-meshadventurer_s3_nocdc: check_bt_buffers
-	arduino-cli compile --log --fqbn "esp32:esp32:esp32s3" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF2\""
 
 firmware-rnode_ng_20: check_bt_buffers
 	arduino-cli compile --log --fqbn esp32:esp32:ttgo-lora32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x40\""
@@ -192,7 +192,7 @@ upload-meshpoe_s3:
 #	@sleep 1
 #	rnodeconf /dev/ttyACM0 --firmware-hash $$(./partition_hashes ./build/esp32.esp32.esp32s3/RNode_Firmware.ino.bin)
 	@sleep 3
-	python ./Release/esptool/esptool.py --chip esp32s3 --port /dev/ttyACM0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 80m --flash_size 4MB 0x210000 ./Release/console_image.bin
+	python ./Release/esptool/esptool.py --chip esp32s3 --port /dev/ttyACM0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode qio --flash_freq 80m --flash_size 16MB 0x210000 ./Release/console_image.bin
 
 upload-meshadventurer_s3:
 	arduino-cli upload -p /dev/ttyACM0 --fqbn esp32:esp32:esp32s3
@@ -228,6 +228,13 @@ upload-aethernode:
 	rnodeconf /dev/ttyUSB0 --firmware-hash $$(./partition_hashes ./build/esp32.esp32.esp32/RNode_Firmware.ino.bin)
 	@sleep 3
 	python ./Release/esptool/esptool.py --chip esp32 --port /dev/ttyACM0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 80m --flash_size 4MB 0x210000 ./Release/console_image.bin
+
+upload-aethernode_s3:
+	arduino-cli upload -p /dev/ttyACM0 --fqbn esp32:esp32:esp32s3
+#	@sleep 1
+#	rnodeconf /dev/ttyACM0 --firmware-hash $$(./partition_hashes ./build/esp32.esp32.esp32s3/RNode_Firmware.ino.bin)
+	@sleep 3
+	python ./Release/esptool/esptool.py --chip esp32s3 --port /dev/ttyACM0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 80m --flash_size 4MB 0x210000 ./Release/console_image.bin
 
 upload-mega2560:
 	arduino-cli upload -p /dev/ttyACM0 --fqbn arduino:avr:mega
@@ -584,7 +591,7 @@ release-genericesp32: check_bt_buffers
 	rm -r build
 
 release-meshpoe_s3: check_bt_buffers
-	arduino-cli compile --fqbn esp32:esp32:esp32s3 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF1\""
+	arduino-cli compile --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF1\""
 	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_meshpoe_s3.boot_app0
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bin build/rnode_firmware_meshpoe_s3.bin
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_meshpoe_s3.bootloader
@@ -593,7 +600,7 @@ release-meshpoe_s3: check_bt_buffers
 	rm -r build
 
 release-meshadventurer_s3: check_bt_buffers
-	arduino-cli compile --fqbn esp32:esp32:esp32s3 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF2\""
+	arduino-cli compile --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF2\""
 	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_meshadventurer_s3.boot_app0
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bin build/rnode_firmware_meshadventurer_s3.bin
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_meshadventurer_s3.bootloader
@@ -646,6 +653,15 @@ release-aethernode: check_bt_buffers
 	cp build/esp32.esp32.esp32/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_aethernode.bootloader
 	cp build/esp32.esp32.esp32/RNode_Firmware.ino.partitions.bin build/rnode_firmware_aethernode.partitions
 	zip --junk-paths ./Release/rnode_firmware_aethernode.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_aethernode.boot_app0 build/rnode_firmware_aethernode.bin build/rnode_firmware_aethernode.bootloader build/rnode_firmware_aethernode.partitions
+	rm -r build
+
+release-aethernode_s3: check_bt_buffers
+	arduino-cli compile --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF7\""
+	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_aethernode_s3.boot_app0
+	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bin build/rnode_firmware_aethernode_s3.bin
+	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_aethernode_s3.bootloader
+	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.partitions.bin build/rnode_firmware_aethernode_s3.partitions
+	zip --junk-paths ./Release/rnode_firmware_aethernode_s3.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_aethernode_s3.boot_app0 build/rnode_firmware_aethernode_s3.bin build/rnode_firmware_aethernode_s3.bootloader build/rnode_firmware_aethernode_s3.partitions
 	rm -r build
 
 release-mega2560:

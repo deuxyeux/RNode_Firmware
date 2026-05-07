@@ -382,6 +382,13 @@ uint8_t boot_vector = 0x00;
 		void led_tx_off() { digitalWrite(pin_led_tx, LOW); }
 		void led_id_on()  { }
 		void led_id_off() { }
+	#elif BOARD_MODEL == BOARD_AETHERNODE_S3
+		void led_rx_on()  { digitalWrite(pin_led_rx, HIGH); }
+		void led_rx_off() {	digitalWrite(pin_led_rx, LOW); }
+		void led_tx_on()  { digitalWrite(pin_led_tx, HIGH); }
+		void led_tx_off() { digitalWrite(pin_led_tx, LOW); }
+		void led_id_on()  { }
+		void led_id_off() { }
 	#endif
 #elif MCU_VARIANT == MCU_NRF52
     #if HAS_NP == true
@@ -1738,6 +1745,8 @@ bool eeprom_model_valid() {
 	#elif BOARD_MODEL == BOARD_DIY_V1
 	if (model == MODEL_FF || model == MODEL_FE || model == MODEL_FD) {
 	#elif BOARD_MODEL == BOARD_AETHERNODE
+	if (model == MODEL_FF || model == MODEL_FE || model == MODEL_FD) {
+	#elif BOARD_MODEL == BOARD_AETHERNODE_S3
 	if (model == MODEL_FF || model == MODEL_FE || model == MODEL_FD) {
 	#elif BOARD_MODEL == BOARD_PROMICRO
 	if (model == MODEL_FF || model == MODEL_FE) {

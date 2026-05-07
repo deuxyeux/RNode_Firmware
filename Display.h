@@ -73,8 +73,8 @@
 #elif BOARD_MODEL == BOARD_MESHPOE_S3
   #define DISP_RST -1
   #define DISP_ADDR 0x3C
-  #define SCL_OLED 1
-  #define SDA_OLED 0
+  #define SCL_OLED 17
+  #define SDA_OLED 47
 #elif BOARD_MODEL == BOARD_MESHADVENTURER_S3
   #define DISP_RST -1
   #define DISP_ADDR 0x3C
@@ -95,6 +95,11 @@
   #define DISP_ADDR 0x3C
   #define SCL_OLED 22
   #define SDA_OLED 21
+#elif BOARD_MODEL == BOARD_AETHERNODE_S3
+  #define DISP_RST -1
+  #define DISP_ADDR 0x3C
+  #define SCL_OLED 9
+  #define SDA_OLED 8
 #elif BOARD_MODEL == BOARD_PROMICRO
   #define DISP_RST -1
   #define DISP_ADDR 0x3C
@@ -352,7 +357,10 @@ bool display_init() {
     #elif BOARD_MODEL == BOARD_HELTEC_T114
       pinMode(PIN_T114_TFT_EN, OUTPUT);
       digitalWrite(PIN_T114_TFT_EN, LOW);
-    #elif BOARD_MODEL == BOARD_MESHADVENTURER_S3
+    #elif BOARD_MODEL == BOARD_MESHADVENTURER_S3 || BOARD_MODEL == BOARD_MESHPOE_S3
+      Wire.setPins(SDA_OLED, SCL_OLED);
+      Wire.begin();
+    #elif BOARD_MODEL == BOARD_AETHERNODE || BOARD_MODEL == AETHERNODE_S3
       Wire.setPins(SDA_OLED, SCL_OLED);
       Wire.begin();
     #elif BOARD_MODEL == BOARD_PROMICRO
@@ -481,7 +489,7 @@ bool display_init() {
         #elif BOARD_MODEL == BOARD_TECHO
           disp_mode = DISP_MODE_PORTRAIT;
           display.setRotation(3);
-        #elif BOARD_MODEL == BOARD_MESHADVENTURER_S3
+        #elif BOARD_MODEL == BOARD_MESHADVENTURER_S3 || BOARD_MODEL == BOARD_MESHPOE_S3
           disp_mode = DISP_MODE_LANDSCAPE;
           display.setRotation(0);
         #elif BOARD_MODEL == BOARD_MESHADVENTURER
@@ -490,7 +498,7 @@ bool display_init() {
         #elif BOARD_MODEL == BOARD_DIY_V1
           disp_mode = DISP_MODE_LANDSCAPE;
           display.setRotation(0);
-        #elif BOARD_MODEL == BOARD_AETHERNODE
+        #elif BOARD_MODEL == BOARD_AETHERNODE || BOARD_MODEL == BOARD_AETHERNODE_S3
           disp_mode = DISP_MODE_LANDSCAPE;
           display.setRotation(0);
         #elif BOARD_MODEL == BOARD_PROMICRO
