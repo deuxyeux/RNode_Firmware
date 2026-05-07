@@ -15,6 +15,10 @@
 
 #include <WiFi.h>
 
+#if HAS_ETHERNET == true
+  #include <ETH.h>
+#endif
+
 #if CONFIG_IDF_TARGET_ESP32
   #include "esp32/rom/rtc.h"
 #elif CONFIG_IDF_TARGET_ESP32S2
@@ -48,6 +52,9 @@ wl_status_t wr_wifi_status = WL_IDLE_STATUS;
 uint8_t wifi_mode = WIFI_OFF;
 bool wifi_init_ran = false;
 bool wifi_initialized = false;
+bool ethernet_init_ran = false;
+bool ethernet_initialized = false;
+bool ethernet_connected = false;
 
 char wr_ssid[33];
 char wr_psk[33];
@@ -58,7 +65,7 @@ void wifi_dbg(String msg) { Serial.print("[WiFi] "); Serial.println(msg); }
 
 uint8_t wifi_remote_mode() { return wifi_mode; }
 
-bool wifi_is_connected() { return (wr_wifi_status == WL_CONNECTED); }
+bool wifi_is_connected() { return (wr_wifi_status == WL_CONNECTED || ethernet_connected); }
 bool wifi_host_is_connected() { if (connection) { return true; } else { return false; } }
 
 void wifi_remote_start_ap() {
@@ -112,6 +119,42 @@ void wifi_remote_stop() {
   WiFi.mode(WIFI_MODE_NULL);
   wifi_initialized = false;
 }
+
+#if HAS_ETHERNET == true
+  void ethernet_remote_start() {
+    ethernet_initialized = false;
+    ethernet_connected = false;
+
+    pinMode(pin_eth_rst, OUTPUT);
+    digitalWrite(pin_eth_rst, LOW);
+    delay(50);
+    digitalWrite(pin_eth_rst, HIGH);
+    delay(150);
+
+    SPI.begin(pin_eth_sclk, pin_eth_miso, pin_eth_mosi);
+    ETH.setHostname(wr_hostname);
+
+    #if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
+      ethernet_initialized = ETH.begin(ETH_PHY_W5500, 1, pin_eth_cs, pin_eth_int, pin_eth_rst, SPI);
+    #else
+      ethernet_initialized = false;
+    #endif
+
+    if (ethernet_initialized == true) {
+      remote_listener.begin();
+      remote_listener.setTimeout(WR_SOCKET_TIMEOUT);
+      wr_state = WR_STATE_ON;
+    }
+  }
+
+  void ethernet_remote_init() {
+    memcpy(wr_hostname, bt_devname, 5);
+    memcpy(wr_hostname+5, bt_devname+6, 4);
+    wr_hostname[9] = 0x00;
+    ethernet_remote_start();
+    ethernet_init_ran = true;
+  }
+#endif
 
 void wifi_remote_start() {
   if      (wifi_mode == WR_WIFI_AP)  { wifi_remote_start_ap(); }
@@ -200,6 +243,10 @@ void wifi_update_status() {
   wr_wifi_status = WiFi.status();
   if (wr_wifi_status == WL_CONNECTED) { wr_device_ip = WiFi.localIP(); }
   if (wifi_mode == WR_WIFI_AP && wifi_initialized) { wr_device_ip = WiFi.softAPIP(); wr_wifi_status = WL_CONNECTED; }
+  #if HAS_ETHERNET == true
+    ethernet_connected = (ethernet_initialized && ETH.linkUp() && ETH.localIP() != IPAddress(0, 0, 0, 0));
+    if (ethernet_connected) { wr_device_ip = ETH.localIP(); }
+  #endif
   if (wifi_init_ran && wifi_mode == WR_WIFI_STA && wr_wifi_status != WL_CONNECTED) {
     if (millis()-wr_last_connect_try >= WR_RECONNECT_INTERVAL_MS) { wifi_remote_init(); }
   }
