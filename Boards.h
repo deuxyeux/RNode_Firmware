@@ -168,6 +168,9 @@
   #define HAS_BLUETOOTH false
   #define HAS_BLE false
   #define HAS_WIFI false
+  #ifndef HAS_ETHERNET
+    #define HAS_ETHERNET false
+  #endif
   #define HAS_TCXO false
   #define HAS_PMU false
   #define HAS_NP false
@@ -267,6 +270,8 @@
       #define HAS_BLUETOOTH false
       #define HAS_BLE true
       #define HAS_WIFI true
+      #undef HAS_ETHERNET
+      #define HAS_ETHERNET true
       #define HAS_CONSOLE true
       #define HAS_EEPROM true
       #define HAS_BUSY true
@@ -289,6 +294,13 @@
       const int pin_txen = 34;
       const int pin_rxen = 35;
       const int pin_tcxo_enable = -1;
+
+      const int pin_eth_rst = 10;
+      const int pin_eth_int = 9;
+      const int pin_eth_mosi = 11;
+      const int pin_eth_miso = 13;
+      const int pin_eth_sclk = 12;
+      const int pin_eth_cs = 14;
 
       const int pin_btn_usr1 = 36;
       const int pin_np = -1;
