@@ -64,6 +64,10 @@ uint8_t eeprom_read(uint32_t mapped_addr);
   #include "Remote.h"
 #endif
 
+#if HAS_ETHERNET == true
+  #include "Ethernet.h"
+#endif
+
 #if HAS_PMU == true
   #include "Power.h"
 #endif
@@ -857,7 +861,10 @@ int8_t  led_standby_direction = 0;
 void serial_write(uint8_t byte) {
 	#if HAS_BLUETOOTH || HAS_BLE == true
 		if (bt_state != BT_STATE_CONNECTED) {
-			#if HAS_WIFI
+			#if HAS_ETHERNET
+				if (eth_is_connected && wifi_host_is_connected()) { connection.write(byte); }
+				else                                              { Serial.write(byte); }
+			#elif HAS_WIFI
 				if (wifi_host_is_connected()) { wifi_remote_write(byte); }
 				else                          { Serial.write(byte); }
 			#else
