@@ -106,6 +106,11 @@
   #define MODEL_C6            0xC6 // Heltec Mesh Node T114, 470-510 MHz
   #define MODEL_C7            0xC7 // Heltec Mesh Node T114, 863-928 MHz
 
+  #define PRODUCT_HELTEC_T096 0xD1 // Heltec Mesh Node T096
+  #define BOARD_HELTEC_T096   0xD2
+  #define MODEL_D3            0xD3 // Heltec Mesh Node T096, 470-510 MHz
+  #define MODEL_D5            0xD5 // Heltec Mesh Node T096, 863-928 MHz
+
   #define PRODUCT_TECHO       0x15 // LilyGO T-Echo devices
   #define BOARD_TECHO         0x44
   #define MODEL_16            0x16 // T-Echo 433 MHz
@@ -168,6 +173,7 @@
   #define HAS_BLUETOOTH false
   #define HAS_BLE false
   #define HAS_WIFI false
+  #define HAS_ETHERNET false
   #define HAS_TCXO false
   #define HAS_PMU false
   #define HAS_NP false
@@ -267,6 +273,7 @@
       #define HAS_BLUETOOTH false
       #define HAS_BLE true
       #define HAS_WIFI true
+      #define HAS_ETHERNET true
       #define HAS_CONSOLE true
       #define HAS_EEPROM true
       #define HAS_BUSY true
@@ -289,6 +296,13 @@
       const int pin_txen = 34;
       const int pin_rxen = 35;
       const int pin_tcxo_enable = -1;
+
+      const int pin_eth_rst = 9;
+      const int pin_eth_int = 10;
+      const int pin_eth_mosi = 11;
+      const int pin_eth_miso = 12;
+      const int pin_eth_sclk = 13;
+      const int pin_eth_cs = 14;
 
       const int pin_btn_usr1 = 36;
       const int pin_np = -1;
@@ -655,7 +669,7 @@
       #define WAKEUP_LEVEL 0
       #define OCP_TUNED 0x28
       #define Vext GPIO_NUM_36
-      #define LORA_PA_MODEL LORA_PA_UNKNOWN;
+      #define LORA_PA_MODEL LORA_PA_UNKNOWN
 
       const int pin_btn_usr1 = 0;
 
