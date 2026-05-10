@@ -282,6 +282,9 @@ void setup() {
         wifi_mode = EEPROM.read(eeprom_addr(ADDR_CONF_WIFI));
         if (wifi_mode == WR_WIFI_STA || wifi_mode == WR_WIFI_AP) { wifi_remote_init(); }
       #endif
+      #if HAS_ETHERNET == true
+        init_ethernet();
+      #endif
       kiss_indicate_reset();
     }
   #endif
@@ -1898,7 +1901,9 @@ void buffer_serial() {
     #if HAS_BLUETOOTH || HAS_BLE == true
     while (
       c < MAX_CYCLES &&
-      #if HAS_WIFI
+      #if HAS_ETHERNET == true
+      ( (bt_state != BT_STATE_CONNECTED && Serial.available()) || (bt_state == BT_STATE_CONNECTED && SerialBT.available()) || (eth_is_connected && wifi_remote_available()) )
+      #elif HAS_WIFI
       ( (bt_state != BT_STATE_CONNECTED && Serial.available()) || (bt_state == BT_STATE_CONNECTED && SerialBT.available()) || (wr_state >= WR_STATE_ON && wifi_remote_available()) )
       #else
       ( (bt_state != BT_STATE_CONNECTED && Serial.available()) || (bt_state == BT_STATE_CONNECTED && SerialBT.available()) )
@@ -1912,8 +1917,11 @@ void buffer_serial() {
 
       #if MCU_VARIANT != MCU_ESP32 && MCU_VARIANT != MCU_NRF52
         if (!fifo_isfull_locked(&serialFIFO)) { fifo_push_locked(&serialFIFO, Serial.read()); }
-      #elif HAS_BLUETOOTH || HAS_BLE == true || HAS_WIFI
+      #elif HAS_BLUETOOTH || HAS_BLE == true || HAS_WIFI || HAS_ETHERNET == true
         if      (bt_state == BT_STATE_CONNECTED) { if (!fifo_isfull(&serialFIFO)) { fifo_push(&serialFIFO, SerialBT.read()); } }
+        #if HAS_ETHERNET == true
+        else if (eth_is_connected && wifi_host_is_connected())  { if (!fifo_isfull(&serialFIFO)) { fifo_push(&serialFIFO, wifi_remote_read()); } }
+        #endif
         #if HAS_WIFI
         else if (wifi_host_is_connected())       { if (!fifo_isfull(&serialFIFO)) { fifo_push(&serialFIFO, wifi_remote_read()); } }
         #endif
