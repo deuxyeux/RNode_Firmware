@@ -1216,7 +1216,7 @@
       #define HAS_BLUETOOTH false
       #define HAS_BLE true
       #define HAS_CONSOLE false
-      #define HAS_PMU false
+      #define HAS_PMU true
       #define HAS_NP false
       #define HAS_SD false
       #define HAS_TCXO true
