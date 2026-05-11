@@ -1209,6 +1209,96 @@
       const int DISPLAY_BL_PIN = PIN_T114_TFT_BLGT;
       const int DISPLAY_RST = PIN_T114_TFT_RST;
 
+    #elif BOARD_MODEL == BOARD_HELTEC_T096
+      #define MODEM SX1262
+      #define HAS_EEPROM false
+      #define HAS_DISPLAY true
+      #define HAS_BLUETOOTH false
+      #define HAS_BLE true
+      #define HAS_CONSOLE false
+      #define HAS_PMU false
+      #define HAS_NP false
+      #define HAS_SD false
+      #define HAS_TCXO true
+      #define HAS_BUSY true
+      #define HAS_INPUT true
+      #define HAS_SLEEP false
+      #define DIO2_AS_RF_SWITCH true
+      #define CONFIG_UART_BUFFER_SIZE 6144
+      #define CONFIG_QUEUE_SIZE 6144
+      #define CONFIG_QUEUE_MAX_LENGTH 200
+      #define EEPROM_SIZE 296
+      #define EEPROM_OFFSET EEPROM_SIZE-EEPROM_RESERVED
+      #define BLE_MANUFACTURER "Heltec"
+      #define BLE_MODEL "T096"
+
+      #define HAS_LORA_PA true
+      #define HAS_LORA_LNA true
+      #define OCP_TUNED 0x28
+      #define LORA_PA_MODEL LORA_PA_KCT8103L
+      #define LNA_GD_THRSHLD (-109)
+      #define LNA_GD_LIMIT   (-89)
+
+      #define LORA_LNA_GAIN  17
+      #define LORA_LNA_GVT   12
+      #define LORA_PA_PWR_EN  7
+      #define LORA_PA_CPS    -1
+      #define LORA_PA_CSD    12
+      #define LORA_PA_CTX     9
+
+      #define PA_MAX_OUTPUT  28
+      #define PA_GAIN_POINTS 22
+
+      #define LORA_LNA_KCT8103L_GAIN 21
+      const int PA_KCT8103L_VALUES[PA_GAIN_POINTS] = {13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 12, 12, 11, 11, 10, 9, 8, 7};
+
+      // LED
+      #define PIN_T096_LED 28
+
+      // SPI
+      #define PIN_T096_MOSI 11
+      #define PIN_T096_MISO 14
+      #define PIN_T096_SCK  40
+      #define PIN_T096_SS   5
+
+      // SX1262
+      #define PIN_T096_RST  16
+      #define PIN_T096_DIO1 21
+      #define PIN_T096_BUSY 19
+
+      // TFT
+      #define DISPLAY_SCALE 1
+      #define PIN_T096_TFT_MOSI 17
+      #define PIN_T096_TFT_SCK 20
+      #define PIN_T096_TFT_SS 22
+      #define PIN_T096_TFT_DC 15
+      #define PIN_T096_TFT_RST 13
+      #define PIN_T096_TFT_EN 26
+      #define PIN_T096_TFT_BLGT 44
+
+      // pins for buttons on Heltec T096
+      const int pin_btn_usr1 = 42;
+
+      // pins for sx1262 on Heltec T096
+      const int pin_reset = PIN_T096_RST;
+      const int pin_cs = PIN_T096_SS;
+      const int pin_sclk = PIN_T096_SCK;
+      const int pin_mosi = PIN_T096_MOSI;
+      const int pin_miso = PIN_T096_MISO;
+      const int pin_busy = PIN_T096_BUSY;
+      const int pin_dio = PIN_T096_DIO1;
+      const int pin_led_rx = 28;
+      const int pin_led_tx = 28;
+      const int pin_tcxo_enable = -1;
+
+      // pins for ST7735 display on Heltec T096
+      const int DISPLAY_DC = PIN_T096_TFT_DC;
+      const int DISPLAY_CS = PIN_T096_TFT_SS;
+      const int DISPLAY_MOSI = PIN_T096_TFT_MOSI;
+      const int DISPLAY_CLK = PIN_T096_TFT_SCK;
+      const int DISPLAY_BL_PIN = PIN_T096_TFT_BLGT;
+      const int DISPLAY_RST = PIN_T096_TFT_RST;
+
     #elif BOARD_MODEL == BOARD_PROMICRO
       //TODO:
       // - Fix low output power

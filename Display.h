@@ -22,6 +22,9 @@
   #elif BOARD_MODEL == BOARD_HELTEC_T114
     #include "ST7789.h"
     #define COLOR565(r, g, b) (((r & 0xF8) << 8) | ((g & 0xFC) << 3) | ((b & 0xF8) >> 3))
+  #elif BOARD_MODEL == BOARD_HELTEC_T096
+    #include <Adafruit_ST7735.h>
+    #define COLOR565(r, g, b) (((r & 0xF8) << 8) | ((g & 0xFC) << 3) | ((b & 0xF8) >> 3))
   #elif BOARD_MODEL == BOARD_TBEAM_S_V1 || BOARD_MODEL == BOARD_TBEAM_S_V3
     #include <Adafruit_SH110X.h>
   #else
@@ -154,6 +157,10 @@
   Adafruit_ST7789 display = Adafruit_ST7789(DISPLAY_CS, DISPLAY_DC, -1);
   #define SSD1306_WHITE ST77XX_WHITE
   #define SSD1306_BLACK ST77XX_BLACK
+#elif BOARD_MODEL == BOARD_HELTEC_T096
+  Adafruit_ST7735 display = Adafruit_ST7735(&SPI1, DISPLAY_CS, DISPLAY_DC, DISPLAY_RST);
+  #define SSD1306_WHITE ST77XX_WHITE
+  #define SSD1306_BLACK ST77XX_BLACK
 #elif BOARD_MODEL == BOARD_HELTEC_T114
   ST7789Spi display(&SPI1, DISPLAY_RST, DISPLAY_DC, DISPLAY_CS);
   #define SSD1306_WHITE ST77XX_WHITE
@@ -243,6 +250,18 @@ void update_area_positions() {
       p_as_x = 126;
       p_as_y = p_ad_y;
     }
+  #elif BOARD_MODEL == BOARD_HELTEC_T096
+    if (disp_mode == DISP_MODE_LANDSCAPE) {
+      p_ad_x = 16;
+      p_ad_y = 8;
+      p_as_x = 82;
+      p_as_y = 8;
+    } else if (disp_mode == DISP_MODE_PORTRAIT) {
+      p_ad_x = 8;
+      p_ad_y = 0;
+      p_as_x = 8;
+      p_as_y = 64;
+    }
   #elif BOARD_MODEL == BOARD_TECHO
     if (disp_mode == DISP_MODE_PORTRAIT) {
       p_ad_x = 61;
@@ -276,6 +295,11 @@ uint8_t display_contrast = 0x00;
   }
 #elif BOARD_MODEL == BOARD_HELTEC_T114
   void set_contrast(ST7789Spi *display, uint8_t value) { }
+#elif BOARD_MODEL == BOARD_HELTEC_T096
+  void set_contrast(Adafruit_ST7735 *display, uint8_t value) {
+    if (value == 0) { digitalWrite(PIN_T096_TFT_BLGT, HIGH); }
+    else            { digitalWrite(PIN_T096_TFT_BLGT, LOW); }
+  }
 #elif BOARD_MODEL == BOARD_TECHO
   void set_contrast(void *display, uint8_t value) {
     if (value == 0) { analogWrite(pin_backlight, 0); }
@@ -357,6 +381,9 @@ bool display_init() {
     #elif BOARD_MODEL == BOARD_HELTEC_T114
       pinMode(PIN_T114_TFT_EN, OUTPUT);
       digitalWrite(PIN_T114_TFT_EN, LOW);
+    #elif BOARD_MODEL == BOARD_HELTEC_T096
+      pinMode(PIN_T096_TFT_EN, OUTPUT);
+      digitalWrite(PIN_T096_TFT_EN, HIGH);
     #elif BOARD_MODEL == BOARD_MESHADVENTURER_S3 || BOARD_MODEL == BOARD_MESHPOE_S3
       Wire.setPins(SDA_OLED, SCL_OLED);
       Wire.begin();
@@ -431,6 +458,9 @@ bool display_init() {
     // set white as default pixel colour for Heltec T114
     display.setRGB(COLOR565(0xFF, 0xFF, 0xFF));
     if (false) {
+    #elif BOARD_MODEL == BOARD_HELTEC_T096
+    display.initR(INITR_MINI160x80);
+    if (false) {
     #elif BOARD_MODEL == BOARD_TBEAM_S_V1 || BOARD_MODEL == BOARD_TBEAM_S_V3
     if (!display.begin(display_address, true)) {
     #else
@@ -479,6 +509,9 @@ bool display_init() {
           display.setRotation(1);
         #elif BOARD_MODEL == BOARD_HELTEC_T114
           disp_mode = DISP_MODE_PORTRAIT;
+          display.setRotation(1);
+        #elif BOARD_MODEL == BOARD_HELTEC_T096
+          disp_mode = DISP_MODE_LANDSCAPE;
           display.setRotation(1);
         #elif BOARD_MODEL == BOARD_RAK4631
           disp_mode = DISP_MODE_LANDSCAPE;
@@ -547,6 +580,10 @@ bool display_init() {
         fillRect(p_as_x, p_as_y, 128, 128, SSD1306_BLACK);
         pinMode(PIN_T114_TFT_BLGT, OUTPUT);
         digitalWrite(PIN_T114_TFT_BLGT, LOW);
+      #elif BOARD_MODEL == BOARD_HELTEC_T096
+        display.fillScreen(SSD1306_BLACK);
+        pinMode(PIN_T096_TFT_BLGT, OUTPUT);
+        digitalWrite(PIN_T096_TFT_BLGT, LOW);
       #endif
 
       return true;
@@ -586,7 +623,21 @@ void fillRect(int16_t x, int16_t y, int16_t width, int16_t height, uint16_t colo
 
 // Draws a bitmap to the display and auto scales it based on the boards configured DISPLAY_SCALE
 void drawBitmap(int16_t startX, int16_t startY, const uint8_t* bitmap, int16_t bitmapWidth, int16_t bitmapHeight, uint16_t foregroundColour, uint16_t backgroundColour) {
-  #if DISPLAY_SCALE == 1
+  #if BOARD_MODEL == BOARD_HELTEC_T096
+    {
+      static uint16_t rowbuf[64];
+      int16_t byteWidth = (bitmapWidth + 7) / 8;
+      display.startWrite();
+      display.setAddrWindow(startX, startY, bitmapWidth, bitmapHeight);
+      for (int16_t row = 0; row < bitmapHeight; row++) {
+        for (int16_t col = 0; col < bitmapWidth; col++) {
+          rowbuf[col] = (bitmap[row * byteWidth + col / 8] & (0x80 >> (col % 8))) ? foregroundColour : backgroundColour;
+        }
+        display.writePixels(rowbuf, bitmapWidth);
+      }
+      display.endWrite();
+    }
+  #elif DISPLAY_SCALE == 1
     display.drawBitmap(startX, startY, bitmap, bitmapWidth, bitmapHeight, foregroundColour, backgroundColour);
   #else
     for(int16_t row = 0; row < bitmapHeight; row++){
@@ -1142,6 +1193,8 @@ void update_display(bool blank = false) {
         display.clear();
         display.display();
         digitalWrite(PIN_T114_TFT_BLGT, HIGH);
+      #elif BOARD_MODEL == BOARD_HELTEC_T096
+        digitalWrite(PIN_T096_TFT_BLGT, HIGH);
       #elif BOARD_MODEL != BOARD_TDECK && BOARD_MODEL != BOARD_TECHO
         display.clearDisplay();
         display.display();
@@ -1163,6 +1216,8 @@ void update_display(bool blank = false) {
       #if BOARD_MODEL == BOARD_HELTEC_T114
         display.clear();
         digitalWrite(PIN_T114_TFT_BLGT, LOW);
+      #elif BOARD_MODEL == BOARD_HELTEC_T096
+        digitalWrite(PIN_T096_TFT_BLGT, LOW);
       #elif BOARD_MODEL != BOARD_TDECK && BOARD_MODEL != BOARD_TECHO
         display.clearDisplay();
       #endif
@@ -1188,7 +1243,7 @@ void update_display(bool blank = false) {
           last_epd_refresh = millis();
           epd_blanked = false;
         }
-      #elif BOARD_MODEL != BOARD_TDECK
+      #elif BOARD_MODEL != BOARD_TDECK && BOARD_MODEL != BOARD_HELTEC_T096
         display.display();
       #endif
 
@@ -1200,8 +1255,10 @@ void update_display(bool blank = false) {
 
 void display_unblank() {
   last_unblank_event = millis();
-  #if BOARD_MODEL == BOARD_HELTEC_T114  
-    digitalWrite(PIN_T114_TFT_BLGT, LOW);  
+  #if BOARD_MODEL == BOARD_HELTEC_T114
+    digitalWrite(PIN_T114_TFT_BLGT, LOW);
+  #elif BOARD_MODEL == BOARD_HELTEC_T096
+    digitalWrite(PIN_T096_TFT_BLGT, LOW);
   #endif
 }
 
