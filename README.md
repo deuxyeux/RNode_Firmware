@@ -10,14 +10,14 @@ The fork contains several DIY devices by me and other developers and has a few s
 ## Added devices
 
 - [Aethernode](https://github.com/ahedproductions/aethernode) by aetherlab LZ1SWE
-- Aethernode-S3 by aetherlab LZ1SWE
+- [Aethernode-S3](https://github.com/ahedproductions/aethernodeS3) by aetherlab LZ1SWE
 - [MeshAdventurer-S3](https://git.rns.moscow/deuxyeux/MeshAdventurer-S3) by Nickie Deuxyeux
 - [MeshAdventurer](https://github.com/chrismyers2000/MeshAdventurer) by Frequency Labs
 - [DIY-V1](https://github.com/NanoVHF/Meshtastic-DIY/) by NanoVHF
 - [Faketec (ProMicro)](https://github.com/gargomoma/fakeTec_pcb) by gargomoma, ShimonHoranek, lupusworax
-- MeshPoE-S3 by Nickie Deuxyeux
-- Heltec T096
-- LilyGo T-Beam Supreme V3
+- [MeshPoE-S3](https://git.rns.moscow/deuxyeux/MeshPoE-S3) by Nickie Deuxyeux
+- [Heltec Mesh Node T096](https://heltec.org/project/t096/)
+- [LilyGo T-Beam Supreme V3](https://lilygo.cc/en-us/products/t-beam-supreme)
 
 ## Improvements
 - Heltec T114 LCD backlight powers off when screen blanks
