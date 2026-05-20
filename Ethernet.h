@@ -18,14 +18,17 @@ SPIClass eth_spi(HSPI);
 bool eth_is_connected = false;
 IPAddress eth_device_ip;
 
-char eth_hostname[10];
+char eth_hostname[11];
 
 void onEthEvent(WiFiEvent_t event) {
     switch (event) {
         case ARDUINO_EVENT_ETH_START:
-            memcpy(eth_hostname, bt_devname, 5);
-            memcpy(eth_hostname+5, bt_devname+6, 4);
-            eth_hostname[9] = 0x00;
+            #if HAS_BLUETOOTH == true || HAS_BLE == true
+            snprintf(eth_hostname, sizeof(eth_hostname), "rnode-%02x%02x", (uint8_t)bt_dh[14], (uint8_t)bt_dh[15]);
+            #else
+            strncpy(eth_hostname, "rnode", sizeof(eth_hostname));
+            eth_hostname[sizeof(eth_hostname)-1] = 0x00;
+            #endif
             ETH.setHostname(eth_hostname);
             break;
         case ARDUINO_EVENT_ETH_GOT_IP:
