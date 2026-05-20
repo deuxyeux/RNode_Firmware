@@ -42,7 +42,7 @@ WiFiServer remote_listener(7633, 1);
 IPAddress ap_ip(10, 0, 0, 1);
 IPAddress ap_nm(255, 255, 255, 0);
 IPAddress wr_device_ip;
-char wr_hostname[10];
+char wr_hostname[11];
 wl_status_t wr_wifi_status = WL_IDLE_STATUS;
 
 uint8_t wifi_mode = WIFI_OFF;
@@ -126,9 +126,7 @@ void wifi_remote_start() {
 }
 
 void wifi_remote_init() {
-  memcpy(wr_hostname, bt_devname, 5);
-  memcpy(wr_hostname+5, bt_devname+6, 4);
-  wr_hostname[9] = 0x00;
+  snprintf(wr_hostname, sizeof(wr_hostname), "rnode-%02x%02x", (uint8_t)bt_dh[14], (uint8_t)bt_dh[15]);
   WiFi.softAPdisconnect(true);
   WiFi.disconnect(true, true);
   WiFi.mode(WIFI_MODE_NULL);
