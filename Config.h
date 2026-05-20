@@ -39,6 +39,9 @@
 	bool bt_ready = false;
 	bool bt_enabled = false;
 	bool bt_allow_pairing = false;
+	#define BT_DEV_HASH_LEN 16
+	char bt_dh[BT_DEV_HASH_LEN];
+	char bt_devname[11];
 
 	#define WR_CHANNEL_DEFAULT 1
 	#define WR_WIFI_OFF        0x00

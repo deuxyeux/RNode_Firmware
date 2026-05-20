@@ -21,14 +21,17 @@
 #if MCU_VARIANT == MCU_ESP32
   #if HAS_BLUETOOTH == true
     #include "BluetoothSerial.h"
-    #include "esp_bt_main.h"
-    #include "esp_bt_device.h"
+    #include "esp_mac.h"
     BluetoothSerial SerialBT;
   #elif HAS_BLE == true
-    #include "esp_bt_main.h"
-    #include "esp_bt_device.h"
+    #include "esp_mac.h"
     #include "BLESerial.h"
+    #if defined(CONFIG_NIMBLE_ENABLED)
+      #include <host/ble_store.h>
+    #endif
     BLESerial SerialBT;
+  #else
+    #include "esp_mac.h"
   #endif
 
 #elif MCU_VARIANT == MCU_NRF52
@@ -46,11 +49,8 @@
 uint32_t bt_pairing_started = 0;
 
 #define BT_DEV_ADDR_LEN 6
-#define BT_DEV_HASH_LEN 16
 uint8_t dev_bt_mac[BT_DEV_ADDR_LEN];
 char bt_da[BT_DEV_ADDR_LEN];
-char bt_dh[BT_DEV_HASH_LEN];
-char bt_devname[11];
 
 #if MCU_VARIANT == MCU_ESP32
   #if HAS_BLUETOOTH == true
@@ -125,31 +125,23 @@ char bt_devname[11];
         } else {
           bt_enabled = false;
         }
-        if (btStart()) {
-          if (esp_bluedroid_init() == ESP_OK) {
-            if (esp_bluedroid_enable() == ESP_OK) {
-              const uint8_t* bda_ptr = esp_bt_dev_get_address();
-              char *data = (char*)malloc(BT_DEV_ADDR_LEN+1);
-              for (int i = 0; i < BT_DEV_ADDR_LEN; i++) {
-                  data[i] = bda_ptr[i];
-              }
-              data[BT_DEV_ADDR_LEN] = EEPROM.read(eeprom_addr(ADDR_SIGNATURE));
-              unsigned char *hash = MD5::make_hash(data, BT_DEV_ADDR_LEN);
-              memcpy(bt_dh, hash, BT_DEV_HASH_LEN);
-              sprintf(bt_devname, "RNode %02X%02X", bt_dh[14], bt_dh[15]);
-              free(data);
+        uint8_t mac[BT_DEV_ADDR_LEN];
+        esp_read_mac(mac, ESP_MAC_BT);
+        char *data = (char*)malloc(BT_DEV_ADDR_LEN+1);
+        for (int i = 0; i < BT_DEV_ADDR_LEN; i++) { data[i] = mac[i]; }
+        data[BT_DEV_ADDR_LEN] = EEPROM.read(eeprom_addr(ADDR_SIGNATURE));
+        unsigned char *hash = MD5::make_hash(data, BT_DEV_ADDR_LEN);
+        memcpy(bt_dh, hash, BT_DEV_HASH_LEN);
+        sprintf(bt_devname, "RNode %02X%02X", bt_dh[14], bt_dh[15]);
+        free(data);
 
-              SerialBT.enableSSP();
-              SerialBT.onConfirmRequest(bt_confirm_pairing);
-              SerialBT.onAuthComplete(bt_pairing_complete);
-              SerialBT.register_callback(bt_connection_callback);
-              
-              bt_ready = true;
-              return true;
+        SerialBT.enableSSP();
+        SerialBT.onConfirmRequest(bt_confirm_pairing);
+        SerialBT.onAuthComplete(bt_pairing_complete);
+        SerialBT.register_callback(bt_connection_callback);
 
-            } else { return false; }
-          } else { return false; }
-        } else { return false; }
+        bt_ready = true;
+        return true;
       } else { return false; }
     }
 
@@ -210,11 +202,15 @@ char bt_devname[11];
 
     void bt_debond_all() {
       // Serial.println("Debonding all");
-      int dev_num = esp_ble_get_bond_device_num();
-      esp_ble_bond_dev_t *dev_list = (esp_ble_bond_dev_t *)malloc(sizeof(esp_ble_bond_dev_t) * dev_num);
-      esp_ble_get_bond_device_list(&dev_num, dev_list);
-      for (int i = 0; i < dev_num; i++) { esp_ble_remove_bond_device(dev_list[i].bd_addr); }
-      free(dev_list);
+      #if defined(CONFIG_BLUEDROID_ENABLED)
+        int dev_num = esp_ble_get_bond_device_num();
+        esp_ble_bond_dev_t *dev_list = (esp_ble_bond_dev_t *)malloc(sizeof(esp_ble_bond_dev_t) * dev_num);
+        esp_ble_get_bond_device_list(&dev_num, dev_list);
+        for (int i = 0; i < dev_num; i++) { esp_ble_remove_bond_device(dev_list[i].bd_addr); }
+        free(dev_list);
+      #elif defined(CONFIG_NIMBLE_ENABLED)
+        ble_store_clear();
+      #endif
     }
 
     void bt_enable_pairing() {
@@ -281,6 +277,7 @@ char bt_devname[11];
         }
     }
 
+    #if defined(CONFIG_BLUEDROID_ENABLED)
     void bt_authentication_complete_callback(esp_ble_auth_cmpl_t auth_result) {
       if (auth_result.success == true) {
         // Serial.println("Authentication success");
@@ -299,6 +296,23 @@ char bt_devname[11];
       bt_allow_pairing = false;
       bt_ssp_pin = 0;
     }
+    #elif defined(CONFIG_NIMBLE_ENABLED)
+    void bt_authentication_complete_callback(ble_gap_conn_desc *desc) {
+      if (desc->sec_state.authenticated) {
+        ble_authenticated = true;
+        if (bt_state == BT_STATE_PAIRING) {
+          delay(2000); SerialBT.disconnect();
+        } else { bt_state = BT_STATE_CONNECTED; }
+      } else {
+        ble_authenticated = false;
+        bt_state = BT_STATE_ON;
+        bt_update_passkey();
+        bt_security_setup();
+      }
+      bt_allow_pairing = false;
+      bt_ssp_pin = 0;
+    }
+    #endif
 
     void bt_connect_callback(BLEServer *server) {
       uint16_t conn_id = server->getConnId();
@@ -325,55 +339,34 @@ char bt_devname[11];
         } else {
           bt_enabled = false;
         }
-        if (btStart()) {
-          if (esp_bluedroid_init() == ESP_OK) {
-            if (esp_bluedroid_enable() == ESP_OK) {
-              const uint8_t* bda_ptr = esp_bt_dev_get_address();
-              char *data = (char*)malloc(BT_DEV_ADDR_LEN+1);
-              for (int i = 0; i < BT_DEV_ADDR_LEN; i++) {
-                  data[i] = bda_ptr[i];
-              }
-              data[BT_DEV_ADDR_LEN] = EEPROM.read(eeprom_addr(ADDR_SIGNATURE));
-              unsigned char *hash = MD5::make_hash(data, BT_DEV_ADDR_LEN);
-              memcpy(bt_dh, hash, BT_DEV_HASH_LEN);
-              sprintf(bt_devname, "RNode %02X%02X", bt_dh[14], bt_dh[15]);
-              free(data);
+        uint8_t mac[BT_DEV_ADDR_LEN];
+        esp_read_mac(mac, ESP_MAC_BT);
+        char *data = (char*)malloc(BT_DEV_ADDR_LEN+1);
+        for (int i = 0; i < BT_DEV_ADDR_LEN; i++) { data[i] = mac[i]; }
+        data[BT_DEV_ADDR_LEN] = EEPROM.read(eeprom_addr(ADDR_SIGNATURE));
+        unsigned char *hash = MD5::make_hash(data, BT_DEV_ADDR_LEN);
+        memcpy(bt_dh, hash, BT_DEV_HASH_LEN);
+        sprintf(bt_devname, "RNode %02X%02X", bt_dh[14], bt_dh[15]);
+        free(data);
 
-              bt_security_setup();
+        bt_security_setup();
 
-              bt_ready = true;
-              return true;
-
-            } else { return false; }
-          } else { return false; }
-        } else { return false; }
+        bt_ready = true;
+        return true;
       } else { return false; }
     }
 
     void bt_security_setup() {
       // Serial.println("Executing BT security setup");
       if (pairing_pin == 0) { bt_update_passkey(); }
-      uint32_t passkey = pairing_pin;
-      // Serial.printf("Passkey is %d\n", passkey);
-
-      uint8_t key_size = 16;
-      uint8_t init_key = ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK;
-      uint8_t rsp_key = ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK;
-
-      esp_ble_auth_req_t auth_req = ESP_LE_AUTH_REQ_SC_MITM_BOND;
-      uint8_t auth_option = ESP_BLE_ONLY_ACCEPT_SPECIFIED_AUTH_ENABLE;
-      uint8_t oob_support = ESP_BLE_OOB_DISABLE;
-
-      esp_ble_io_cap_t iocap = ESP_IO_CAP_OUT;
-
-      esp_ble_gap_set_security_param(ESP_BLE_SM_SET_STATIC_PASSKEY, &passkey, sizeof(uint32_t));
-      esp_ble_gap_set_security_param(ESP_BLE_SM_AUTHEN_REQ_MODE, &auth_req, sizeof(uint8_t));
-      esp_ble_gap_set_security_param(ESP_BLE_SM_IOCAP_MODE, &iocap, sizeof(uint8_t));
-      esp_ble_gap_set_security_param(ESP_BLE_SM_MAX_KEY_SIZE, &key_size, sizeof(uint8_t));
-      esp_ble_gap_set_security_param(ESP_BLE_SM_ONLY_ACCEPT_SPECIFIED_SEC_AUTH, &auth_option, sizeof(uint8_t));
-      esp_ble_gap_set_security_param(ESP_BLE_SM_OOB_SUPPORT, &oob_support, sizeof(uint8_t));
-      esp_ble_gap_set_security_param(ESP_BLE_SM_SET_INIT_KEY, &init_key, sizeof(uint8_t));
-      esp_ble_gap_set_security_param(ESP_BLE_SM_SET_RSP_KEY, &rsp_key, sizeof(uint8_t));
+      // Serial.printf("Passkey is %d\n", pairing_pin);
+      BLESecurity::setAuthenticationMode(ESP_LE_AUTH_REQ_SC_MITM_BOND);
+      BLESecurity::setCapability(ESP_IO_CAP_OUT);
+      BLESecurity::setInitEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
+      BLESecurity::setRespEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
+      BLESecurity::setKeySize(16);
+      BLESecurity::setPassKey(true, pairing_pin);
+      BLESecurity::setForceAuthentication(true);
     }
 
     void update_bt() {
@@ -386,6 +379,20 @@ char bt_devname[11];
         }
       }
     }
+  #else
+    bool bt_init() {
+      uint8_t mac[BT_DEV_ADDR_LEN];
+      esp_read_mac(mac, ESP_MAC_BT);
+      char *data = (char*)malloc(BT_DEV_ADDR_LEN+1);
+      for (int i = 0; i < BT_DEV_ADDR_LEN; i++) { data[i] = mac[i]; }
+      data[BT_DEV_ADDR_LEN] = EEPROM.read(eeprom_addr(ADDR_SIGNATURE));
+      unsigned char *hash = MD5::make_hash(data, BT_DEV_ADDR_LEN);
+      memcpy(bt_dh, hash, BT_DEV_HASH_LEN);
+      sprintf(bt_devname, "RNode %02X%02X", bt_dh[14], bt_dh[15]);
+      free(data);
+      return true;
+    }
+    void update_bt() { }
   #endif
 
 #elif MCU_VARIANT == MCU_NRF52

@@ -77,7 +77,7 @@
   #define DISP_RST -1
   #define DISP_ADDR 0x3C
   #define SCL_OLED 17
-  #define SDA_OLED 47
+  #define SDA_OLED 48
 #elif BOARD_MODEL == BOARD_MESHADVENTURER_S3
   #define DISP_RST -1
   #define DISP_ADDR 0x3C
@@ -933,8 +933,6 @@ void update_stat_area() {
 #define START_PAGE 0
 const uint8_t pages = 3;
 uint8_t disp_page = START_PAGE;
-extern char bt_devname[11];
-extern char bt_dh[16];
 #if HAS_WIFI
   extern IPAddress wr_device_ip;
 #endif
