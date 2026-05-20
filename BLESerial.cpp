@@ -23,7 +23,11 @@
 uint32_t bt_passkey_callback();
 void bt_passkey_notify_callback(uint32_t passkey);
 bool bt_security_request_callback();
+#if defined(CONFIG_BLUEDROID_ENABLED)
 void bt_authentication_complete_callback(esp_ble_auth_cmpl_t auth_result);
+#elif defined(CONFIG_NIMBLE_ENABLED)
+void bt_authentication_complete_callback(ble_gap_conn_desc *desc);
+#endif
 bool bt_confirm_pin_callback(uint32_t pin);
 void bt_connect_callback(BLEServer *server);
 void bt_disconnect_callback(BLEServer *server);
@@ -32,7 +36,11 @@ bool bt_client_authenticated();
 uint32_t BLESerial::onPassKeyRequest() { return bt_passkey_callback(); }
 void BLESerial::onPassKeyNotify(uint32_t passkey) { bt_passkey_notify_callback(passkey); }
 bool BLESerial::onSecurityRequest() { return bt_security_request_callback(); }
+#if defined(CONFIG_BLUEDROID_ENABLED)
 void BLESerial::onAuthenticationComplete(esp_ble_auth_cmpl_t auth_result) { bt_authentication_complete_callback(auth_result); }
+#elif defined(CONFIG_NIMBLE_ENABLED)
+void BLESerial::onAuthenticationComplete(ble_gap_conn_desc *desc) { bt_authentication_complete_callback(desc); }
+#endif
 void BLESerial::onConnect(BLEServer *server) { bt_connect_callback(server); }
 void BLESerial::onDisconnect(BLEServer *server) { bt_disconnect_callback(server); ble_server->startAdvertising(); }
 bool BLESerial::onConfirmPIN(uint32_t pin) { return bt_confirm_pin_callback(pin); };
@@ -111,13 +119,12 @@ void BLESerial::begin(const char *name) {
   ConnectedDeviceCount = 0;
   BLEDevice::init(name);
 
-  esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_DEFAULT, ESP_PWR_LVL_P9); 
+  esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_DEFAULT, ESP_PWR_LVL_P9);
   esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV, ESP_PWR_LVL_P9);
-  esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_SCAN ,ESP_PWR_LVL_P9);
+  esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_SCAN, ESP_PWR_LVL_P9);
 
   ble_server = BLEDevice::createServer();
   ble_server->setCallbacks(this);
-  BLEDevice::setEncryptionLevel(ESP_BLE_SEC_ENCRYPT_MITM);
   BLEDevice::setSecurityCallbacks(this);
 
   SetupSerialService();
