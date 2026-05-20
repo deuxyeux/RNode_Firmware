@@ -57,6 +57,8 @@ uint8_t eeprom_read(uint32_t mapped_addr);
 
 #if HAS_BLUETOOTH == true || HAS_BLE == true
 	void kiss_indicate_btpin();
+#endif
+#if MCU_VARIANT == MCU_ESP32 || HAS_BLUETOOTH == true || HAS_BLE == true
   #include "Bluetooth.h"
 #endif
 
@@ -351,13 +353,6 @@ uint8_t boot_vector = 0x00;
 		void led_tx_off() { digitalWrite(pin_led_tx, LOW); }
 		void led_id_on()  { }
 		void led_id_off() { }
-	#elif BOARD_MODEL == BOARD_MESHPOE_S3
-		void led_rx_on()  { digitalWrite(pin_led_rx, HIGH); }
-		void led_rx_off() {	digitalWrite(pin_led_rx, LOW); }
-		void led_tx_on()  { digitalWrite(pin_led_tx, HIGH); }
-		void led_tx_off() { digitalWrite(pin_led_tx, LOW); }
-		void led_id_on()  { }
-		void led_id_off() { }
 	#elif BOARD_MODEL == BOARD_MESHADVENTURER_S3
 		void led_rx_on()  { digitalWrite(pin_led_rx, HIGH); }
 		void led_rx_off() {	digitalWrite(pin_led_rx, LOW); }
@@ -391,6 +386,13 @@ uint8_t boot_vector = 0x00;
 		void led_rx_off() {	digitalWrite(pin_led_rx, LOW); }
 		void led_tx_on()  { digitalWrite(pin_led_tx, HIGH); }
 		void led_tx_off() { digitalWrite(pin_led_tx, LOW); }
+		void led_id_on()  { }
+		void led_id_off() { }
+	#elif BOARD_MODEL == BOARD_MESHPOE_S3
+		void led_rx_on()  { }
+		void led_rx_off() { }
+		void led_tx_on()  { }
+		void led_tx_off() { }
 		void led_id_on()  { }
 		void led_id_off() { }
 	#endif
