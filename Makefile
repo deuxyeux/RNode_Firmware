@@ -14,10 +14,10 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 # Version 2.0.17 of the Arduino ESP core is based on ESP-IDF v4.4.7
-ARDUINO_ESP_CORE_VER = 2.0.17
+#ARDUINO_ESP_CORE_VER = 2.0.17
 
-# Version 3.2.0 of the Arduino ESP core is based on ESP-IDF v5.4.1
-#ARDUINO_ESP_CORE_VER = 3.3.7
+# Version 3.3.8 of the Arduino ESP core is based on ESP-IDF v5.5.4
+ARDUINO_ESP_CORE_VER = 3.3.8
 
 all: release
 
@@ -195,7 +195,7 @@ upload-meshpoe_s3:
 #	@sleep 1
 #	rnodeconf /dev/ttyACM0 --firmware-hash $$(./partition_hashes ./build/esp32.esp32.esp32s3/RNode_Firmware.ino.bin)
 	@sleep 3
-	python ./Release/esptool/esptool.py --chip esp32s3 --port /dev/ttyACM0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode qio --flash_freq 80m --flash_size 16MB 0x210000 ./Release/console_image.bin
+#	python ./Release/esptool/esptool.py --chip esp32s3 --port /dev/ttyACM0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode qio --flash_freq 80m --flash_size 16MB 0x210000 ./Release/console_image.bin
 
 upload-meshadventurer_s3:
 	arduino-cli upload -p /dev/ttyACM0 --fqbn esp32:esp32:esp32s3
