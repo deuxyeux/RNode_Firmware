@@ -470,11 +470,21 @@ bool display_init() {
     } else {
       set_contrast(&display, display_contrast);
       if (display_rotation != 0xFF) {
-        if (display_rotation == 0 || display_rotation == 2) {
-          disp_mode = DISP_MODE_LANDSCAPE;
-        } else {
-          disp_mode = DISP_MODE_PORTRAIT;
-        }
+        #if BOARD_MODEL == BOARD_HELTEC_T096
+          // MINI160x80 native orientation is portrait (80x160), so rotations
+          // 1 and 3 yield landscape (160x80) and 0/2 yield portrait (80x160).
+          if (display_rotation == 1 || display_rotation == 3) {
+            disp_mode = DISP_MODE_LANDSCAPE;
+          } else {
+            disp_mode = DISP_MODE_PORTRAIT;
+          }
+        #else
+          if (display_rotation == 0 || display_rotation == 2) {
+            disp_mode = DISP_MODE_LANDSCAPE;
+          } else {
+            disp_mode = DISP_MODE_PORTRAIT;
+          }
+        #endif
         display.setRotation(display_rotation);
       } else {
         #if BOARD_MODEL == BOARD_RNODE_NG_20

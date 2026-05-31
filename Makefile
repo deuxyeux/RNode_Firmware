@@ -363,7 +363,7 @@ upload-heltec_t096:
 	rnodeconf /dev/ttyACM0 --firmware-hash $$(./partition_hashes from_device /dev/ttyACM0)
 
 upload-promicro:
-	arduino-cli upload -p /dev/ttyACM0 --fqbn promicro:nrf52:nicenanov2:softdevice=s140v6
+	arduino-cli upload -p /dev/ttyACM0 --fqbn promicro:nrf52:nicenanov2
 	@sleep 6
 	rnodeconf /dev/ttyACM0 --firmware-hash $$(./partition_hashes from_device /dev/ttyACM0)
 
