@@ -587,6 +587,9 @@ void flush_queue(void) {
   if (!queue_flushing) {
     queue_flushing = true;
     if (!LED_DISPLAY_BLANKED) { led_tx_on(); }
+    #if HAS_DISPLAY && BOARD_MODEL == BOARD_HELTEC_T096
+      display_indicate_tx();
+    #endif
 
     #if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
     while (!fifo16_isempty(&packet_starts)) {
@@ -619,7 +622,8 @@ void flush_queue(void) {
 
   queue_flushing = false;
 
-  #if HAS_DISPLAY
+  #if HAS_DISPLAY && BOARD_MODEL != BOARD_HELTEC_T096
+    // on the T096 this is handled by display_indicate_tx() pre-transmit
     display_tx = true;
   #endif
 }
@@ -628,6 +632,9 @@ void pop_queue() {
   if (!queue_flushing) {
     queue_flushing = true;
     if (!LED_DISPLAY_BLANKED) { led_tx_on(); }
+    #if HAS_DISPLAY && BOARD_MODEL == BOARD_HELTEC_T096
+      display_indicate_tx();
+    #endif
 
     #if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
     if (!fifo16_isempty(&packet_starts)) {
@@ -659,7 +666,8 @@ void pop_queue() {
 
   queue_flushing = false;
 
-  #if HAS_DISPLAY
+  #if HAS_DISPLAY && BOARD_MODEL != BOARD_HELTEC_T096
+    // on the T096 this is handled by display_indicate_tx() pre-transmit
     display_tx = true;
   #endif
 }

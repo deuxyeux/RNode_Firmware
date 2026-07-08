@@ -24,7 +24,9 @@
     #define COLOR565(r, g, b) (((r & 0xF8) << 8) | ((g & 0xFC) << 3) | ((b & 0xF8) >> 3))
   #elif BOARD_MODEL == BOARD_HELTEC_T096
     #include <Adafruit_ST7735.h>
-    #define COLOR565(r, g, b) (((r & 0xF8) << 8) | ((g & 0xFC) << 3) | ((b & 0xF8) >> 3))
+    // The T096 panel is wired BGR: the high field drives blue, so red and
+    // blue swap places compared to standard RGB565
+    #define COLOR565(r, g, b) (((b & 0xF8) << 8) | ((g & 0xFC) << 3) | ((r & 0xF8) >> 3))
   #elif BOARD_MODEL == BOARD_TBEAM_S_V1 || BOARD_MODEL == BOARD_TBEAM_S_V3
     #include <Adafruit_SH110X.h>
   #else
@@ -203,18 +205,59 @@ int page_interval = 4000;
 bool device_signatures_ok();
 bool device_firmware_ok();
 
-#define WATERFALL_SIZE 46
+#if BOARD_MODEL == BOARD_HELTEC_T096
+  // The 80x160 panel gets a redesigned layout: 80x64 device area on top of
+  // an 80x96 status area with a wider and taller waterfall. Bitmap art
+  // stays 64px wide and is centered with a DISP_BM_X offset.
+  #define WATERFALL_SIZE 78
+  #define STAT_AREA_W 80
+  #define STAT_AREA_H 96
+  #define DISP_AREA_W 80
+  #define DISP_AREA_H 64
+  #define DISP_BM_X 8
+  #define DIAG_COL2 42
+  // Waterfall position within the status area
+  #define WF_POS_X 27
+  #define WF_POS_Y 4
+#else
+  #define WATERFALL_SIZE 46
+  #define STAT_AREA_W 64
+  #define STAT_AREA_H 64
+  #define DISP_AREA_W 64
+  #define DISP_AREA_H 64
+  #define DISP_BM_X 0
+  #define DIAG_COL2 32
+#endif
+#define DISP_BM_W 64
 int waterfall[WATERFALL_SIZE];
 int waterfall_meta[WATERFALL_SIZE];
 int waterfall_head = 0;
+
+#if MODEM == SX1280
+  #define WF_TX_SIZE 5
+#else
+  #define WF_TX_SIZE 5
+#endif
+#define WF_RSSI_MAX -60
+#define WF_RSSI_MIN -135
+#define WF_RSSI_SPAN (WF_RSSI_MAX-WF_RSSI_MIN)
+#if BOARD_MODEL == BOARD_HELTEC_T096
+  #define WF_PIXEL_WIDTH 26
+#else
+  #define WF_PIXEL_WIDTH 10
+#endif
+#define WF_M_RX   0x00
+#define WF_M_TX   0x01
+#define WF_M_NTFR 0x02
+#define WF_M_RX_PKT 0x03 // sampled while carrier was detected
 
 int p_ad_x = 0;
 int p_ad_y = 0;
 int p_as_x = 0;
 int p_as_y = 0;
 
-GFXcanvas1 stat_area(64, 64);
-GFXcanvas1 disp_area(64, 64);
+GFXcanvas1 stat_area(STAT_AREA_W, STAT_AREA_H);
+GFXcanvas1 disp_area(DISP_AREA_W, DISP_AREA_H);
 
 static const uint8_t one_counts[256] = {
   0,  1,  0,  0,  0,  0,  0,  0,  0,  0,  1,  2,  1,  1,  1,  1,
@@ -252,14 +295,16 @@ void update_area_positions() {
     }
   #elif BOARD_MODEL == BOARD_HELTEC_T096
     if (disp_mode == DISP_MODE_LANDSCAPE) {
-      p_ad_x = 16;
+      // Interim placement until the landscape layout is redesigned for
+      // the 80-tall areas; the status area bottom rows are clipped.
+      p_ad_x = 0;
       p_ad_y = 8;
-      p_as_x = 82;
-      p_as_y = 8;
+      p_as_x = 80;
+      p_as_y = 0;
     } else if (disp_mode == DISP_MODE_PORTRAIT) {
-      p_ad_x = 8;
+      p_ad_x = 0;
       p_ad_y = 0;
-      p_as_x = 8;
+      p_as_x = 0;
       p_as_y = 64;
     }
   #elif BOARD_MODEL == BOARD_TECHO
@@ -638,7 +683,31 @@ void fillRect(int16_t x, int16_t y, int16_t width, int16_t height, uint16_t colo
   // the last bitmap pushed to each screen region and only write the
   // bounding box of changed pixels.
   #define REGION_CACHE_SLOTS 3
-  #define REGION_CACHE_BYTES 512 // enough for a 64x64 mono bitmap
+  #define REGION_CACHE_BYTES 960 // enough for an 80x96 mono bitmap
+  #if USE_COLOR_DISPLAY == true
+    #define COLOR_LAMP_RX COLOR565(0x3E, 0xD8, 0x60)
+    #define COLOR_LAMP_TX COLOR565(0x48, 0x96, 0xFF)
+    #define COLOR_BAT_LOW COLOR565(0xEB, 0x4C, 0x42)
+    #define COLOR_BANNER_OK COLOR565(0x28, 0x90, 0x40)    // darker green for status banners
+    #define COLOR_BANNER_ALERT COLOR565(0xFF, 0xA0, 0x20)  // amber for warning banners
+    #define COLOR_BT_ON COLOR565(0x28, 0x60, 0xC0)         // darker blue bluetooth box fill
+  #endif
+  // Background tint of the currently displayed status banner, 0 = none
+  uint16_t disp_banner_fg = 0;
+  // RX/TX indicator lamps and low-battery warning; states set in
+  // draw_stat_area, read by the push-time colourizer in drawBitmap
+  #define LAMP_HOLD_MS 300
+  // Voltage readout turns red when approaching the critical voltage
+  // (BAT_V_MIN, 3.15V on this board; defined later in Power.h)
+  #define BAT_V_ALERT 3.30
+  bool lamp_rx_lit = false;
+  bool lamp_tx_lit = false;
+  bool battery_low_lit = false;
+  bool battery_volt_low_lit = false;
+  bool bt_enabled_lit = false;
+  uint8_t bt_icon_i = 0; // icon variant shown in the bluetooth box
+  uint32_t lamp_rx_until = 0;
+  uint32_t lamp_tx_until = 0;
   struct RegionCache {
     int16_t x = -1; int16_t y = -1; int16_t w = 0; int16_t h = 0;
     uint16_t fg = 0; uint16_t bg = 0;
@@ -646,16 +715,21 @@ void fillRect(int16_t x, int16_t y, int16_t width, int16_t height, uint16_t colo
   };
   RegionCache region_cache[REGION_CACHE_SLOTS];
   uint8_t region_cache_next = 0;
+  // Forces a full repaint on the next push; needed when only colours
+  // change while the mono canvas content stays identical
+  void region_cache_flush() {
+    for (uint8_t i = 0; i < REGION_CACHE_SLOTS; i++) { region_cache[i].x = -1; }
+  }
 #endif
 
 // Draws a bitmap to the display and auto scales it based on the boards configured DISPLAY_SCALE
 void drawBitmap(int16_t startX, int16_t startY, const uint8_t* bitmap, int16_t bitmapWidth, int16_t bitmapHeight, uint16_t foregroundColour, uint16_t backgroundColour) {
   #if BOARD_MODEL == BOARD_HELTEC_T096
     {
-      static uint16_t rowbuf[64];
+      static uint16_t rowbuf[80];
       int16_t byteWidth = (bitmapWidth + 7) / 8;
       int32_t bitmapBytes = (int32_t)byteWidth * bitmapHeight;
-      bool cacheable = bitmapBytes <= REGION_CACHE_BYTES && bitmapWidth <= 64;
+      bool cacheable = bitmapBytes <= REGION_CACHE_BYTES && bitmapWidth <= 80;
 
       RegionCache *reg = NULL;
       if (cacheable) {
@@ -692,10 +766,17 @@ void drawBitmap(int16_t startX, int16_t startY, const uint8_t* bitmap, int16_t b
           for (int16_t bc = 0; bc < byteWidth; bc++) {
             int32_t idx = (int32_t)row * byteWidth + bc;
             if (bitmap[idx] != reg->back[idx]) {
+              uint8_t diff = bitmap[idx] ^ reg->back[idx];
               if (row < minY) minY = row;
               if (row > maxY) maxY = row;
-              if (bc*8 < minX) minX = bc*8;
-              if (bc*8+7 > maxX) maxX = bc*8+7;
+              // Track changed columns per-pixel, so static pixels sharing
+              // a byte with changing ones don't get rewritten
+              for (uint8_t b = 0; b < 8; b++) {
+                if (diff & (0x80 >> b)) {
+                  if (bc*8+b < minX) minX = bc*8+b;
+                  if (bc*8+b > maxX) maxX = bc*8+b;
+                }
+              }
               reg->back[idx] = bitmap[idx];
             }
           }
@@ -707,8 +788,41 @@ void drawBitmap(int16_t startX, int16_t startY, const uint8_t* bitmap, int16_t b
       display.startWrite();
       display.setAddrWindow(startX+minX, startY+minY, maxX-minX+1, maxY-minY+1);
       for (int16_t row = minY; row <= maxY; row++) {
+        #if USE_COLOR_DISPLAY == true
+          int16_t ay = (startY+row) - p_as_y;
+        #endif
         for (int16_t col = minX; col <= maxX; col++) {
-          rowbuf[col-minX] = (bitmap[row * byteWidth + col / 8] & (0x80 >> (col % 8))) ? foregroundColour : backgroundColour;
+          uint16_t fg = foregroundColour;
+          #if USE_COLOR_DISPLAY == true
+            // Lit pixels inside an active indicator lamp or a depleted
+            // battery icon get that element's colour; everything else
+            // stays monochrome
+            if (foregroundColour == SSD1306_WHITE) {
+              int16_t ax = (startX+col) - p_as_x;
+              if      (lamp_rx_lit && ax >= 3 && ax <= 18 && ay >= 64 && ay <= 79)          { fg = COLOR_LAMP_RX; }
+              else if (lamp_tx_lit && ax >= 61 && ax <= 76 && ay >= 64 && ay <= 79)         { fg = COLOR_LAMP_TX; }
+              else if (battery_low_lit && ax >= 2 && ax <= 19 && ay >= 88 && ay <= 94)      { fg = COLOR_BAT_LOW; }
+              else if (battery_volt_low_lit && ax >= 20 && ax <= 38 && ay >= 87 && ay <= 94) { fg = COLOR_BAT_LOW; }
+              else if (bt_enabled_lit && ax >= 3 && ax <= 18 && ay >= 36 && ay <= 51) {
+                // icon pixels stay light, the rest of the box fills dark blue
+                uint8_t bt_c = ax-3; uint8_t bt_r = ay-36;
+                if (!(bm_bt[bt_icon_i*32 + bt_r*2 + bt_c/8] & (0x80 >> (bt_c%8)))) { fg = COLOR_BT_ON; }
+              }
+              else if (ax >= WF_POS_X && ax < WF_POS_X+WF_PIXEL_WIDTH &&
+                       ay >= WF_POS_Y && ay < WF_POS_Y+WATERFALL_SIZE) {
+                int wf_m = waterfall_meta[(waterfall_head + (ay-WF_POS_Y)) % WATERFALL_SIZE];
+                if      (wf_m == WF_M_RX_PKT) { fg = COLOR_LAMP_RX; }
+                else if (wf_m == WF_M_TX)     { fg = COLOR_LAMP_TX; }
+              }
+              else if (disp_banner_fg != 0) {
+                // status banner fill (checks passed / hw ok / fw corrupt)
+                int16_t bx = (startX+col) - p_ad_x;
+                int16_t by = (startY+row) - p_ad_y;
+                if (bx >= 0 && bx < DISP_AREA_W && by >= 37 && by <= 63) { fg = disp_banner_fg; }
+              }
+            }
+          #endif
+          rowbuf[col-minX] = (bitmap[row * byteWidth + col / 8] & (0x80 >> (col % 8))) ? fg : backgroundColour;
         }
         display.writePixels(rowbuf, maxX-minX+1);
       }
@@ -770,17 +884,29 @@ void draw_cable_icon(int px, int py) {
 }
 
 void draw_bt_icon(int px, int py) {
-  if (bt_state == BT_STATE_OFF) {
-    stat_area.drawBitmap(px, py, bm_bt+0*32, 16, 16, SSD1306_WHITE, SSD1306_BLACK);
-  } else if (bt_state == BT_STATE_ON) {
-    stat_area.drawBitmap(px, py, bm_bt+1*32, 16, 16, SSD1306_WHITE, SSD1306_BLACK);
-  } else if (bt_state == BT_STATE_PAIRING) {
-    stat_area.drawBitmap(px, py, bm_bt+2*32, 16, 16, SSD1306_WHITE, SSD1306_BLACK);
-  } else if (bt_state == BT_STATE_CONNECTED) {
-    stat_area.drawBitmap(px, py, bm_bt+3*32, 16, 16, SSD1306_WHITE, SSD1306_BLACK);
-  } else {
-    stat_area.drawBitmap(px, py, bm_bt+0*32, 16, 16, SSD1306_WHITE, SSD1306_BLACK);
-  }
+  uint8_t bt_i = 0;
+  if      (bt_state == BT_STATE_ON)        { bt_i = 1; }
+  else if (bt_state == BT_STATE_PAIRING)   { bt_i = 2; }
+  else if (bt_state == BT_STATE_CONNECTED) { bt_i = 3; }
+  #if BOARD_MODEL == BOARD_HELTEC_T096
+    // Lamp-style: the box fills dark blue when bluetooth is enabled, the
+    // state icon stays light. The mono canvas holds a fully lit interior;
+    // the colourizer separates icon pixels from fill via bm_bt directly.
+    bt_enabled_lit = bt_i != 0;
+    #if USE_COLOR_DISPLAY == true
+      if (bt_i != bt_icon_i) {
+        bt_icon_i = bt_i;
+        region_cache_flush(); // glyph changes are colour-only on a lit box
+      }
+      if (bt_enabled_lit) { stat_area.fillRect(px, py, 16, 16, SSD1306_WHITE); }
+      else                { stat_area.drawBitmap(px, py, bm_bt+bt_i*32, 16, 16, SSD1306_WHITE, SSD1306_BLACK); }
+    #else
+      if (bt_enabled_lit) { stat_area.drawBitmap(px, py, bm_bt+bt_i*32, 16, 16, SSD1306_BLACK, SSD1306_WHITE); }
+      else                { stat_area.drawBitmap(px, py, bm_bt+bt_i*32, 16, 16, SSD1306_WHITE, SSD1306_BLACK); }
+    #endif
+  #else
+    stat_area.drawBitmap(px, py, bm_bt+bt_i*32, 16, 16, SSD1306_WHITE, SSD1306_BLACK);
+  #endif
 }
 
 void draw_lora_icon(int px, int py) {
@@ -801,6 +927,9 @@ void draw_mw_icon(int px, int py) {
 
 uint8_t charge_tick = 0;
 void draw_battery_bars(int px, int py) {
+  #if BOARD_MODEL == BOARD_HELTEC_T096
+    battery_low_lit = false;
+  #endif
   if (pmu_ready) {
     if (battery_ready) {
       if (battery_installed) {
@@ -832,6 +961,10 @@ void draw_battery_bars(int px, int py) {
             stat_area.drawBitmap(px-2, py-2, bm_plug, 17, 7, SSD1306_WHITE, SSD1306_BLACK);
           } else {
             // stat_area.fillRect(px, py, 14, 3, SSD1306_BLACK);
+            #if BOARD_MODEL == BOARD_HELTEC_T096
+              // 2 sticks or fewer render the icon red
+              battery_low_lit = battery_value <= 33;
+            #endif
             stat_area.fillRect(px-2, py-2, 18, 7, SSD1306_BLACK);
             stat_area.drawRect(px-2, py-2, 17, 7, SSD1306_WHITE);
             stat_area.drawLine(px+15, py, px+15, py+3, SSD1306_WHITE);
@@ -912,18 +1045,6 @@ void draw_signal_bars(int px, int py) {
   }
 }
 
-#if MODEM == SX1280
-  #define WF_TX_SIZE 5
-#else
-  #define WF_TX_SIZE 5
-#endif
-#define WF_RSSI_MAX -60
-#define WF_RSSI_MIN -135
-#define WF_RSSI_SPAN (WF_RSSI_MAX-WF_RSSI_MIN)
-#define WF_PIXEL_WIDTH 10
-#define WF_M_RX   0x00
-#define WF_M_TX   0x01
-#define WF_M_NTFR 0x02
 void draw_waterfall(int px, int py) {
   int rssi_val = current_rssi;
   if (rssi_val < WF_RSSI_MIN) rssi_val = WF_RSSI_MIN;
@@ -937,8 +1058,9 @@ void draw_waterfall(int px, int py) {
     }
     display_tx = false;
   } else {
-    if (interference_detected) { waterfall_meta[waterfall_head] = WF_M_NTFR; }
-    else                       { waterfall_meta[waterfall_head] = WF_M_RX; }
+    if      (interference_detected) { waterfall_meta[waterfall_head] = WF_M_NTFR; }
+    else if (dcd_led)               { waterfall_meta[waterfall_head] = WF_M_RX_PKT; }
+    else                            { waterfall_meta[waterfall_head] = WF_M_RX; }
     waterfall[waterfall_head++] = rssi_normalised;
     if (waterfall_head >= WATERFALL_SIZE) waterfall_head = 0;
   }
@@ -949,13 +1071,20 @@ void draw_waterfall(int px, int py) {
     int ws = waterfall[wi];
     int wm = waterfall_meta[wi];
     if (ws > 0) {
-      if      (wm == WF_M_RX)   { stat_area.drawLine(px, py+i, px+ws-1, py+i, SSD1306_WHITE); }
+      if      (wm == WF_M_RX || wm == WF_M_RX_PKT) { stat_area.drawLine(px, py+i, px+ws-1, py+i, SSD1306_WHITE); }
       else if (wm == WF_M_NTFR) {
         uint8_t o = 0;
         for (uint8_t ti = 0; ti < WF_PIXEL_WIDTH/2; ti++) { stat_area.drawPixel(px+ti*2+o, py+i, SSD1306_WHITE); }
       }
     } else if (ws == -1) {
-      uint8_t o = i%2;
+      #if BOARD_MODEL == BOARD_HELTEC_T096
+        // Anchor the checker phase to the entry, not the screen row, so
+        // the pattern scrolls with the content instead of inverting in
+        // place on every frame
+        uint8_t o = wi%2;
+      #else
+        uint8_t o = i%2;
+      #endif
       for (uint8_t ti = 0; ti < WF_PIXEL_WIDTH/2; ti++) {
         stat_area.drawPixel(px+ti*2+o, py+i, SSD1306_WHITE);
       }
@@ -963,24 +1092,95 @@ void draw_waterfall(int px, int py) {
   }
 }
 
+#if BOARD_MODEL == BOARD_HELTEC_T096
+// Battery voltage readout in the 19px gap between the battery bars and
+// the quality graph; "d.dd" in Org_01 is exactly 19px wide. Refreshed at
+// most every 5s so the jittering last decimal doesn't expand the display
+// update region on every frame.
+#define BAT_V_REFRESH_INTERVAL 5000
+void draw_battery_voltage(int px, int py) {
+  bool volt_low = pmu_ready && battery_ready && battery_installed && battery_voltage <= BAT_V_ALERT;
+  if (volt_low != battery_volt_low_lit) {
+    battery_volt_low_lit = volt_low;
+    // colour-only change; the glyph pixels may be identical
+    region_cache_flush();
+  }
+  static uint32_t last_drawn = 0;
+  if (last_drawn != 0 && millis()-last_drawn < BAT_V_REFRESH_INTERVAL) return;
+  if (pmu_ready && battery_ready && battery_installed) {
+    stat_area.fillRect(px, py-6, 19, 8, SSD1306_BLACK);
+    stat_area.setFont(SMALL_FONT); stat_area.setTextWrap(false);
+    stat_area.setTextColor(SSD1306_WHITE); stat_area.setTextSize(1);
+    stat_area.setCursor(px, py);
+    stat_area.printf("%.2f", battery_voltage);
+    last_drawn = millis();
+  }
+}
+#endif
+
 bool stat_area_intialised = false;
 void draw_stat_area() {
   if (device_init_done) {
-    if (!stat_area_intialised) {
-      stat_area.drawBitmap(0, 0, bm_frame, 64, 64, SSD1306_WHITE, SSD1306_BLACK);
-      stat_area_intialised = true;
-    }
+    #if BOARD_MODEL == BOARD_HELTEC_T096
+      if (!stat_area_intialised) {
+        stat_area.drawBitmap(0, 0, bm_frame_t096, STAT_AREA_W, STAT_AREA_H, SSD1306_WHITE, SSD1306_BLACK);
+        stat_area_intialised = true;
+      }
 
-    draw_cable_icon(3, 8);
-    draw_bt_icon(3, 30);
-    draw_lora_icon(45, 8);
-    draw_mw_icon(45, 30);
-    draw_battery_bars(4, 58);
-    draw_quality_bars(28, 56);
-    draw_signal_bars(44, 56);
-    if (radio_online) {
-      draw_waterfall(27, 4);
-    }
+      // Lamp states follow the same signals that drive the RX/TX LEDs:
+      // carrier detect here, and display_indicate_tx() called from the
+      // transmit paths; both held for LAMP_HOLD_MS so short events stay
+      // visible at the display frame rate.
+      if (radio_online && dcd_led) { lamp_rx_until = millis()+LAMP_HOLD_MS; }
+      if (display_tx) { lamp_tx_until = millis()+LAMP_HOLD_MS; }
+      lamp_rx_lit = millis() < lamp_rx_until;
+      lamp_tx_lit = millis() < lamp_tx_until;
+
+      // Indicator lamps: labels knocked out of the fill when lit
+      if (lamp_rx_lit) { stat_area.drawBitmap(3, 64, bm_lamp_rx, 16, 16, SSD1306_BLACK, SSD1306_WHITE); }
+      else             { stat_area.drawBitmap(3, 64, bm_lamp_rx, 16, 16, SSD1306_WHITE, SSD1306_BLACK); }
+      if (lamp_tx_lit) { stat_area.drawBitmap(61, 64, bm_lamp_tx, 16, 16, SSD1306_BLACK, SSD1306_WHITE); }
+      else             { stat_area.drawBitmap(61, 64, bm_lamp_tx, 16, 16, SSD1306_WHITE, SSD1306_BLACK); }
+
+      // Icon boxes and the status row keep their bm_frame appearance; the
+      // right-side elements sit +16 to make room for the wider waterfall,
+      // the status row sits +32 down at the bottom of the taller area
+      draw_cable_icon(3, 8);
+      draw_bt_icon(3, 36);
+      draw_lora_icon(61, 8);
+      draw_mw_icon(61, 36);
+      draw_battery_bars(4, 90);
+      // The low-battery tint is colour-only: flipping it doesn't change
+      // the mono canvas (the outline pixels stay identical), so force a
+      // repaint when it transitions
+      static bool battery_low_prev = false;
+      if (battery_low_lit != battery_low_prev) {
+        battery_low_prev = battery_low_lit;
+        region_cache_flush();
+      }
+      draw_battery_voltage(20, 93);
+      draw_quality_bars(44, 88);
+      draw_signal_bars(60, 88);
+      if (radio_online) {
+        draw_waterfall(WF_POS_X, WF_POS_Y);
+      }
+    #else
+      if (!stat_area_intialised) {
+        stat_area.drawBitmap(0, 0, bm_frame, 64, 64, SSD1306_WHITE, SSD1306_BLACK);
+        stat_area_intialised = true;
+      }
+
+      draw_cable_icon(3, 8);
+      draw_bt_icon(3, 30);
+      draw_lora_icon(45, 8);
+      draw_mw_icon(45, 30);
+      draw_battery_bars(4, 58);
+      draw_quality_bars(28, 56);
+      draw_signal_bars(44, 56);
+      if (radio_online) {
+        draw_waterfall(27, 4);
+      }
+    #endif
   }
 }
 
@@ -991,21 +1191,58 @@ void update_stat_area() {
     if (disp_mode == DISP_MODE_PORTRAIT) {
       drawBitmap(p_as_x, p_as_y, stat_area.getBuffer(), stat_area.width(), stat_area.height(), SSD1306_WHITE, SSD1306_BLACK);
     } else if (disp_mode == DISP_MODE_LANDSCAPE) {
-      drawBitmap(p_as_x+2, p_as_y, stat_area.getBuffer(), stat_area.width(), stat_area.height(), SSD1306_WHITE, SSD1306_BLACK);
-      if (device_init_done && !disp_ext_fb) drawLine(p_as_x, 0, p_as_x, 64, SSD1306_WHITE);
+      #if BOARD_MODEL == BOARD_HELTEC_T096
+        // Interim: push only the 80 rows that fit until the landscape
+        // layout is redesigned
+        drawBitmap(p_as_x, p_as_y, stat_area.getBuffer(), stat_area.width(), 80, SSD1306_WHITE, SSD1306_BLACK);
+      #else
+        drawBitmap(p_as_x+2, p_as_y, stat_area.getBuffer(), stat_area.width(), stat_area.height(), SSD1306_WHITE, SSD1306_BLACK);
+        if (device_init_done && !disp_ext_fb) drawLine(p_as_x, 0, p_as_x, 64, SSD1306_WHITE);
+      #endif
     }
 
   } else {
+    // bm_updating and bm_console are fixed 64x64 images; center them in
+    // the status area when it is larger than 64x64
+    int bm_x = p_as_x + (stat_area.width()-64)/2;
+    int bm_y = p_as_y; if (disp_mode == DISP_MODE_PORTRAIT) bm_y += (stat_area.height()-64)/2;
     if (firmware_update_mode) {
-      drawBitmap(p_as_x, p_as_y, bm_updating, stat_area.width(), stat_area.height(), SSD1306_BLACK, SSD1306_WHITE);
+      drawBitmap(bm_x, bm_y, bm_updating, 64, 64, SSD1306_BLACK, SSD1306_WHITE);
     } else if (console_active && device_init_done) {
-      drawBitmap(p_as_x, p_as_y, bm_console, stat_area.width(), stat_area.height(), SSD1306_BLACK, SSD1306_WHITE);
+      drawBitmap(bm_x, bm_y, bm_console, 64, 64, SSD1306_BLACK, SSD1306_WHITE);
       if (disp_mode == DISP_MODE_LANDSCAPE) {
         drawLine(p_as_x, 0, p_as_x, 64, SSD1306_WHITE);
       }
     }
   }
 }
+
+// Draws 64px-wide art into the device area, centered. When the device area
+// is wider than the art, rows whose edge pixels are lit get stretched into
+// the side margins, so full-bleed boxes span the whole area width.
+void draw_disp_art(int16_t y, const uint8_t* bitmap, int16_t h) {
+  disp_area.drawBitmap(DISP_BM_X, y, bitmap, DISP_BM_W, h, SSD1306_WHITE, SSD1306_BLACK);
+  #if DISP_BM_X > 0
+    for (int16_t r = 0; r < h; r++) {
+      uint16_t lc = (bitmap[r*(DISP_BM_W/8)] & 0x80) ? SSD1306_WHITE : SSD1306_BLACK;
+      uint16_t rc = (bitmap[r*(DISP_BM_W/8)+(DISP_BM_W/8)-1] & 0x01) ? SSD1306_WHITE : SSD1306_BLACK;
+      disp_area.drawFastHLine(0, y+r, DISP_BM_X, lc);
+      disp_area.drawFastHLine(DISP_BM_X+DISP_BM_W, y+r, disp_area.width()-(DISP_BM_X+DISP_BM_W), rc);
+    }
+  #endif
+}
+
+#if BOARD_MODEL == BOARD_HELTEC_T096
+// Lights the TX lamp and pushes the status area immediately, so the
+// indication appears BEFORE the blocking transmission - the same way
+// led_tx_on() lights the physical LED beforehand. Also sets display_tx,
+// so the waterfall TX marker lands in the same push.
+void display_indicate_tx() {
+  lamp_tx_until = millis()+LAMP_HOLD_MS;
+  display_tx = true;
+  if (disp_ready && !display_blanked && !display_updating) { update_stat_area(); }
+}
+#endif
 
 #define START_PAGE 0
 const uint8_t pages = 3;
@@ -1014,14 +1251,17 @@ uint8_t disp_page = START_PAGE;
   extern IPAddress wr_device_ip;
 #endif
 void draw_disp_area() {
+  #if BOARD_MODEL == BOARD_HELTEC_T096
+    disp_banner_fg = 0;
+  #endif
   if (!device_init_done || firmware_update_mode) {
     uint8_t p_by = 37;
     if (disp_mode == DISP_MODE_LANDSCAPE || firmware_update_mode) {
       p_by = 18;
       disp_area.fillRect(0, 0, disp_area.width(), disp_area.height(), SSD1306_BLACK);
     }
-    if (!device_init_done) disp_area.drawBitmap(0, p_by, bm_boot, disp_area.width(), 27, SSD1306_WHITE, SSD1306_BLACK);
-    if (firmware_update_mode) disp_area.drawBitmap(0, p_by, bm_fw_update, disp_area.width(), 27, SSD1306_WHITE, SSD1306_BLACK);
+    if (!device_init_done) draw_disp_art(p_by, bm_boot, 27);
+    if (firmware_update_mode) draw_disp_art(p_by, bm_fw_update, 27);
   } else {
     if (!disp_ext_fb or bt_ssp_pin != 0) {
       if (radio_online && display_diagnostics) {
@@ -1049,7 +1289,7 @@ void draw_disp_area() {
         }
         disp_area.drawBitmap(2, 26-1, bm_hg_low, 5, 9, SSD1306_WHITE, SSD1306_BLACK);
 
-        disp_area.setCursor(32+11, 33-1);
+        disp_area.setCursor(DIAG_COL2+11, 33-1);
         if (longterm_channel_util < 0.099) {
           //disp_area.printf("%.1f%%", longterm_channel_util*100.0);
           disp_area.printf("%.1f%%", longterm_airtime*100.0);
@@ -1057,13 +1297,13 @@ void draw_disp_area() {
           //disp_area.printf("%.0f%%", longterm_channel_util*100.0);
           disp_area.printf("%.0f%%", longterm_airtime*100.0);
         }
-        disp_area.drawBitmap(32+2, 26-1, bm_hg_high, 5, 9, SSD1306_WHITE, SSD1306_BLACK);
+        disp_area.drawBitmap(DIAG_COL2+2, 26-1, bm_hg_high, 5, 9, SSD1306_WHITE, SSD1306_BLACK);
 
 
         disp_area.setTextColor(SSD1306_BLACK);
         disp_area.setCursor(2, 46);
         disp_area.print("Channel");
-        disp_area.setCursor(38, 46);
+        disp_area.setCursor(DIAG_COL2+6, 46);
         disp_area.print("Load:");
         
         disp_area.setCursor(11, 57);
@@ -1076,7 +1316,7 @@ void draw_disp_area() {
         }
         disp_area.drawBitmap(2, 50, bm_hg_low, 5, 9, SSD1306_BLACK, SSD1306_WHITE);
 
-        disp_area.setCursor(32+11, 57);
+        disp_area.setCursor(DIAG_COL2+11, 57);
         if (longterm_channel_util < 0.099) {
           //disp_area.printf("%.1f%%", longterm_airtime*100.0);
           disp_area.printf("%.1f%%", longterm_channel_util*100.0);
@@ -1084,11 +1324,18 @@ void draw_disp_area() {
           //disp_area.printf("%.0f%%", longterm_airtime*100.0);
           disp_area.printf("%.0f%%", longterm_channel_util*100.0);
         }
-        disp_area.drawBitmap(32+2, 50, bm_hg_high, 5, 9, SSD1306_BLACK, SSD1306_WHITE);
+        disp_area.drawBitmap(DIAG_COL2+2, 50, bm_hg_high, 5, 9, SSD1306_BLACK, SSD1306_WHITE);
 
       } else {
-        if (device_signatures_ok()) { disp_area.drawBitmap(0, 0, bm_def_lc, disp_area.width(), 23, SSD1306_WHITE, SSD1306_BLACK); }
-        else {                        disp_area.drawBitmap(0, 0, bm_def,    disp_area.width(), 23, SSD1306_WHITE, SSD1306_BLACK); }
+        #if BOARD_MODEL == BOARD_HELTEC_T096
+          // Full-width header: left-aligned art with the unsigned.io strip
+          // and zigzag extended to the whole 80px width
+          if (device_signatures_ok()) { disp_area.drawBitmap(0, 0, bm_def_lc_t096, disp_area.width(), 23, SSD1306_WHITE, SSD1306_BLACK); }
+          else {                        disp_area.drawBitmap(0, 0, bm_def_t096,    disp_area.width(), 23, SSD1306_WHITE, SSD1306_BLACK); }
+        #else
+          if (device_signatures_ok()) { draw_disp_art(0, bm_def_lc, 23); }
+          else {                        draw_disp_art(0, bm_def, 23); }
+        #endif
 
         bool display_ip = false;
         #if HAS_WIFI
@@ -1114,29 +1361,38 @@ void draw_disp_area() {
           if ((bt_dh[14] >> 4)         == 0x01) { ofsc += 8; }
           if ((bt_dh[15] & 0b00001111) == 0x01) { ofsc += 8; }
           if ((bt_dh[15] >> 4)         == 0x01) { ofsc += 8; }
-          disp_area.setCursor(17+ofsc, 32); disp_area.printf("%02X%02X", bt_dh[14], bt_dh[15]);
+          #if BOARD_MODEL == BOARD_HELTEC_T096
+            // Right-aligned to the screen edge with 3px padding, mirroring
+            // the left-aligned RNode logo above
+            disp_area.setCursor(31+ofsc, 32); disp_area.printf("%02X%02X", bt_dh[14], bt_dh[15]);
+          #else
+            disp_area.setCursor(DISP_BM_X+17+ofsc, 32); disp_area.printf("%02X%02X", bt_dh[14], bt_dh[15]);
+          #endif
         }
       }
 
       if (!hw_ready || radio_error || !device_firmware_ok()) {
         if (!device_firmware_ok()) {
-          disp_area.drawBitmap(0, 37, bm_fw_corrupt, disp_area.width(), 27, SSD1306_WHITE, SSD1306_BLACK);
+          draw_disp_art(37, bm_fw_corrupt, 27);
+          #if BOARD_MODEL == BOARD_HELTEC_T096 && USE_COLOR_DISPLAY == true
+            disp_banner_fg = COLOR_BANNER_ALERT;
+          #endif
         } else {
           if (!modem_installed) {
-            disp_area.drawBitmap(0, 37, bm_no_radio, disp_area.width(), 27, SSD1306_WHITE, SSD1306_BLACK);
+            draw_disp_art(37, bm_no_radio, 27);
           } else {
-            disp_area.drawBitmap(0, 37, bm_conf_missing, disp_area.width(), 27, SSD1306_WHITE, SSD1306_BLACK);
+            draw_disp_art(37, bm_conf_missing, 27);
           }
         }
       } else if (bt_state == BT_STATE_PAIRING and bt_ssp_pin != 0) {
         char *pin_str = (char*)malloc(DISP_PIN_SIZE+1);
         sprintf(pin_str, "%06d", bt_ssp_pin);
 
-        disp_area.drawBitmap(0, 37, bm_pairing, disp_area.width(), 27, SSD1306_WHITE, SSD1306_BLACK);
+        draw_disp_art(37, bm_pairing, 27);
         for (int i = 0; i < DISP_PIN_SIZE; i++) {
           uint8_t numeric = pin_str[i]-48;
           uint8_t offset = numeric*5;
-          disp_area.drawBitmap(7+9*i, 37+16, bm_n_uh+offset, 8, 5, SSD1306_WHITE, SSD1306_BLACK);
+          disp_area.drawBitmap(DISP_BM_X+7+9*i, 37+16, bm_n_uh+offset, 8, 5, SSD1306_WHITE, SSD1306_BLACK);
         }
         free(pin_str);
       } else {
@@ -1148,46 +1404,63 @@ void draw_disp_area() {
 
         if (radio_online) {
           if (!display_diagnostics) {
-            disp_area.drawBitmap(0, 37, bm_online, disp_area.width(), 27, SSD1306_WHITE, SSD1306_BLACK);
+            draw_disp_art(37, bm_online, 27);
           }
         } else {
           if (disp_page == 0) {
             if (true || device_signatures_ok()) {
-              disp_area.drawBitmap(0, 37, bm_checks, disp_area.width(), 27, SSD1306_WHITE, SSD1306_BLACK);
+              draw_disp_art(37, bm_checks, 27);
+              #if BOARD_MODEL == BOARD_HELTEC_T096 && USE_COLOR_DISPLAY == true
+                disp_banner_fg = COLOR_BANNER_OK;
+              #endif
             } else {
-              disp_area.drawBitmap(0, 37, bm_nfr, disp_area.width(), 27, SSD1306_WHITE, SSD1306_BLACK);
+              draw_disp_art(37, bm_nfr, 27);
             }
           } else if (disp_page == 1) {
             if (!console_active) {
-              disp_area.drawBitmap(0, 37, bm_hwok, disp_area.width(), 27, SSD1306_WHITE, SSD1306_BLACK);
+              draw_disp_art(37, bm_hwok, 27);
+              #if BOARD_MODEL == BOARD_HELTEC_T096 && USE_COLOR_DISPLAY == true
+                disp_banner_fg = COLOR_BANNER_OK;
+              #endif
             } else {
-              disp_area.drawBitmap(0, 37, bm_console_active, disp_area.width(), 27, SSD1306_WHITE, SSD1306_BLACK);
+              draw_disp_art(37, bm_console_active, 27);
             }
           } else if (disp_page == 2) {
-            disp_area.drawBitmap(0, 37, bm_version, disp_area.width(), 27, SSD1306_WHITE, SSD1306_BLACK);
+            draw_disp_art(37, bm_version, 27);
             char *v_str = (char*)malloc(3+1);
             sprintf(v_str, "%01d%02d", MAJ_VERS, MIN_VERS);
             for (int i = 0; i < 3; i++) {
               uint8_t numeric = v_str[i]-48; uint8_t bm_offset = numeric*5;
-              uint8_t dxp = 20;
+              uint8_t dxp = DISP_BM_X+20;
               if (i == 1) dxp += 9*1+4;
               if (i == 2) dxp += 9*2+4;
               disp_area.drawBitmap(dxp, 37+16, bm_n_uh+bm_offset, 8, 5, SSD1306_WHITE, SSD1306_BLACK);
             }
             free(v_str);
-            disp_area.drawLine(27, 37+19, 28, 37+19, SSD1306_BLACK);
-            disp_area.drawLine(27, 37+20, 28, 37+20, SSD1306_BLACK);
+            disp_area.drawLine(DISP_BM_X+27, 37+19, DISP_BM_X+28, 37+19, SSD1306_BLACK);
+            disp_area.drawLine(DISP_BM_X+27, 37+20, DISP_BM_X+28, 37+20, SSD1306_BLACK);
           }
         }
       }
     } else {
-      disp_area.drawBitmap(0, 0, fb, disp_area.width(), disp_area.height(), SSD1306_WHITE, SSD1306_BLACK);
+      #if DISP_BM_X > 0
+        disp_area.fillRect(0, 0, disp_area.width(), disp_area.height(), SSD1306_BLACK);
+      #endif
+      disp_area.drawBitmap(DISP_BM_X, 0, fb, DISP_BM_W, 64, SSD1306_WHITE, SSD1306_BLACK);
     }
   }
 }
 
 void update_disp_area() {
   draw_disp_area();
+
+  #if BOARD_MODEL == BOARD_HELTEC_T096
+    static uint16_t banner_fg_prev = 0;
+    if (disp_banner_fg != banner_fg_prev) {
+      banner_fg_prev = disp_banner_fg;
+      region_cache_flush();
+    }
+  #endif
 
   drawBitmap(p_ad_x, p_ad_y, disp_area.getBuffer(), disp_area.width(), disp_area.height(), SSD1306_WHITE, SSD1306_BLACK);
   if (disp_mode == DISP_MODE_LANDSCAPE) {

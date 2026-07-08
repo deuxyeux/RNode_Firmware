@@ -1263,6 +1263,9 @@
 
       // TFT
       #define DISPLAY_SCALE 1
+      // Colourize the waterfall (RX green, TX blue); set to false for an
+      // all-monochrome display
+      #define USE_COLOR_DISPLAY true
       #define PIN_T096_TFT_MOSI 17
       #define PIN_T096_TFT_SCK 20
       #define PIN_T096_TFT_SS 22
