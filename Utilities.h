@@ -70,7 +70,7 @@ uint8_t eeprom_read(uint32_t mapped_addr);
   #include "Ethernet.h"
 #endif
 
-#if HAS_PMU == true
+#if HAS_PMU == true || IS_ESP32S3
   #include "Power.h"
 #endif
 
@@ -199,6 +199,13 @@ uint8_t boot_vector = 0x00;
   void boot_seq() { }
 #endif
 
+// TX/RX LEDs should work when display is blanked on externally powered nodes
+#if BOARD_MODEL == BOARD_MESHPOE_S3 || BOARD_MODEL == BOARD_MESHADVENTURER_S3
+  #define LED_DISPLAY_BLANKED false
+#else
+  #define LED_DISPLAY_BLANKED display_blanked
+#endif
+
 #if MCU_VARIANT == MCU_1284P || MCU_VARIANT == MCU_2560
 	void led_rx_on()  { digitalWrite(pin_led_rx, HIGH); }
 	void led_rx_off() {	digitalWrite(pin_led_rx, LOW); }
@@ -208,9 +215,9 @@ uint8_t boot_vector = 0x00;
 	void led_id_off() { }
 #elif MCU_VARIANT == MCU_ESP32
 	#if HAS_NP == true
-		void led_rx_on()  { npset(0, 0, 0xFF); }
+		void led_rx_on()  { npset(0, 0xFF, 0); }
 		void led_rx_off() {	npset(0, 0, 0); }
-		void led_tx_on()  { npset(0xFF, 0x50, 0x00); }
+		void led_tx_on()  { npset(0, 0, 0xFF); }
 		void led_tx_off() { npset(0, 0, 0); }
 		void led_id_on()  { npset(0x90, 0, 0x70); }
 		void led_id_off() { npset(0, 0, 0); }
@@ -873,7 +880,10 @@ void serial_write(uint8_t byte) {
 		if (bt_state != BT_STATE_CONNECTED) {
 			#if HAS_ETHERNET
 				if (eth_is_connected && wifi_host_is_connected()) { connection.write(byte); }
-				else                                              { Serial.write(byte); }
+				#if HAS_WIFI
+				else if (wifi_host_is_connected()) { wifi_remote_write(byte); }
+				#endif
+				else                               { Serial.write(byte); }
 			#elif HAS_WIFI
 				if (wifi_host_is_connected()) { wifi_remote_write(byte); }
 				else                          { Serial.write(byte); }
@@ -1097,7 +1107,7 @@ void kiss_indicate_battery() {
 }
 
 void kiss_indicate_temperature() {
-	#if HAS_PMU
+	#if HAS_PMU || IS_ESP32S3
 		#if MCU_VARIANT == MCU_ESP32
 			float pmu_temp = pmu_temperature+PMU_TEMP_OFFSET;
 			uint8_t temp = (uint8_t)pmu_temp;

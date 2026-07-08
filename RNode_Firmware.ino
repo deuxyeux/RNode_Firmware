@@ -262,7 +262,7 @@ void setup() {
   #endif
 
   #if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
-    #if HAS_PMU == true
+    #if HAS_PMU == true || IS_ESP32S3
       pmu_ready = init_pmu();
     #endif
 
@@ -544,7 +544,7 @@ bool startRadio() {
         // Flash an info pattern to indicate
         // that the radio is now on
         kiss_indicate_radiostate();
-        if (!display_blanked) {
+        if (!LED_DISPLAY_BLANKED) {
           led_indicate_info(3);
         }
         return true;
@@ -586,7 +586,7 @@ volatile bool queue_flushing = false;
 void flush_queue(void) {
   if (!queue_flushing) {
     queue_flushing = true;
-    if (!display_blanked) { led_tx_on(); }
+    if (!LED_DISPLAY_BLANKED) { led_tx_on(); }
 
     #if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
     while (!fifo16_isempty(&packet_starts)) {
@@ -607,7 +607,7 @@ void flush_queue(void) {
       }
     }
 
-    lora_receive(); if (!display_blanked) { led_tx_off(); }
+    lora_receive(); if (!LED_DISPLAY_BLANKED) { led_tx_off(); }
   }
 
   queue_height = 0;
@@ -627,7 +627,7 @@ void flush_queue(void) {
 void pop_queue() {
   if (!queue_flushing) {
     queue_flushing = true;
-    if (!display_blanked) { led_tx_on(); }
+    if (!LED_DISPLAY_BLANKED) { led_tx_on(); }
 
     #if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
     if (!fifo16_isempty(&packet_starts)) {
@@ -650,7 +650,7 @@ void pop_queue() {
     }
 
     lora_receive();
-    if (!display_blanked) { led_tx_off(); }
+    if (!LED_DISPLAY_BLANKED) { led_tx_off(); }
   }
 
   #if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
@@ -764,7 +764,7 @@ void transmit(uint16_t size) {
       add_airtime(written);
 
     } else {
-      if (!display_blanked) { led_tx_on(); } uint16_t written = 0;
+      if (!LED_DISPLAY_BLANKED) { led_tx_on(); } uint16_t written = 0;
       if (size > SINGLE_MTU) { size = SINGLE_MTU; }
       if (!implicit) { LoRa->beginPacket(); }
       else           { LoRa->beginPacket(size); }
@@ -997,7 +997,7 @@ void serial_callback(uint8_t sbyte) {
     } else if (command == CMD_RADIO_LOCK) {
       update_radio_lock();
       kiss_indicate_radio_lock();
-    } else if (command == CMD_BLINK && !display_blanked) {
+    } else if (command == CMD_BLINK && !LED_DISPLAY_BLANKED) {
       led_indicate_info(sbyte);
     } else if (command == CMD_RANDOM) {
       kiss_indicate_random(getRandom());
@@ -1444,14 +1444,14 @@ void update_modem_status() {
   if (carrier_detected) { dcd = true; } else { dcd = false; }
 
   dcd_led = dcd;
-  if (!display_blanked && dcd_led) { led_rx_on(); }
+  if (!LED_DISPLAY_BLANKED && dcd_led) { led_rx_on(); }
   else {
     if (interference_detected) {
-      if (led_id_filter >= LED_ID_TRIG && noise_floor_sampled && !display_blanked) { led_id_on(); }
+      if (led_id_filter >= LED_ID_TRIG && noise_floor_sampled && !LED_DISPLAY_BLANKED) { led_id_on(); }
     } else {
-      if (airtime_lock && !display_blanked) { led_indicate_airtime_lock(); }
+      if (airtime_lock && !LED_DISPLAY_BLANKED) { led_indicate_airtime_lock(); }
       else { 
-        if (!display_blanked) { led_rx_off(); led_id_off(); }
+        if (!LED_DISPLAY_BLANKED) { led_rx_off(); led_id_off(); }
       }
     }
   }
@@ -1564,6 +1564,9 @@ void validate_status() {
                 update_display();
               }
             #endif
+            LoRa->reset();
+            delay(5000);
+            hard_reset();
           }
           
           if (hw_ready && eeprom_have_conf()) {
@@ -1722,7 +1725,7 @@ void loop() {
           console_loop();
         #endif
       } else {
-        if (!display_blanked) {
+        if (!LED_DISPLAY_BLANKED) {
           led_indicate_standby();
         }
       }
@@ -1744,7 +1747,7 @@ void loop() {
     if (disp_ready && !display_updating) update_display();
   #endif
 
-  #if HAS_PMU
+  #if HAS_PMU || IS_ESP32S3
     if (pmu_ready) update_pmu();
   #endif
 
@@ -1813,6 +1816,9 @@ void sleep_now() {
         digitalWrite(PIN_VEXT_EN, LOW);
         digitalWrite(PIN_T114_TFT_BLGT, HIGH);
         digitalWrite(PIN_T114_TFT_EN, HIGH);
+      #elif BOARD_MODEL == BOARD_HELTEC_T096
+        digitalWrite(PIN_T096_TFT_BLGT, HIGH);
+        digitalWrite(PIN_T096_TFT_EN, LOW);
       #elif BOARD_MODEL == BOARD_TECHO
         for (uint8_t i = display_intensity; i > 0; i--) { analogWrite(pin_backlight, i-1); delay(1); }
         epd_black(true); delay(300); epd_black(true); delay(300); epd_black(false);
@@ -1902,7 +1908,7 @@ void buffer_serial() {
     while (
       c < MAX_CYCLES &&
       #if HAS_ETHERNET == true
-      ( (bt_state != BT_STATE_CONNECTED && Serial.available()) || (bt_state == BT_STATE_CONNECTED && SerialBT.available()) || (eth_is_connected && wifi_remote_available()) )
+      ( (bt_state != BT_STATE_CONNECTED && Serial.available()) || (bt_state == BT_STATE_CONNECTED && SerialBT.available()) || ((eth_is_connected || wr_state >= WR_STATE_ON) && wifi_remote_available()) )
       #elif HAS_WIFI
       ( (bt_state != BT_STATE_CONNECTED && Serial.available()) || (bt_state == BT_STATE_CONNECTED && SerialBT.available()) || (wr_state >= WR_STATE_ON && wifi_remote_available()) )
       #else

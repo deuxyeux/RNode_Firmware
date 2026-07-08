@@ -76,13 +76,13 @@
 #elif BOARD_MODEL == BOARD_MESHPOE_S3
   #define DISP_RST -1
   #define DISP_ADDR 0x3C
-  #define SCL_OLED 17
-  #define SDA_OLED 48
+  #define SCL_OLED 48
+  #define SDA_OLED 47
 #elif BOARD_MODEL == BOARD_MESHADVENTURER_S3
   #define DISP_RST -1
   #define DISP_ADDR 0x3C
-  #define SCL_OLED 0
-  #define SDA_OLED 42
+  #define SCL_OLED 42
+  #define SDA_OLED 41
 #elif BOARD_MODEL == BOARD_MESHADVENTURER
   #define DISP_RST -1
   #define DISP_ADDR 0x3C
@@ -631,19 +631,86 @@ void fillRect(int16_t x, int16_t y, int16_t width, int16_t height, uint16_t colo
   #endif
 }
 
+#if BOARD_MODEL == BOARD_HELTEC_T096
+  // The T114 avoids flicker by keeping a back buffer in its ST7789 driver
+  // and only pushing changed pixels to the panel (see ST7789.h). The
+  // Adafruit ST7735 driver used here has no framebuffer, so keep a copy of
+  // the last bitmap pushed to each screen region and only write the
+  // bounding box of changed pixels.
+  #define REGION_CACHE_SLOTS 3
+  #define REGION_CACHE_BYTES 512 // enough for a 64x64 mono bitmap
+  struct RegionCache {
+    int16_t x = -1; int16_t y = -1; int16_t w = 0; int16_t h = 0;
+    uint16_t fg = 0; uint16_t bg = 0;
+    uint8_t back[REGION_CACHE_BYTES];
+  };
+  RegionCache region_cache[REGION_CACHE_SLOTS];
+  uint8_t region_cache_next = 0;
+#endif
+
 // Draws a bitmap to the display and auto scales it based on the boards configured DISPLAY_SCALE
 void drawBitmap(int16_t startX, int16_t startY, const uint8_t* bitmap, int16_t bitmapWidth, int16_t bitmapHeight, uint16_t foregroundColour, uint16_t backgroundColour) {
   #if BOARD_MODEL == BOARD_HELTEC_T096
     {
       static uint16_t rowbuf[64];
       int16_t byteWidth = (bitmapWidth + 7) / 8;
-      display.startWrite();
-      display.setAddrWindow(startX, startY, bitmapWidth, bitmapHeight);
-      for (int16_t row = 0; row < bitmapHeight; row++) {
-        for (int16_t col = 0; col < bitmapWidth; col++) {
-          rowbuf[col] = (bitmap[row * byteWidth + col / 8] & (0x80 >> (col % 8))) ? foregroundColour : backgroundColour;
+      int32_t bitmapBytes = (int32_t)byteWidth * bitmapHeight;
+      bool cacheable = bitmapBytes <= REGION_CACHE_BYTES && bitmapWidth <= 64;
+
+      RegionCache *reg = NULL;
+      if (cacheable) {
+        for (uint8_t i = 0; i < REGION_CACHE_SLOTS; i++) {
+          RegionCache *c = &region_cache[i];
+          if (c->x == startX && c->y == startY && c->w == bitmapWidth && c->h == bitmapHeight &&
+              c->fg == foregroundColour && c->bg == backgroundColour) {
+            reg = c; break;
+          }
         }
-        display.writePixels(rowbuf, bitmapWidth);
+      }
+
+      int16_t minX = 0, minY = 0, maxX = bitmapWidth-1, maxY = bitmapHeight-1;
+      if (reg == NULL) {
+        if (cacheable) {
+          // Cached regions overlapping this one on the panel no longer
+          // reflect what is displayed there
+          for (uint8_t i = 0; i < REGION_CACHE_SLOTS; i++) {
+            RegionCache *c = &region_cache[i];
+            if (c->x >= 0 && startX < c->x + c->w && c->x < startX + bitmapWidth &&
+                startY < c->y + c->h && c->y < startY + bitmapHeight) {
+              c->x = -1;
+            }
+          }
+          reg = &region_cache[region_cache_next];
+          region_cache_next = (region_cache_next+1) % REGION_CACHE_SLOTS;
+          reg->x = startX; reg->y = startY; reg->w = bitmapWidth; reg->h = bitmapHeight;
+          reg->fg = foregroundColour; reg->bg = backgroundColour;
+          memcpy(reg->back, bitmap, bitmapBytes);
+        }
+      } else {
+        minX = bitmapWidth; minY = bitmapHeight; maxX = -1; maxY = -1;
+        for (int16_t row = 0; row < bitmapHeight; row++) {
+          for (int16_t bc = 0; bc < byteWidth; bc++) {
+            int32_t idx = (int32_t)row * byteWidth + bc;
+            if (bitmap[idx] != reg->back[idx]) {
+              if (row < minY) minY = row;
+              if (row > maxY) maxY = row;
+              if (bc*8 < minX) minX = bc*8;
+              if (bc*8+7 > maxX) maxX = bc*8+7;
+              reg->back[idx] = bitmap[idx];
+            }
+          }
+        }
+        if (maxY < 0) return;
+        if (maxX > bitmapWidth-1) maxX = bitmapWidth-1;
+      }
+
+      display.startWrite();
+      display.setAddrWindow(startX+minX, startY+minY, maxX-minX+1, maxY-minY+1);
+      for (int16_t row = minY; row <= maxY; row++) {
+        for (int16_t col = minX; col <= maxX; col++) {
+          rowbuf[col-minX] = (bitmap[row * byteWidth + col / 8] & (0x80 >> (col % 8))) ? foregroundColour : backgroundColour;
+        }
+        display.writePixels(rowbuf, maxX-minX+1);
       }
       display.endWrite();
     }

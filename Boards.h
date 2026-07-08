@@ -269,7 +269,7 @@
     #elif BOARD_MODEL == BOARD_MESHPOE_S3
       #define IS_ESP32S3 true
       #define HAS_DISPLAY true
-      #define HAS_NP false
+      #define HAS_NP true
       #define HAS_BLUETOOTH false
       #define HAS_BLE true
       #define HAS_WIFI true
@@ -286,15 +286,15 @@
       #define LORA_LNA_GAIN  30
       #define LORA_LNA_GVT   14
 
-      const int pin_cs = 16;
-      const int pin_sclk = 18;
-      const int pin_mosi = 15;
-      const int pin_miso = 3;
-      const int pin_reset = 2;
-      const int pin_busy = 1;
-      const int pin_dio = 47;
+      const int pin_cs = 17;
+      const int pin_sclk = 16;
+      const int pin_miso = 15;
+      const int pin_mosi = 18;
+      const int pin_reset = 3;
+      const int pin_busy = 2;
+      const int pin_dio = 1;
       const int pin_txen = 40;
-      const int pin_rxen = 41;
+      const int pin_rxen = 39;
       const int pin_tcxo_enable = -1;
 
       const int pin_eth_rst = 9;
@@ -305,7 +305,7 @@
       const int pin_eth_cs = 14;
 
       const int pin_btn_usr1 = 42;
-      const int pin_np = -1;
+      const int pin_np = 21;
 
       #if HAS_NP == false
         const int pin_led_rx = -1;
@@ -325,24 +325,24 @@
       #define HAS_INPUT true
       #define HAS_TCXO true
       #define MODEM SX1262
-      #define DIO2_AS_RF_SWITCH false
-      #define HAS_RF_SWITCH_RX_TX true
+      #define DIO2_AS_RF_SWITCH true
+      #define HAS_RF_SWITCH_RX_TX false
       #define HAS_LORA_LNA true
       #define LORA_LNA_GAIN  30
       #define LORA_LNA_GVT   14
 
-      const int pin_cs = 39;
-      const int pin_sclk = 38;
+      const int pin_sclk = 1;
+      const int pin_reset = 2;
       const int pin_miso = 40;
+      const int pin_cs = 39;
       const int pin_mosi = 18;
       const int pin_busy = 7;
-      const int pin_reset = 43;
       const int pin_dio = 15;
-      const int pin_txen = 9;
+      const int pin_txen = 21;
       const int pin_rxen = 8;
       const int pin_tcxo_enable = -1;
 
-      const int pin_btn_usr1 = 36
+      const int pin_btn_usr1 = 4;
       const int pin_np = 48;
 
       #if HAS_NP == false
@@ -1217,7 +1217,7 @@
       #define HAS_TCXO true
       #define HAS_BUSY true
       #define HAS_INPUT true
-      #define HAS_SLEEP false
+      #define HAS_SLEEP true
       #define DIO2_AS_RF_SWITCH true
       #define CONFIG_UART_BUFFER_SIZE 6144
       #define CONFIG_QUEUE_SIZE 6144

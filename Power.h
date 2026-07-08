@@ -434,6 +434,12 @@ void measure_battery() {
       if (pmu_temp_sensor_ready) { kiss_indicate_temperature(); }
     }
   }
+  #if IS_ESP32S3
+  else if (pmu_temp_sensor_ready) {
+    pmu_rc++;
+    if (pmu_rc%PMU_R_INTERVAL == 0) { kiss_indicate_temperature(); }
+  }
+  #endif
 }
 
 void update_pmu() {
@@ -447,6 +453,9 @@ void update_pmu() {
 bool init_pmu() {
   #if IS_ESP32S3
     pmu_temp_sensor_ready = true;
+    #if !HAS_PMU
+      return true;
+    #endif
   #endif
 
   #if BOARD_MODEL == BOARD_RNODE_NG_21 || BOARD_MODEL == BOARD_LORA32_V2_1 || BOARD_MODEL == BOARD_TDECK || BOARD_MODEL == BOARD_T3S3 || BOARD_MODEL == BOARD_TECHO || BOARD_MODEL == BOARD_PROMICRO
