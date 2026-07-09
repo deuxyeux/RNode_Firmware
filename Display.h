@@ -370,14 +370,34 @@ uint8_t display_contrast = 0x00;
 #elif BOARD_MODEL == BOARD_HELTEC_T114
   void set_contrast(ST7789Spi *display, uint8_t value) { }
 #elif BOARD_MODEL == BOARD_HELTEC_T096
+  // Perceived brightness follows duty^(1/gamma), not duty linearly, so a
+  // linear duty cycle looks nearly full-bright until well below half scale
+  // and then drops off fast. This table gamma-corrects (gamma 2.8) the
+  // intensity value into duty space so it dims perceptually linearly across
+  // the full range. Raw PWM values below 7 don't light the backlight at all,
+  // so nonzero entries are also scaled onto the usable range (7-255).
+  static const uint8_t t096_backlight_gamma[256] = {
+    0, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+    7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 8, 8, 8, 8,
+    8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 9, 9, 9, 9, 9, 9,
+    9, 9, 10, 10, 10, 10, 10, 10, 11, 11, 11, 11, 11, 12, 12, 12,
+    12, 12, 13, 13, 13, 13, 14, 14, 14, 14, 15, 15, 15, 16, 16, 16,
+    17, 17, 17, 18, 18, 18, 19, 19, 20, 20, 20, 21, 21, 22, 22, 23,
+    23, 24, 24, 25, 25, 26, 26, 27, 27, 28, 28, 29, 29, 30, 31, 31,
+    32, 32, 33, 34, 34, 35, 36, 36, 37, 38, 38, 39, 40, 41, 41, 42,
+    43, 44, 45, 45, 46, 47, 48, 49, 50, 51, 51, 52, 53, 54, 55, 56,
+    57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 69, 70, 71, 72, 73,
+    74, 75, 77, 78, 79, 80, 82, 83, 84, 85, 87, 88, 89, 91, 92, 93,
+    95, 96, 98, 99, 101, 102, 103, 105, 106, 108, 110, 111, 113, 114, 116, 117,
+    119, 121, 122, 124, 126, 127, 129, 131, 133, 134, 136, 138, 140, 142, 143, 145,
+    147, 149, 151, 153, 155, 157, 159, 161, 163, 165, 167, 169, 171, 173, 175, 177,
+    180, 182, 184, 186, 188, 191, 193, 195, 197, 200, 202, 204, 207, 209, 211, 214,
+    216, 219, 221, 224, 226, 229, 231, 234, 236, 239, 242, 244, 247, 250, 252, 255,
+  };
+
   void set_contrast(Adafruit_ST7735 *display, uint8_t value) {
     // Backlight is active-low, so duty cycle is inverted.
-    // Raw PWM values below 7 don't light the backlight at all, so scale
-    // the nonzero range (1-255) onto the usable range (7-255); 0 stays off.
-    uint8_t pwm = 0;
-    if (value > 0) {
-      pwm = 7 + ((uint16_t)(255 - 7) * (value - 1)) / (255 - 1);
-    }
+    uint8_t pwm = t096_backlight_gamma[value];
     analogWrite(PIN_T096_TFT_BLGT, 255-pwm);
   }
 #elif BOARD_MODEL == BOARD_TECHO
