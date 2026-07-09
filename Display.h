@@ -371,8 +371,14 @@ uint8_t display_contrast = 0x00;
   void set_contrast(ST7789Spi *display, uint8_t value) { }
 #elif BOARD_MODEL == BOARD_HELTEC_T096
   void set_contrast(Adafruit_ST7735 *display, uint8_t value) {
-    if (value == 0) { digitalWrite(PIN_T096_TFT_BLGT, HIGH); }
-    else            { digitalWrite(PIN_T096_TFT_BLGT, LOW); }
+    // Backlight is active-low, so duty cycle is inverted.
+    // Raw PWM values below 7 don't light the backlight at all, so scale
+    // the nonzero range (1-255) onto the usable range (7-255); 0 stays off.
+    uint8_t pwm = 0;
+    if (value > 0) {
+      pwm = 7 + ((uint16_t)(255 - 7) * (value - 1)) / (255 - 1);
+    }
+    analogWrite(PIN_T096_TFT_BLGT, 255-pwm);
   }
 #elif BOARD_MODEL == BOARD_TECHO
   void set_contrast(void *display, uint8_t value) {
@@ -667,7 +673,7 @@ bool display_init() {
       #elif BOARD_MODEL == BOARD_HELTEC_T096
         display.fillScreen(SSD1306_BLACK);
         pinMode(PIN_T096_TFT_BLGT, OUTPUT);
-        digitalWrite(PIN_T096_TFT_BLGT, LOW);
+        set_contrast(&display, display_intensity);
       #endif
 
       return true;
@@ -1664,7 +1670,7 @@ void update_display(bool blank = false) {
         display.display();
         digitalWrite(PIN_T114_TFT_BLGT, HIGH);
       #elif BOARD_MODEL == BOARD_HELTEC_T096
-        digitalWrite(PIN_T096_TFT_BLGT, HIGH);
+        // Backlight is already set by set_contrast() above
       #elif BOARD_MODEL != BOARD_TDECK && BOARD_MODEL != BOARD_TECHO
         display.clearDisplay();
         display.display();
@@ -1687,7 +1693,7 @@ void update_display(bool blank = false) {
         display.clear();
         digitalWrite(PIN_T114_TFT_BLGT, LOW);
       #elif BOARD_MODEL == BOARD_HELTEC_T096
-        digitalWrite(PIN_T096_TFT_BLGT, LOW);
+        // Backlight is already set by set_contrast() above
       #elif BOARD_MODEL != BOARD_TDECK && BOARD_MODEL != BOARD_TECHO
         display.clearDisplay();
       #endif
@@ -1728,7 +1734,7 @@ void display_unblank() {
   #if BOARD_MODEL == BOARD_HELTEC_T114
     digitalWrite(PIN_T114_TFT_BLGT, LOW);
   #elif BOARD_MODEL == BOARD_HELTEC_T096
-    digitalWrite(PIN_T096_TFT_BLGT, LOW);
+    analogWrite(PIN_T096_TFT_BLGT, 0);
   #endif
 }
 
