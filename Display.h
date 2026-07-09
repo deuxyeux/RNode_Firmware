@@ -256,6 +256,23 @@ int p_ad_y = 0;
 int p_as_x = 0;
 int p_as_y = 0;
 
+#if BOARD_MODEL == BOARD_HELTEC_T096
+  // In landscape the status area is pushed as two regions: the icon and
+  // waterfall cluster (stat rows 0..79) on the right half, and the status
+  // strip (stat rows 80..95) at p_ss on the left half under the banner.
+  int p_ss_x = 0;
+  int p_ss_y = 0;
+  // Stat-canvas positions that differ between the two orientations
+  int16_t st_box_y0 = 8;   // first icon row (cable / lora)
+  int16_t st_box_y1 = 36;  // second icon row (bt / 2.4G)
+  int16_t st_box_y2 = 64;  // lamp row (rx / tx)
+  int16_t wf_y = WF_POS_Y; // waterfall content top
+  // Set around stat-area pushes so the colourizer in drawBitmap can map
+  // bitmap rows back to stat-canvas rows
+  bool push_is_stat = false;
+  int16_t push_stat_dy = 0;
+#endif
+
 GFXcanvas1 stat_area(STAT_AREA_W, STAT_AREA_H);
 GFXcanvas1 disp_area(DISP_AREA_W, DISP_AREA_H);
 
@@ -295,17 +312,29 @@ void update_area_positions() {
     }
   #elif BOARD_MODEL == BOARD_HELTEC_T096
     if (disp_mode == DISP_MODE_LANDSCAPE) {
-      // Interim placement until the landscape layout is redesigned for
-      // the 80-tall areas; the status area bottom rows are clipped.
+      // Device area on the left half with the status strip under the
+      // banner; icon/waterfall cluster fills the right half
       p_ad_x = 0;
-      p_ad_y = 8;
+      p_ad_y = 0;
       p_as_x = 80;
       p_as_y = 0;
+      p_ss_x = 0;
+      p_ss_y = 64;
+      st_box_y0 = 6;
+      st_box_y1 = 31;
+      st_box_y2 = 56;
+      wf_y = 1;
     } else if (disp_mode == DISP_MODE_PORTRAIT) {
       p_ad_x = 0;
       p_ad_y = 0;
       p_as_x = 0;
       p_as_y = 64;
+      p_ss_x = 0;
+      p_ss_y = 144; // unused: the portrait stat push covers the strip
+      st_box_y0 = 8;
+      st_box_y1 = 36;
+      st_box_y2 = 64;
+      wf_y = WF_POS_Y;
     }
   #elif BOARD_MODEL == BOARD_TECHO
     if (disp_mode == DISP_MODE_PORTRAIT) {
@@ -682,7 +711,7 @@ void fillRect(int16_t x, int16_t y, int16_t width, int16_t height, uint16_t colo
   // Adafruit ST7735 driver used here has no framebuffer, so keep a copy of
   // the last bitmap pushed to each screen region and only write the
   // bounding box of changed pixels.
-  #define REGION_CACHE_SLOTS 3
+  #define REGION_CACHE_SLOTS 4
   #define REGION_CACHE_BYTES 960 // enough for an 80x96 mono bitmap
   #if USE_COLOR_DISPLAY == true
     #define COLOR_LAMP_RX COLOR565(0x3E, 0xD8, 0x60)
@@ -715,10 +744,42 @@ void fillRect(int16_t x, int16_t y, int16_t width, int16_t height, uint16_t colo
   };
   RegionCache region_cache[REGION_CACHE_SLOTS];
   uint8_t region_cache_next = 0;
-  // Forces a full repaint on the next push; needed when only colours
-  // change while the mono canvas content stays identical
-  void region_cache_flush() {
-    for (uint8_t i = 0; i < REGION_CACHE_SLOTS; i++) { region_cache[i].x = -1; }
+  // Colour-only changes leave the mono canvas identical, so the diff in
+  // drawBitmap would skip them. Flushing the whole cache would force a
+  // full-panel repaint - a visible flicker sweep - so instead the affected
+  // panel-space rectangles are queued here and folded into the bounds of
+  // the next push that covers them.
+  #if USE_COLOR_DISPLAY == true
+    #define CDIRTY_SLOTS 4
+    struct CDirtyRect { int16_t x; int16_t y; int16_t w; int16_t h; };
+    CDirtyRect cdirty[CDIRTY_SLOTS];
+    uint8_t cdirty_count = 0;
+    void colour_mark_dirty(int16_t x, int16_t y, int16_t w, int16_t h) {
+      if (cdirty_count < CDIRTY_SLOTS) {
+        cdirty[cdirty_count].x = x; cdirty[cdirty_count].y = y;
+        cdirty[cdirty_count].w = w; cdirty[cdirty_count].h = h;
+        cdirty_count++;
+      } else {
+        // Queue full; widen the last rect to cover the new one
+        CDirtyRect *r = &cdirty[CDIRTY_SLOTS-1];
+        int16_t x1 = r->x+r->w; if (x+w > x1) x1 = x+w;
+        int16_t y1 = r->y+r->h; if (y+h > y1) y1 = y+h;
+        if (x < r->x) r->x = x;
+        if (y < r->y) r->y = y;
+        r->w = x1-r->x; r->h = y1-r->y;
+      }
+    }
+  #else
+    void colour_mark_dirty(int16_t x, int16_t y, int16_t w, int16_t h) {}
+  #endif
+  // Maps a stat-canvas rectangle to its position on the panel; in landscape
+  // the strip rows (80+) are pushed separately at p_ss on the left half
+  void stat_mark_dirty(int16_t sx, int16_t sy, int16_t w, int16_t h) {
+    if (disp_mode == DISP_MODE_LANDSCAPE && sy >= 80) {
+      colour_mark_dirty(p_ss_x+sx, p_ss_y+sy-80, w, h);
+    } else {
+      colour_mark_dirty(p_as_x+sx, p_as_y+sy, w, h);
+    }
   }
 #endif
 
@@ -726,7 +787,11 @@ void fillRect(int16_t x, int16_t y, int16_t width, int16_t height, uint16_t colo
 void drawBitmap(int16_t startX, int16_t startY, const uint8_t* bitmap, int16_t bitmapWidth, int16_t bitmapHeight, uint16_t foregroundColour, uint16_t backgroundColour) {
   #if BOARD_MODEL == BOARD_HELTEC_T096
     {
-      static uint16_t rowbuf[80];
+      // The whole changed rect is assembled here and sent as a single DMA
+      // transfer. Splitting the push into per-row writePixels calls (one
+      // DMA setup each) stretches the write burst several-fold, and the
+      // panel visibly dips in brightness for the duration of a burst.
+      static uint16_t pushbuf[STAT_AREA_W*STAT_AREA_H];
       int16_t byteWidth = (bitmapWidth + 7) / 8;
       int32_t bitmapBytes = (int32_t)byteWidth * bitmapHeight;
       bool cacheable = bitmapBytes <= REGION_CACHE_BYTES && bitmapWidth <= 80;
@@ -781,15 +846,36 @@ void drawBitmap(int16_t startX, int16_t startY, const uint8_t* bitmap, int16_t b
             }
           }
         }
-        if (maxY < 0) return;
         if (maxX > bitmapWidth-1) maxX = bitmapWidth-1;
       }
 
-      display.startWrite();
-      display.setAddrWindow(startX+minX, startY+minY, maxX-minX+1, maxY-minY+1);
+      #if USE_COLOR_DISPLAY == true
+        // Fold queued colour-only dirty rects overlapping this region into
+        // the push bounds, then retire them
+        if (cacheable) {
+          for (uint8_t i = 0; i < cdirty_count; ) {
+            int16_t ix0 = cdirty[i].x-startX;            if (ix0 < 0) ix0 = 0;
+            int16_t iy0 = cdirty[i].y-startY;            if (iy0 < 0) iy0 = 0;
+            int16_t ix1 = cdirty[i].x+cdirty[i].w-startX; if (ix1 > bitmapWidth)  ix1 = bitmapWidth;
+            int16_t iy1 = cdirty[i].y+cdirty[i].h-startY; if (iy1 > bitmapHeight) iy1 = bitmapHeight;
+            if (ix0 < ix1 && iy0 < iy1) {
+              if (ix0 < minX)   minX = ix0;
+              if (iy0 < minY)   minY = iy0;
+              if (ix1-1 > maxX) maxX = ix1-1;
+              if (iy1-1 > maxY) maxY = iy1-1;
+              cdirty[i] = cdirty[--cdirty_count];
+            } else { i++; }
+          }
+        }
+      #endif
+      if (maxY < 0) return;
+
+      uint32_t pb = 0;
       for (int16_t row = minY; row <= maxY; row++) {
         #if USE_COLOR_DISPLAY == true
-          int16_t ay = (startY+row) - p_as_y;
+          // stat pushes are full-width slices of the stat canvas, so the
+          // bitmap column is the stat column and rows shift by push_stat_dy
+          int16_t sy = row + push_stat_dy;
         #endif
         for (int16_t col = minX; col <= maxX; col++) {
           uint16_t fg = foregroundColour;
@@ -798,23 +884,24 @@ void drawBitmap(int16_t startX, int16_t startY, const uint8_t* bitmap, int16_t b
             // battery icon get that element's colour; everything else
             // stays monochrome
             if (foregroundColour == SSD1306_WHITE) {
-              int16_t ax = (startX+col) - p_as_x;
-              if      (lamp_rx_lit && ax >= 3 && ax <= 18 && ay >= 64 && ay <= 79)          { fg = COLOR_LAMP_RX; }
-              else if (lamp_tx_lit && ax >= 61 && ax <= 76 && ay >= 64 && ay <= 79)         { fg = COLOR_LAMP_TX; }
-              else if (battery_low_lit && ax >= 2 && ax <= 19 && ay >= 88 && ay <= 94)      { fg = COLOR_BAT_LOW; }
-              else if (battery_volt_low_lit && ax >= 20 && ax <= 38 && ay >= 87 && ay <= 94) { fg = COLOR_BAT_LOW; }
-              else if (bt_enabled_lit && ax >= 3 && ax <= 18 && ay >= 36 && ay <= 51) {
-                // icon pixels stay light, the rest of the box fills dark blue
-                uint8_t bt_c = ax-3; uint8_t bt_r = ay-36;
-                if (!(bm_bt[bt_icon_i*32 + bt_r*2 + bt_c/8] & (0x80 >> (bt_c%8)))) { fg = COLOR_BT_ON; }
-              }
-              else if (ax >= WF_POS_X && ax < WF_POS_X+WF_PIXEL_WIDTH &&
-                       ay >= WF_POS_Y && ay < WF_POS_Y+WATERFALL_SIZE) {
-                int wf_m = waterfall_meta[(waterfall_head + (ay-WF_POS_Y)) % WATERFALL_SIZE];
-                if      (wf_m == WF_M_RX_PKT) { fg = COLOR_LAMP_RX; }
-                else if (wf_m == WF_M_TX)     { fg = COLOR_LAMP_TX; }
-              }
-              else if (disp_banner_fg != 0) {
+              if (push_is_stat) {
+                int16_t sx = col;
+                if      (lamp_rx_lit && sx >= 3 && sx <= 18 && sy >= st_box_y2 && sy <= st_box_y2+15)  { fg = COLOR_LAMP_RX; }
+                else if (lamp_tx_lit && sx >= 61 && sx <= 76 && sy >= st_box_y2 && sy <= st_box_y2+15) { fg = COLOR_LAMP_TX; }
+                else if (battery_low_lit && sx >= 2 && sx <= 19 && sy >= 88 && sy <= 94)       { fg = COLOR_BAT_LOW; }
+                else if (battery_volt_low_lit && sx >= 20 && sx <= 38 && sy >= 87 && sy <= 94) { fg = COLOR_BAT_LOW; }
+                else if (bt_enabled_lit && sx >= 3 && sx <= 18 && sy >= st_box_y1 && sy <= st_box_y1+15) {
+                  // icon pixels stay light, the rest of the box fills dark blue
+                  uint8_t bt_c = sx-3; uint8_t bt_r = sy-st_box_y1;
+                  if (!(bm_bt[bt_icon_i*32 + bt_r*2 + bt_c/8] & (0x80 >> (bt_c%8)))) { fg = COLOR_BT_ON; }
+                }
+                else if (sx >= WF_POS_X && sx < WF_POS_X+WF_PIXEL_WIDTH &&
+                         sy >= wf_y && sy < wf_y+WATERFALL_SIZE) {
+                  int wf_m = waterfall_meta[(waterfall_head + (sy-wf_y)) % WATERFALL_SIZE];
+                  if      (wf_m == WF_M_RX_PKT) { fg = COLOR_LAMP_RX; }
+                  else if (wf_m == WF_M_TX)     { fg = COLOR_LAMP_TX; }
+                }
+              } else if (disp_banner_fg != 0) {
                 // status banner fill (checks passed / hw ok / fw corrupt)
                 int16_t bx = (startX+col) - p_ad_x;
                 int16_t by = (startY+row) - p_ad_y;
@@ -822,10 +909,15 @@ void drawBitmap(int16_t startX, int16_t startY, const uint8_t* bitmap, int16_t b
               }
             }
           #endif
-          rowbuf[col-minX] = (bitmap[row * byteWidth + col / 8] & (0x80 >> (col % 8))) ? fg : backgroundColour;
+          // stored big-endian, ready for the panel
+          uint16_t pxc = (bitmap[row * byteWidth + col / 8] & (0x80 >> (col % 8))) ? fg : backgroundColour;
+          pushbuf[pb++] = __builtin_bswap16(pxc);
         }
-        display.writePixels(rowbuf, maxX-minX+1);
       }
+
+      display.startWrite();
+      display.setAddrWindow(startX+minX, startY+minY, maxX-minX+1, maxY-minY+1);
+      display.writePixels(pushbuf, pb, true, true);
       display.endWrite();
     }
   #elif DISPLAY_SCALE == 1
@@ -896,7 +988,8 @@ void draw_bt_icon(int px, int py) {
     #if USE_COLOR_DISPLAY == true
       if (bt_i != bt_icon_i) {
         bt_icon_i = bt_i;
-        region_cache_flush(); // glyph changes are colour-only on a lit box
+        // glyph changes are colour-only on a lit box
+        stat_mark_dirty(px, py, 16, 16);
       }
       if (bt_enabled_lit) { stat_area.fillRect(px, py, 16, 16, SSD1306_WHITE); }
       else                { stat_area.drawBitmap(px, py, bm_bt+bt_i*32, 16, 16, SSD1306_WHITE, SSD1306_BLACK); }
@@ -1090,6 +1183,14 @@ void draw_waterfall(int px, int py) {
       }
     }
   }
+
+  #if BOARD_MODEL == BOARD_HELTEC_T096 && USE_COLOR_DISPLAY == true
+    // Row colours are looked up from waterfall_meta at push time, but rows
+    // whose mono content matches what the panel already shows are skipped
+    // by the diff and would keep the colour of the entry displayed there
+    // before the scroll. Re-push the whole waterfall rect every scroll.
+    stat_mark_dirty(px, py, WF_PIXEL_WIDTH, WATERFALL_SIZE);
+  #endif
 }
 
 #if BOARD_MODEL == BOARD_HELTEC_T096
@@ -1099,11 +1200,14 @@ void draw_waterfall(int px, int py) {
 // update region on every frame.
 #define BAT_V_REFRESH_INTERVAL 5000
 void draw_battery_voltage(int px, int py) {
-  bool volt_low = pmu_ready && battery_ready && battery_installed && battery_voltage <= BAT_V_ALERT;
+  // 50mV of hysteresis, so measurement noise at the threshold doesn't
+  // toggle the tint back and forth
+  float v_thr = battery_volt_low_lit ? BAT_V_ALERT+0.05 : BAT_V_ALERT;
+  bool volt_low = pmu_ready && battery_ready && battery_installed && battery_voltage <= v_thr;
   if (volt_low != battery_volt_low_lit) {
     battery_volt_low_lit = volt_low;
     // colour-only change; the glyph pixels may be identical
-    region_cache_flush();
+    stat_mark_dirty(px, py-6, 19, 8);
   }
   static uint32_t last_drawn = 0;
   if (last_drawn != 0 && millis()-last_drawn < BAT_V_REFRESH_INTERVAL) return;
@@ -1123,7 +1227,11 @@ void draw_stat_area() {
   if (device_init_done) {
     #if BOARD_MODEL == BOARD_HELTEC_T096
       if (!stat_area_intialised) {
-        stat_area.drawBitmap(0, 0, bm_frame_t096, STAT_AREA_W, STAT_AREA_H, SSD1306_WHITE, SSD1306_BLACK);
+        if (disp_mode == DISP_MODE_LANDSCAPE) {
+          stat_area.drawBitmap(0, 0, bm_frame_t096_land, STAT_AREA_W, STAT_AREA_H, SSD1306_WHITE, SSD1306_BLACK);
+        } else {
+          stat_area.drawBitmap(0, 0, bm_frame_t096, STAT_AREA_W, STAT_AREA_H, SSD1306_WHITE, SSD1306_BLACK);
+        }
         stat_area_intialised = true;
       }
 
@@ -1137,18 +1245,17 @@ void draw_stat_area() {
       lamp_tx_lit = millis() < lamp_tx_until;
 
       // Indicator lamps: labels knocked out of the fill when lit
-      if (lamp_rx_lit) { stat_area.drawBitmap(3, 64, bm_lamp_rx, 16, 16, SSD1306_BLACK, SSD1306_WHITE); }
-      else             { stat_area.drawBitmap(3, 64, bm_lamp_rx, 16, 16, SSD1306_WHITE, SSD1306_BLACK); }
-      if (lamp_tx_lit) { stat_area.drawBitmap(61, 64, bm_lamp_tx, 16, 16, SSD1306_BLACK, SSD1306_WHITE); }
-      else             { stat_area.drawBitmap(61, 64, bm_lamp_tx, 16, 16, SSD1306_WHITE, SSD1306_BLACK); }
+      if (lamp_rx_lit) { stat_area.drawBitmap(3, st_box_y2, bm_lamp_rx, 16, 16, SSD1306_BLACK, SSD1306_WHITE); }
+      else             { stat_area.drawBitmap(3, st_box_y2, bm_lamp_rx, 16, 16, SSD1306_WHITE, SSD1306_BLACK); }
+      if (lamp_tx_lit) { stat_area.drawBitmap(61, st_box_y2, bm_lamp_tx, 16, 16, SSD1306_BLACK, SSD1306_WHITE); }
+      else             { stat_area.drawBitmap(61, st_box_y2, bm_lamp_tx, 16, 16, SSD1306_WHITE, SSD1306_BLACK); }
 
       // Icon boxes and the status row keep their bm_frame appearance; the
-      // right-side elements sit +16 to make room for the wider waterfall,
-      // the status row sits +32 down at the bottom of the taller area
-      draw_cable_icon(3, 8);
-      draw_bt_icon(3, 36);
-      draw_lora_icon(61, 8);
-      draw_mw_icon(61, 36);
+      // row positions differ per orientation (set in update_area_positions)
+      draw_cable_icon(3, st_box_y0);
+      draw_bt_icon(3, st_box_y1);
+      draw_lora_icon(61, st_box_y0);
+      draw_mw_icon(61, st_box_y1);
       draw_battery_bars(4, 90);
       // The low-battery tint is colour-only: flipping it doesn't change
       // the mono canvas (the outline pixels stay identical), so force a
@@ -1156,13 +1263,13 @@ void draw_stat_area() {
       static bool battery_low_prev = false;
       if (battery_low_lit != battery_low_prev) {
         battery_low_prev = battery_low_lit;
-        region_cache_flush();
+        stat_mark_dirty(2, 88, 18, 7);
       }
       draw_battery_voltage(20, 93);
       draw_quality_bars(44, 88);
       draw_signal_bars(60, 88);
       if (radio_online) {
-        draw_waterfall(WF_POS_X, WF_POS_Y);
+        draw_waterfall(WF_POS_X, wf_y);
       }
     #else
       if (!stat_area_intialised) {
@@ -1189,12 +1296,22 @@ void update_stat_area() {
 
     draw_stat_area();
     if (disp_mode == DISP_MODE_PORTRAIT) {
+      #if BOARD_MODEL == BOARD_HELTEC_T096
+        push_is_stat = true; push_stat_dy = 0;
+      #endif
       drawBitmap(p_as_x, p_as_y, stat_area.getBuffer(), stat_area.width(), stat_area.height(), SSD1306_WHITE, SSD1306_BLACK);
+      #if BOARD_MODEL == BOARD_HELTEC_T096
+        push_is_stat = false;
+      #endif
     } else if (disp_mode == DISP_MODE_LANDSCAPE) {
       #if BOARD_MODEL == BOARD_HELTEC_T096
-        // Interim: push only the 80 rows that fit until the landscape
-        // layout is redesigned
+        // Icon/waterfall cluster (stat rows 0..79) on the right half, the
+        // status strip (stat rows 80..95) on the left half under the banner
+        push_is_stat = true; push_stat_dy = 0;
         drawBitmap(p_as_x, p_as_y, stat_area.getBuffer(), stat_area.width(), 80, SSD1306_WHITE, SSD1306_BLACK);
+        push_stat_dy = 80;
+        drawBitmap(p_ss_x, p_ss_y, stat_area.getBuffer() + 80*((STAT_AREA_W+7)/8), stat_area.width(), 16, SSD1306_WHITE, SSD1306_BLACK);
+        push_is_stat = false;
       #else
         drawBitmap(p_as_x+2, p_as_y, stat_area.getBuffer(), stat_area.width(), stat_area.height(), SSD1306_WHITE, SSD1306_BLACK);
         if (device_init_done && !disp_ext_fb) drawLine(p_as_x, 0, p_as_x, 64, SSD1306_WHITE);
@@ -1427,6 +1544,9 @@ void draw_disp_area() {
             }
           } else if (disp_page == 2) {
             draw_disp_art(37, bm_version, 27);
+            #if BOARD_MODEL == BOARD_HELTEC_T096 && USE_COLOR_DISPLAY == true
+              disp_banner_fg = COLOR_BANNER_OK;
+            #endif
             char *v_str = (char*)malloc(3+1);
             sprintf(v_str, "%01d%02d", MAJ_VERS, MIN_VERS);
             for (int i = 0; i < 3; i++) {
@@ -1458,16 +1578,18 @@ void update_disp_area() {
     static uint16_t banner_fg_prev = 0;
     if (disp_banner_fg != banner_fg_prev) {
       banner_fg_prev = disp_banner_fg;
-      region_cache_flush();
+      colour_mark_dirty(p_ad_x, p_ad_y+37, DISP_AREA_W, 27);
     }
   #endif
 
   drawBitmap(p_ad_x, p_ad_y, disp_area.getBuffer(), disp_area.width(), disp_area.height(), SSD1306_WHITE, SSD1306_BLACK);
+  #if BOARD_MODEL != BOARD_HELTEC_T096
   if (disp_mode == DISP_MODE_LANDSCAPE) {
     if (device_init_done && !firmware_update_mode && !disp_ext_fb) {
       drawLine(0, 0, 0, 63, SSD1306_WHITE);
     }
   }
+  #endif
 }
 
 void display_recondition() {
