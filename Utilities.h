@@ -1229,8 +1229,10 @@ void kiss_indicate_disp() {
 	#if HAS_DISPLAY
 		uint8_t *da = disp_area.getBuffer();
 		uint8_t *sa = stat_area.getBuffer();
-		for (int i = 0; i < 512; i++) { escaped_serial_write(da[i]); }
-		for (int i = 0; i < 512; i++) { escaped_serial_write(sa[i]); }
+		size_t da_len = ((disp_area.width()+7)/8)*disp_area.height();
+		size_t sa_len = ((stat_area.width()+7)/8)*stat_area.height();
+		for (size_t i = 0; i < da_len; i++) { escaped_serial_write(da[i]); }
+		for (size_t i = 0; i < sa_len; i++) { escaped_serial_write(sa[i]); }
 	#else
 		serial_write(0xFF);
 	#endif
