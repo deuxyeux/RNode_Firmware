@@ -238,8 +238,16 @@ int waterfall_head = 0;
 #else
   #define WF_TX_SIZE 5
 #endif
-#define WF_RSSI_MAX -60
-#define WF_RSSI_MIN -135
+#if BOARD_MODEL == BOARD_HELTEC_T096
+  // The KCT8103L LNA raises the idle noise reading; -120 keeps the graph
+  // near zero at ambient instead of idling a fifth up the scale. The wider
+  // 26-pixel waterfall gets headroom up to -40 before pegging full.
+  #define WF_RSSI_MAX -40
+  #define WF_RSSI_MIN -120
+#else
+  #define WF_RSSI_MAX -60
+  #define WF_RSSI_MIN -135
+#endif
 #define WF_RSSI_SPAN (WF_RSSI_MAX-WF_RSSI_MIN)
 #if BOARD_MODEL == BOARD_HELTEC_T096
   #define WF_PIXEL_WIDTH 26

@@ -1236,12 +1236,19 @@
       #define LNA_GD_THRSHLD (-109)
       #define LNA_GD_LIMIT   (-89)
 
-      #define LORA_LNA_GAIN  17
+      // The KCT8103L RX LNA has 21 dB gain (1.9 dB NF). The FEM model is
+      // fixed at compile time on this board, so the runtime detection that
+      // corrects this value on the Heltec V4 never runs — it must be right
+      // here.
+      #define LORA_LNA_GAIN  21
       #define LORA_LNA_GVT   12
-      #define LORA_PA_PWR_EN  7
+      // KCT8103L FEM: VFEM LDO enable on P0.30, CSD on P0.12, CTX on P1.09
+      // (41). CPS is wired to SX1262 DIO2 and switched automatically via
+      // DIO2_AS_RF_SWITCH.
+      #define LORA_PA_PWR_EN 30
       #define LORA_PA_CPS    -1
       #define LORA_PA_CSD    12
-      #define LORA_PA_CTX     9
+      #define LORA_PA_CTX    41
 
       #define PA_MAX_OUTPUT  28
       #define PA_GAIN_POINTS 22
