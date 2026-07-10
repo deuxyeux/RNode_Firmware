@@ -48,6 +48,8 @@ sx128x *LoRa = &sx128x_modem;
 uint8_t eeprom_read(uint32_t mapped_addr);
 #endif
 
+void set_rns_link_state(uint8_t new_state);
+
 #if HAS_DISPLAY == true
   #include "Display.h"
 #else
@@ -198,6 +200,119 @@ uint8_t boot_vector = 0x00;
 #else
   void boot_seq() { }
 #endif
+
+#if HAS_BUZZER == true
+  void buzzer_init() {
+    pinMode(PIN_BUZZER, OUTPUT);
+    noTone(PIN_BUZZER);
+  }
+
+  // Avoid tone()'s duration overload: its internal auto-stop timer can
+  // race with the noTone() call at the end of each note in a tight loop
+  // and crash the LEDC driver, so time each note manually instead.
+  void buzzer_play_notes(const uint16_t *notes, uint8_t count, uint16_t note_ms) {
+    for (uint8_t i = 0; i < count; i++) {
+      tone(PIN_BUZZER, notes[i]);
+      delay(note_ms);
+      noTone(PIN_BUZZER);
+      delay(10);
+    }
+  }
+
+  // Simple ascending startup jingle, played once while the boot banner is
+  // shown. Runs during setup(), before loop() starts, so blocking is fine
+  // here - nothing else is competing for CPU time yet.
+  void buzzer_boot_melody() {
+    const uint16_t notes[] = { 1319, 1568, 1976, 2637 };
+    buzzer_play_notes(notes, sizeof(notes)/sizeof(notes[0]), 80);
+  }
+
+  // Non-blocking melody player for cues triggered from hot paths (button
+  // handling, serial_callback()). Blocking here would stall packet queue
+  // processing and display updates for the duration of the melody, which
+  // was observed to disrupt the waterfall right as an RNS host attaches.
+  // buzzer_update() must be called every loop() iteration to advance it.
+  const uint16_t *buzzer_async_notes = NULL;
+  uint8_t buzzer_async_count = 0;
+  uint8_t buzzer_async_index = 0;
+  uint16_t buzzer_async_note_ms = 0;
+  bool buzzer_async_in_gap = false;
+  bool buzzer_async_playing = false;
+  unsigned long buzzer_async_phase_started = 0;
+  const uint16_t BUZZER_ASYNC_GAP_MS = 10;
+
+  void buzzer_start_async_melody(const uint16_t *notes, uint8_t count, uint16_t note_ms) {
+    buzzer_async_notes = notes;
+    buzzer_async_count = count;
+    buzzer_async_note_ms = note_ms;
+    buzzer_async_index = 0;
+    buzzer_async_in_gap = false;
+    buzzer_async_playing = true;
+    tone(PIN_BUZZER, notes[0]);
+    buzzer_async_phase_started = millis();
+  }
+
+  void buzzer_update() {
+    if (!buzzer_async_playing) return;
+    unsigned long now = millis();
+    if (!buzzer_async_in_gap) {
+      if (now - buzzer_async_phase_started >= buzzer_async_note_ms) {
+        noTone(PIN_BUZZER);
+        buzzer_async_in_gap = true;
+        buzzer_async_phase_started = now;
+      }
+    } else if (now - buzzer_async_phase_started >= BUZZER_ASYNC_GAP_MS) {
+      buzzer_async_index++;
+      if (buzzer_async_index >= buzzer_async_count) {
+        buzzer_async_playing = false;
+      } else {
+        tone(PIN_BUZZER, buzzer_async_notes[buzzer_async_index]);
+        buzzer_async_in_gap = false;
+        buzzer_async_phase_started = now;
+      }
+    }
+  }
+
+  // Short two-note cues for Bluetooth toggling via the user button.
+  void buzzer_bt_on_melody() {
+    static const uint16_t notes[] = { 1568, 1175 };
+    buzzer_start_async_melody(notes, sizeof(notes)/sizeof(notes[0]), 60);
+  }
+
+  void buzzer_bt_off_melody() {
+    static const uint16_t notes[] = { 1568, 2093 };
+    buzzer_start_async_melody(notes, sizeof(notes)/sizeof(notes[0]), 60);
+  }
+
+  // Short chirps for the RNS host (rns_link_state) attaching to / leaving the KISS interface.
+  void buzzer_rns_connect_melody() {
+    static const uint16_t notes[] = { 1976, 2637 };
+    buzzer_start_async_melody(notes, sizeof(notes)/sizeof(notes[0]), 45);
+  }
+
+  void buzzer_rns_disconnect_melody() {
+    static const uint16_t notes[] = { 1319, 988 };
+    buzzer_start_async_melody(notes, sizeof(notes)/sizeof(notes[0]), 45);
+  }
+#else
+  void buzzer_init() { }
+  void buzzer_update() { }
+  void buzzer_bt_on_melody() { }
+  void buzzer_bt_off_melody() { }
+  void buzzer_boot_melody() { }
+  void buzzer_rns_connect_melody() { }
+  void buzzer_rns_disconnect_melody() { }
+#endif
+
+// Centralises rns_link_state transitions so the RNS connect/disconnect chirp
+// only fires on the actual edge, not on every KISS byte that touches rns_link_state.
+void set_rns_link_state(uint8_t new_state) {
+  if (new_state != rns_link_state) {
+    if (new_state == RNS_LINK_STATE_CONNECTED)         { buzzer_rns_connect_melody(); }
+    else if (new_state == RNS_LINK_STATE_DISCONNECTED) { buzzer_rns_disconnect_melody(); }
+  }
+  rns_link_state = new_state;
+}
 
 // TX/RX LEDs should work when display is blanked on externally powered nodes
 #if BOARD_MODEL == BOARD_MESHPOE_S3 || BOARD_MODEL == BOARD_MESHADVENTURER_S3
@@ -2145,7 +2260,7 @@ inline uint16_t fifo16_len(FIFOBuffer16 *f) {
 extern void stopRadio();
 void host_disconnected() {
 	stopRadio();
-	cable_state   = CABLE_STATE_DISCONNECTED;
+	set_rns_link_state(RNS_LINK_STATE_DISCONNECTED);
 	current_rssi  = -292;
 	last_rssi     = -292;
 	last_rssi_raw = 0x00;

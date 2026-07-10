@@ -261,6 +261,11 @@ void setup() {
     update_display();
   #endif
 
+  #if HAS_BUZZER == true
+    buzzer_init();
+    buzzer_boot_melody();
+  #endif
+
   #if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
     #if HAS_PMU == true || IS_ESP32S3
       pmu_ready = init_pmu();
@@ -813,7 +818,7 @@ void serial_callback(uint8_t sbyte) {
         command = sbyte;
     } else if (command == CMD_DATA) {
         if (bt_state != BT_STATE_CONNECTED) {
-          cable_state = CABLE_STATE_CONNECTED;
+          set_rns_link_state(RNS_LINK_STATE_CONNECTED);
         }
         if (sbyte == FESC) {
             ESCAPE = true;
@@ -930,7 +935,7 @@ void serial_callback(uint8_t sbyte) {
     } else if (command == CMD_LEAVE) {
       if (sbyte == 0xFF) {
         display_unblank();
-        cable_state   = CABLE_STATE_DISCONNECTED;
+        set_rns_link_state(RNS_LINK_STATE_DISCONNECTED);
         current_rssi  = -292;
         last_rssi     = -292;
         last_rssi_raw = 0x00;
@@ -938,7 +943,7 @@ void serial_callback(uint8_t sbyte) {
       }
     } else if (command == CMD_RADIO_STATE) {
       if (bt_state != BT_STATE_CONNECTED) {
-        cable_state = CABLE_STATE_CONNECTED;
+        set_rns_link_state(RNS_LINK_STATE_CONNECTED);
         display_unblank();
       }
       if (sbyte == 0xFF) {
@@ -1011,7 +1016,7 @@ void serial_callback(uint8_t sbyte) {
       kiss_indicate_random(getRandom());
     } else if (command == CMD_DETECT) {
       if (sbyte == DETECT_REQ) {
-        if (bt_state != BT_STATE_CONNECTED) cable_state = CABLE_STATE_CONNECTED;
+        if (bt_state != BT_STATE_CONNECTED) set_rns_link_state(RNS_LINK_STATE_CONNECTED);
         kiss_indicate_detect();
       }
     } else if (command == CMD_PROMISC) {
@@ -1755,6 +1760,10 @@ void loop() {
     if (disp_ready && !display_updating) update_display();
   #endif
 
+  #if HAS_BUZZER == true
+    buzzer_update();
+  #endif
+
   #if HAS_PMU || IS_ESP32S3
     if (pmu_ready) update_pmu();
   #endif
@@ -1874,9 +1883,15 @@ void button_event(uint8_t event, unsigned long duration) {
           if (bt_state == BT_STATE_OFF) {
             bt_start();
             bt_conf_save(true);
+            #if HAS_BUZZER == true
+              buzzer_bt_on_melody();
+            #endif
           } else {
             bt_stop();
             bt_conf_save(false);
+            #if HAS_BUZZER == true
+              buzzer_bt_off_melody();
+            #endif
           }
         }
         #endif

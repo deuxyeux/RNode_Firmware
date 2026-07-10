@@ -25,9 +25,9 @@
 	#define MODE_HOST 0x11
 	#define MODE_TNC  0x12
 
-	#define CABLE_STATE_DISCONNECTED 0x00
-	#define CABLE_STATE_CONNECTED    0x01
-	uint8_t cable_state = CABLE_STATE_DISCONNECTED;
+	#define RNS_LINK_STATE_DISCONNECTED 0x00
+	#define RNS_LINK_STATE_CONNECTED    0x01
+	uint8_t rns_link_state = RNS_LINK_STATE_DISCONNECTED;
 	
 	#define BT_STATE_NA        0xff
 	#define BT_STATE_OFF       0x00

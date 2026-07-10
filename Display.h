@@ -976,8 +976,8 @@ extern bool wifi_host_is_connected();
 void draw_cable_icon(int px, int py) {
   #if HAS_WIFI
     if (wifi_mode == WR_WIFI_OFF) {
-      if      (cable_state == CABLE_STATE_DISCONNECTED) { stat_area.drawBitmap(px, py, bm_cable+0*32, 16, 16, SSD1306_WHITE, SSD1306_BLACK); }
-      else if (cable_state == CABLE_STATE_CONNECTED)    { stat_area.drawBitmap(px, py, bm_cable+1*32, 16, 16, SSD1306_WHITE, SSD1306_BLACK); }
+      if      (rns_link_state == RNS_LINK_STATE_DISCONNECTED) { stat_area.drawBitmap(px, py, bm_cable+0*32, 16, 16, SSD1306_WHITE, SSD1306_BLACK); }
+      else if (rns_link_state == RNS_LINK_STATE_CONNECTED)    { stat_area.drawBitmap(px, py, bm_cable+1*32, 16, 16, SSD1306_WHITE, SSD1306_BLACK); }
     } else {
       if (wifi_mode == WR_WIFI_STA) {
         if (wifi_is_connected()) {
@@ -990,14 +990,14 @@ void draw_cable_icon(int px, int py) {
         else                          { stat_area.drawBitmap(px, py, bm_wifi+0*32, 16, 16, SSD1306_WHITE, SSD1306_BLACK); }
       
       } else {
-        if      (cable_state == CABLE_STATE_DISCONNECTED) { stat_area.drawBitmap(px, py, bm_cable+0*32, 16, 16, SSD1306_WHITE, SSD1306_BLACK); }
-        else if (cable_state == CABLE_STATE_CONNECTED)    { stat_area.drawBitmap(px, py, bm_cable+1*32, 16, 16, SSD1306_WHITE, SSD1306_BLACK); }
+        if      (rns_link_state == RNS_LINK_STATE_DISCONNECTED) { stat_area.drawBitmap(px, py, bm_cable+0*32, 16, 16, SSD1306_WHITE, SSD1306_BLACK); }
+        else if (rns_link_state == RNS_LINK_STATE_CONNECTED)    { stat_area.drawBitmap(px, py, bm_cable+1*32, 16, 16, SSD1306_WHITE, SSD1306_BLACK); }
       }
     }
 
   #else
-  if      (cable_state == CABLE_STATE_DISCONNECTED) { stat_area.drawBitmap(px, py, bm_cable+0*32, 16, 16, SSD1306_WHITE, SSD1306_BLACK); }
-  else if (cable_state == CABLE_STATE_CONNECTED)    { stat_area.drawBitmap(px, py, bm_cable+1*32, 16, 16, SSD1306_WHITE, SSD1306_BLACK); }
+  if      (rns_link_state == RNS_LINK_STATE_DISCONNECTED) { stat_area.drawBitmap(px, py, bm_cable+0*32, 16, 16, SSD1306_WHITE, SSD1306_BLACK); }
+  else if (rns_link_state == RNS_LINK_STATE_CONNECTED)    { stat_area.drawBitmap(px, py, bm_cable+1*32, 16, 16, SSD1306_WHITE, SSD1306_BLACK); }
   #endif
 }
 

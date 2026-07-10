@@ -110,7 +110,7 @@ char bt_da[BT_DEV_ADDR_LEN];
       display_unblank();
       if(event == ESP_SPP_SRV_OPEN_EVT) {
         bt_state = BT_STATE_CONNECTED;
-        cable_state = CABLE_STATE_DISCONNECTED;
+        set_rns_link_state(RNS_LINK_STATE_DISCONNECTED);
       }
        
       if(event == ESP_SPP_CLOSE_EVT ){
@@ -320,7 +320,7 @@ char bt_da[BT_DEV_ADDR_LEN];
       display_unblank();
       ble_authenticated = false;
       if (bt_state != BT_STATE_PAIRING) { bt_state = BT_STATE_CONNECTED; }
-      cable_state = CABLE_STATE_DISCONNECTED;
+      set_rns_link_state(RNS_LINK_STATE_DISCONNECTED);
     }
 
     void bt_disconnect_callback(BLEServer *server) {
@@ -442,7 +442,7 @@ char bt_da[BT_DEV_ADDR_LEN];
       if (security.sm == 1 && security.lv >= 3) {
           // Serial.println("Auth level success");
           bt_state = BT_STATE_CONNECTED;
-          cable_state = CABLE_STATE_DISCONNECTED;
+          set_rns_link_state(RNS_LINK_STATE_DISCONNECTED);
           connection->disconnect();
           bt_disable_pairing();
       } else {
@@ -469,7 +469,7 @@ char bt_da[BT_DEV_ADDR_LEN];
   void bt_connect_callback(uint16_t conn_handle) {
     // Serial.println("Connect callback");
     bt_state = BT_STATE_CONNECTED;
-    cable_state = CABLE_STATE_DISCONNECTED;
+    set_rns_link_state(RNS_LINK_STATE_DISCONNECTED);
 
     BLEConnection* conn = Bluefruit.Connection(conn_handle);
     conn->requestPHY(BLE_GAP_PHY_2MBPS);

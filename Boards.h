@@ -330,6 +330,7 @@
       #define HAS_LORA_LNA true
       #define LORA_LNA_GAIN  30
       #define LORA_LNA_GVT   14
+      #define HAS_BUZZER true
 
       const int pin_sclk = 1;
       const int pin_reset = 2;
@@ -344,6 +345,7 @@
 
       const int pin_btn_usr1 = 4;
       const int pin_np = 48;
+      #define PIN_BUZZER 17
 
       #if HAS_NP == false
         #if defined(EXTERNAL_LEDS)
@@ -1370,6 +1372,10 @@
 
   #ifndef HAS_BUSY
     const int pin_busy = -1;
+  #endif
+
+  #ifndef HAS_BUZZER
+    #define HAS_BUZZER false
   #endif
 
   #ifndef LED_ON
