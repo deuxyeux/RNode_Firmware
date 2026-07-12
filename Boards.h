@@ -332,6 +332,8 @@
       #define LORA_LNA_GVT   14
       #define HAS_BUZZER true
       #define HAS_ENCODER true
+      #define HAS_VSENSE true
+      #define PIN_VSENSE 6
 
       const int pin_sclk = 1;
       const int pin_reset = 2;
@@ -1391,6 +1393,10 @@
 
   #ifndef HAS_ENCODER
     #define HAS_ENCODER false
+  #endif
+
+  #ifndef HAS_VSENSE
+    #define HAS_VSENSE false
   #endif
 
   #ifndef LED_ON

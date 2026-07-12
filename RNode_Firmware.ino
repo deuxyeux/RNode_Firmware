@@ -1783,6 +1783,10 @@ void loop() {
     if (pmu_ready) update_pmu();
   #endif
 
+  #if HAS_VSENSE == true
+    update_vsense();
+  #endif
+
   #if HAS_BLUETOOTH || HAS_BLE == true
     if (!console_active && bt_ready) update_bt();
   #endif

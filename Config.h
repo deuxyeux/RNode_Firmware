@@ -235,6 +235,10 @@
     float battery_voltage = 0.0;
     float battery_percent = 0.0;
     uint8_t battery_state = 0x00;
+    // Raw resistor-divider voltage sense (no PMU, no real battery to gauge
+    // charge state for - just a plain voltage readout). Independent of the
+    // battery_ready/battery_percent state machine above.
+    float vsense_voltage = 0.0;
     uint8_t display_intensity = 0xFF;
     uint8_t display_addr = 0xFF;
     volatile bool display_updating = false;

@@ -1156,6 +1156,34 @@ void draw_battery_bars(int px, int py) {
   }
 }
 
+#if HAS_VSENSE == true
+  // No PMU/battery on this board, so the battery-bars slot is otherwise
+  // blank (draw_battery_bars() draws nothing when battery_ready is false) -
+  // show the raw divider voltage there instead. Same box dims as the
+  // battery icon (px-2,py-2,18,7) so it drops straight into that spot.
+  #define VSENSE_DISP_REFRESH_INTERVAL 2000
+  // Alternates with the CPU temperature every 4s (same dwell time as the
+  // rotating info pages in draw_disp_area()) since there's no PMU/battery
+  // reading to otherwise fill this slot with
+  #define VSENSE_DISP_TOGGLE_INTERVAL 4000
+  extern bool pmu_temp_sensor_ready;
+  extern float pmu_temperature;
+  void draw_vsense_voltage(int px, int py) {
+    static uint32_t last_drawn = 0;
+    if (last_drawn != 0 && millis()-last_drawn < VSENSE_DISP_REFRESH_INTERVAL) return;
+    stat_area.fillRect(px-2, py-2, 18, 7, SSD1306_BLACK);
+    stat_area.setFont(SMALL_FONT); stat_area.setTextWrap(false);
+    stat_area.setTextColor(SSD1306_WHITE); stat_area.setTextSize(1);
+    stat_area.setCursor(px-2, py+3);
+    if (pmu_temp_sensor_ready && (millis()/VSENSE_DISP_TOGGLE_INTERVAL)%2 == 1) {
+      stat_area.printf("%.0fC", pmu_temperature);
+    } else {
+      stat_area.printf("%.1fV", vsense_voltage);
+    }
+    last_drawn = millis();
+  }
+#endif
+
 #define Q_SNR_STEP 2.0
 #define Q_SNR_MIN_BASE -9.0
 #define Q_SNR_MAX 6.0
@@ -1356,7 +1384,11 @@ void draw_stat_area() {
       draw_bt_icon(3, 30);
       draw_lora_icon(45, 8);
       draw_mw_icon(45, 30);
-      draw_battery_bars(4, 58);
+      #if HAS_VSENSE == true
+        draw_vsense_voltage(4, 58);
+      #else
+        draw_battery_bars(4, 58);
+      #endif
       draw_quality_bars(28, 56);
       draw_signal_bars(44, 56);
       if (radio_online) {
