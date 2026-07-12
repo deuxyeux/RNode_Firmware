@@ -2055,8 +2055,17 @@ void db_conf_save(uint8_t val) {
 void drot_conf_save(uint8_t val) {
 	#if HAS_DISPLAY
 		if (val >= 0x00 and val <= 0x03) {
+			// Only reboot if the rotation is actually changing - hosts (e.g. the
+			// flasher's "Apply" button) resend all display fields together, so
+			// an unrelated brightness/timeout change would otherwise also
+			// reboot the device via this unconditionally-resent rotation value.
+			#if HAS_EEPROM
+				bool rotation_changed = EEPROM.read(eeprom_addr(ADDR_CONF_DROT)) != val;
+			#elif MCU_VARIANT == MCU_NRF52
+				bool rotation_changed = eeprom_read(eeprom_addr(ADDR_CONF_DROT)) != val;
+			#endif
 			eeprom_update(eeprom_addr(ADDR_CONF_DROT), val);
-			hard_reset();
+			if (rotation_changed) { hard_reset(); }
 		}
 	#endif
 }
