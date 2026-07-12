@@ -1022,6 +1022,9 @@ void drawBitmap(int16_t startX, int16_t startY, const uint8_t* bitmap, int16_t b
 extern uint8_t wifi_mode;
 extern bool wifi_is_connected();
 extern bool wifi_host_is_connected();
+#if HAS_ETHERNET
+extern bool eth_link_up;
+#endif
 void draw_cable_icon(int px, int py) {
   #if HAS_WIFI
     if (wifi_mode == WR_WIFI_OFF) {
@@ -1092,6 +1095,22 @@ void draw_mw_icon(int px, int py) {
     stat_area.drawBitmap(px, py, bm_rf+2*32, 16, 16, SSD1306_WHITE, SSD1306_BLACK);
   }
 }
+
+#if HAS_ETHERNET
+void draw_eth_icon(int px, int py) {
+  // The box interior is actually 17px tall border-to-border (bm_frame's
+  // top/bottom border lines sit one row further apart than the 16px icon
+  // grid), so a full-height fill needs 17 here or it leaves the bottom
+  // interior row showing through as an unfilled dark line
+  if (eth_link_up) {
+    stat_area.fillRect(px, py, 16, 17, SSD1306_WHITE);
+    stat_area.drawBitmap(px+2, py+6, bm_eth_txt, 11, 5, SSD1306_BLACK, SSD1306_WHITE);
+  } else {
+    stat_area.fillRect(px, py, 16, 17, SSD1306_BLACK);
+    stat_area.drawBitmap(px+2, py+6, bm_eth_txt, 11, 5, SSD1306_WHITE, SSD1306_BLACK);
+  }
+}
+#endif
 
 uint8_t charge_tick = 0;
 void draw_battery_bars(int px, int py) {
@@ -1383,7 +1402,11 @@ void draw_stat_area() {
       draw_cable_icon(3, 8);
       draw_bt_icon(3, 30);
       draw_lora_icon(45, 8);
-      draw_mw_icon(45, 30);
+      #if BOARD_MODEL == BOARD_MESHPOE_S3
+        draw_eth_icon(45, 30);
+      #else
+        draw_mw_icon(45, 30);
+      #endif
       #if HAS_VSENSE == true
         draw_vsense_voltage(4, 58);
       #else
@@ -1469,10 +1492,29 @@ void display_indicate_tx() {
 #endif
 
 #define START_PAGE 0
-const uint8_t pages = 3;
+const uint8_t pages = 4;
 uint8_t disp_page = START_PAGE;
 #if HAS_WIFI
   extern IPAddress wr_device_ip;
+#endif
+#if HAS_ETHERNET
+  extern bool eth_is_connected;
+  extern IPAddress eth_device_ip;
+#endif
+
+#if HAS_WIFI || HAS_ETHERNET
+void draw_disp_ip_line(const char* label, IPAddress ip) {
+  uint8_t ones = 3+one_counts[ip[0]]+one_counts[ip[1]]+one_counts[ip[2]]+one_counts[ip[3]];
+  uint8_t chars = 7;
+  for (uint8_t i = 0; i<4; i++) { if (ip[i] > 9) { chars++; } if (ip[i] > 99) { chars++; } }
+  uint8_t width = chars*6-(ones*4);
+  int alignment_offset = disp_area.width()-width;
+  int ipxpos = alignment_offset;
+  disp_area.setFont(SMALL_FONT); disp_area.setTextWrap(false); disp_area.setTextColor(SSD1306_WHITE); disp_area.setTextSize(1);
+  disp_area.fillRect(0, 20, disp_area.width(), 17, SSD1306_BLACK);
+  disp_area.setCursor(3, 34-8); disp_area.print(label);
+  disp_area.setCursor(ipxpos, 34); disp_area.print(ip);
+}
 #endif
 
 void draw_disp_area() {
@@ -1562,22 +1604,33 @@ void draw_disp_area() {
           else {                        draw_disp_art(0, bm_def, 23); }
         #endif
 
-        bool display_ip = false;
+        bool wifi_ip_ready = false;
+        bool eth_ip_ready = false;
         #if HAS_WIFI
-          if (wifi_is_connected() && disp_page%2 == 1) { display_ip = true; }
+          wifi_ip_ready = wifi_is_connected();
         #endif
+        #if HAS_ETHERNET
+          eth_ip_ready = eth_is_connected;
+        #endif
+
+        // Page 1 dwells on the WiFi IP, page 3 on the Ethernet IP, each for
+        // a full page_interval, same as the original single WiFi IP page
+        bool display_ip = false;
+        bool show_wifi_ip = false;
+        bool show_eth_ip = false;
+        if (wifi_ip_ready && disp_page == 1) {
+          display_ip = true;
+          show_wifi_ip = true;
+        } else if (eth_ip_ready && disp_page == 3) {
+          display_ip = true;
+          show_eth_ip = true;
+        }
         if (display_ip) {
           #if HAS_WIFI
-            uint8_t ones = 3+one_counts[wr_device_ip[0]]+one_counts[wr_device_ip[1]]+one_counts[wr_device_ip[2]]+one_counts[wr_device_ip[3]];
-            uint8_t chars = 7;
-            for (uint8_t i = 0; i<4; i++) { if (wr_device_ip[i] > 9) { chars++; } if (wr_device_ip[i] > 99) { chars++; } }
-            uint8_t width = chars*6-(ones*4);
-            int alignment_offset = disp_area.width()-width;
-            int ipxpos = alignment_offset;
-            disp_area.setFont(SMALL_FONT); disp_area.setTextWrap(false); disp_area.setTextColor(SSD1306_WHITE); disp_area.setTextSize(1);
-            disp_area.fillRect(0, 20, disp_area.width(), 17, SSD1306_BLACK);
-            disp_area.setCursor(3, 34-8); disp_area.print("WiFi IP:");
-            disp_area.setCursor(ipxpos, 34); disp_area.print(wr_device_ip);
+            if (show_wifi_ip) { draw_disp_ip_line("WiFi IP:", wr_device_ip); }
+          #endif
+          #if HAS_ETHERNET
+            if (show_eth_ip) { draw_disp_ip_line("Eth IP:", eth_device_ip); }
           #endif
         } else {
           disp_area.setFont(SMALL_FONT); disp_area.setTextWrap(false); disp_area.setTextColor(SSD1306_WHITE); disp_area.setTextSize(2);
@@ -1667,6 +1720,15 @@ void draw_disp_area() {
             free(v_str);
             disp_area.drawLine(DISP_BM_X+27, 37+19, DISP_BM_X+28, 37+19, SSD1306_BLACK);
             disp_area.drawLine(DISP_BM_X+27, 37+20, DISP_BM_X+28, 37+20, SSD1306_BLACK);
+          } else if (disp_page == 3) {
+            if (!console_active) {
+              draw_disp_art(37, bm_hwok, 27);
+              #if BOARD_MODEL == BOARD_HELTEC_T096 && USE_COLOR_DISPLAY == true
+                disp_banner_fg = COLOR_BANNER_OK;
+              #endif
+            } else {
+              draw_disp_art(37, bm_console_active, 27);
+            }
           }
         }
       }

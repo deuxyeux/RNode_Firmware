@@ -16,6 +16,7 @@
 
 SPIClass eth_spi(HSPI);
 bool eth_is_connected = false;
+bool eth_link_up = false;
 IPAddress eth_device_ip;
 
 char eth_hostname[11];
@@ -31,6 +32,9 @@ void onEthEvent(WiFiEvent_t event) {
             #endif
             ETH.setHostname(eth_hostname);
             break;
+        case ARDUINO_EVENT_ETH_CONNECTED:
+            eth_link_up = true;
+            break;
         case ARDUINO_EVENT_ETH_GOT_IP:
             eth_is_connected = true;
             eth_device_ip = ETH.localIP();
@@ -38,6 +42,7 @@ void onEthEvent(WiFiEvent_t event) {
         case ARDUINO_EVENT_ETH_DISCONNECTED:
         case ARDUINO_EVENT_ETH_STOP:
             eth_is_connected = false;
+            eth_link_up = false;
             break;
         default:
             break;
