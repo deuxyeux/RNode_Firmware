@@ -159,25 +159,31 @@
   Adafruit_ST7789 display = Adafruit_ST7789(DISPLAY_CS, DISPLAY_DC, -1);
   #define SSD1306_WHITE ST77XX_WHITE
   #define SSD1306_BLACK ST77XX_BLACK
+  #define DISPLAY_IS_OLED false
 #elif BOARD_MODEL == BOARD_HELTEC_T096
   Adafruit_ST7735 display = Adafruit_ST7735(&SPI1, DISPLAY_CS, DISPLAY_DC, DISPLAY_RST);
   #define SSD1306_WHITE ST77XX_WHITE
   #define SSD1306_BLACK ST77XX_BLACK
+  #define DISPLAY_IS_OLED false
 #elif BOARD_MODEL == BOARD_HELTEC_T114
   ST7789Spi display(&SPI1, DISPLAY_RST, DISPLAY_DC, DISPLAY_CS);
   #define SSD1306_WHITE ST77XX_WHITE
   #define SSD1306_BLACK ST77XX_BLACK
+  #define DISPLAY_IS_OLED false
 #elif BOARD_MODEL == BOARD_TBEAM_S_V1 || BOARD_MODEL == BOARD_TBEAM_S_V3
   Adafruit_SH1106G display = Adafruit_SH1106G(128, 64, &Wire, -1);
   #define SSD1306_WHITE SH110X_WHITE
   #define SSD1306_BLACK SH110X_BLACK
+  #define DISPLAY_IS_OLED true
 #elif BOARD_MODEL == BOARD_TECHO
   GxEPD2_BW<GxEPD2_154_D67, GxEPD2_154_D67::HEIGHT> display(GxEPD2_154_D67(pin_disp_cs, pin_disp_dc, pin_disp_reset, pin_disp_busy));
   uint32_t last_epd_refresh = 0;
   uint32_t last_epd_full_refresh = 0;
   #define REFRESH_PERIOD 300000
+  #define DISPLAY_IS_OLED false
 #else
   Adafruit_SSD1306 display(DISP_W, DISP_H, &Wire, DISP_RST);
+  #define DISPLAY_IS_OLED true
 #endif
 
 float disp_target_fps = 7;
@@ -189,6 +195,11 @@ float epd_update_fps  = 0.5;
 #define DISP_PIN_SIZE   6
 #define DISPLAY_BLANKING_TIMEOUT 15*1000
 uint8_t disp_mode = DISP_MODE_UNKNOWN;
+// The raw 0-3 rotation value actually applied at boot (display_rotation
+// itself is only a local var inside display_init()) - used by the settings
+// menu (Menu.h) to force its own fixed landscape orientation regardless of
+// the main content's rotation setting. See update_display()'s menu dispatch.
+uint8_t active_display_rotation = 0;
 uint8_t disp_ext_fb = false;
 unsigned char fb[512];
 uint32_t last_disp_update = 0;
@@ -204,6 +215,13 @@ uint32_t last_page_flip = 0;
 int page_interval = 4000;
 bool device_signatures_ok();
 bool device_firmware_ok();
+
+#if HAS_ENCODER == true
+  // MENU_STATE_* is #define'd in Menu.h, included after Display.h, so it
+  // can't be referenced by name here - go through this bool wrapper instead.
+  bool menu_is_open();
+  void draw_settings_menu_disp();
+#endif
 
 #if BOARD_MODEL == BOARD_HELTEC_T096
   // The 80x160 panel gets a redesigned layout: 80x64 device area on top of
@@ -440,8 +458,29 @@ uint8_t display_contrast = 0x00;
   }
 #else
   void set_contrast(Adafruit_SSD1306 *display, uint8_t contrast) {
-    display->ssd1306_command(SSD1306_SETCONTRAST);
-    display->ssd1306_command(contrast);
+    // SETCONTRAST alone only adjusts segment drive current - the panel
+    // stays lit even at 0, it doesn't "turn off". Actually powering the
+    // OLED matrix off/on is a separate command (DISPLAYOFF/DISPLAYON,
+    // 0xAE/0xAF), which we use here at the 0 boundary for a real, visible
+    // effect instead of relying on contrast's often-marginal range.
+    //
+    // Bundled into one I2C transaction (0x00 control byte = command
+    // stream, then all command bytes) rather than one ssd1306_command()
+    // call per byte - some SSD1306-compatible controllers only accept a
+    // command's parameter byte if it arrives in the same transaction as
+    // the opcode. ssd1306_commandList() does this the same way internally
+    // but is a protected library method, so replicate its wire protocol
+    // directly instead.
+    Wire.beginTransmission(DISP_ADDR);
+    Wire.write((uint8_t)0x00);
+    if (contrast == 0) {
+      Wire.write(SSD1306_DISPLAYOFF);
+    } else {
+      Wire.write(SSD1306_DISPLAYON);
+      Wire.write(SSD1306_SETCONTRAST);
+      Wire.write(contrast);
+    }
+    Wire.endTransmission();
   }
 #endif
 
@@ -660,6 +699,8 @@ bool display_init() {
           display.setRotation(3);
         #endif
       }
+
+      active_display_rotation = display.getRotation();
 
       update_area_positions();
 
@@ -1401,6 +1442,7 @@ uint8_t disp_page = START_PAGE;
 #if HAS_WIFI
   extern IPAddress wr_device_ip;
 #endif
+
 void draw_disp_area() {
   #if BOARD_MODEL == BOARD_HELTEC_T096
     disp_banner_fg = 0;
@@ -1736,8 +1778,32 @@ void update_display(bool blank = false) {
           display.fillScreen(SSD1306_WHITE);
         #endif
 
-        update_stat_area();
-        update_disp_area();
+        #if HAS_ENCODER == true
+          // The settings menu is always laid out for the panel's native
+          // 128x64 landscape shape, regardless of what rotation the main
+          // content is using - the panel itself doesn't physically change
+          // shape, so forcing rotation 0/2 (both landscape, GFX-wise) here
+          // just undoes whatever swap the main content's rotation setting
+          // applied. 90 and 270 are the same physical mounting 180 degrees
+          // apart, so they need opposite landscape variants (0 vs 2) to
+          // still read right-side-up - same for the 0/180 pair.
+          static bool menu_was_open = false;
+          bool menu_open_now = menu_is_open();
+          if (menu_open_now && !menu_was_open) {
+            display.setRotation(active_display_rotation & 0x02);
+          } else if (!menu_open_now && menu_was_open) {
+            display.setRotation(active_display_rotation);
+          }
+          menu_was_open = menu_open_now;
+
+          if (menu_open_now) {
+            draw_settings_menu_disp();
+          } else
+        #endif
+        {
+          update_stat_area();
+          update_disp_area();
+        }
       }
       
       #if BOARD_MODEL == BOARD_TECHO

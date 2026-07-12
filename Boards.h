@@ -331,6 +331,7 @@
       #define LORA_LNA_GAIN  30
       #define LORA_LNA_GVT   14
       #define HAS_BUZZER true
+      #define HAS_ENCODER true
 
       const int pin_sclk = 1;
       const int pin_reset = 2;
@@ -346,6 +347,9 @@
       const int pin_btn_usr1 = 4;
       const int pin_np = 48;
       #define PIN_BUZZER 17
+      #define PIN_ENCODER_UP 9
+      #define PIN_ENCODER_DOWN 10
+      #define PIN_ENCODER_PRESS 11
 
       #if HAS_NP == false
         #if defined(EXTERNAL_LEDS)
@@ -1383,6 +1387,10 @@
 
   #ifndef HAS_BUZZER
     #define HAS_BUZZER false
+  #endif
+
+  #ifndef HAS_ENCODER
+    #define HAS_ENCODER false
   #endif
 
   #ifndef LED_ON

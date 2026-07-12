@@ -50,11 +50,24 @@ uint8_t eeprom_read(uint32_t mapped_addr);
 
 void set_rns_link_state(uint8_t new_state);
 
+// Default ON: preserves the buzzer's always-on behavior for anyone who has
+// never touched the Sound setting (erased EEPROM reads 0xFF, not 0x00).
+bool sound_enabled = true;
+void db_conf_save(uint8_t val);
+void di_conf_save(uint8_t dint);
+void snd_conf_save(bool is_enabled);
+void wr_conf_save(uint8_t mode);
+void drot_conf_save(uint8_t val);
+void eeprom_update(int mapped_addr, uint8_t byte);
+void buzzer_encoder_tick_melody();
+void buzzer_encoder_click_melody();
+
 #if HAS_DISPLAY == true
   #include "Display.h"
 #else
 	void display_unblank() {}
 	bool display_blanked = false;
+	#define DISPLAY_IS_OLED false
 #endif
 
 #if HAS_BLUETOOTH == true || HAS_BLE == true
@@ -100,6 +113,12 @@ void set_rns_link_state(uint8_t new_state);
 #if MCU_VARIANT == MCU_1284P || MCU_VARIANT == MCU_2560
 	#include <avr/wdt.h>
 	#include <util/atomic.h>
+#endif
+
+// Must come after ISR_VECT is defined above (Encoder.h's ISR uses it).
+#if HAS_ENCODER == true
+  #include "Encoder.h"
+  #include "Menu.h"
 #endif
 
 uint8_t boot_vector = 0x00;
@@ -211,6 +230,7 @@ uint8_t boot_vector = 0x00;
   // race with the noTone() call at the end of each note in a tight loop
   // and crash the LEDC driver, so time each note manually instead.
   void buzzer_play_notes(const uint16_t *notes, uint8_t count, uint16_t note_ms) {
+    if (!sound_enabled) return;
     for (uint8_t i = 0; i < count; i++) {
       tone(PIN_BUZZER, notes[i]);
       delay(note_ms);
@@ -242,6 +262,7 @@ uint8_t boot_vector = 0x00;
   const uint16_t BUZZER_ASYNC_GAP_MS = 10;
 
   void buzzer_start_async_melody(const uint16_t *notes, uint8_t count, uint16_t note_ms) {
+    if (!sound_enabled) return;
     buzzer_async_notes = notes;
     buzzer_async_count = count;
     buzzer_async_note_ms = note_ms;
@@ -294,6 +315,18 @@ uint8_t boot_vector = 0x00;
     static const uint16_t notes[] = { 1319, 988 };
     buzzer_start_async_melody(notes, sizeof(notes)/sizeof(notes[0]), 45);
   }
+
+  // Single-note, very short ticks for encoder feedback - deliberately
+  // shorter than the other cues so rapid rotation doesn't get annoying.
+  void buzzer_encoder_tick_melody() {
+    static const uint16_t notes[] = { 500 };
+    buzzer_start_async_melody(notes, 1, 12);
+  }
+
+  void buzzer_encoder_click_melody() {
+    static const uint16_t notes[] = { 1200 };
+    buzzer_start_async_melody(notes, 1, 12);
+  }
 #else
   void buzzer_init() { }
   void buzzer_update() { }
@@ -302,6 +335,8 @@ uint8_t boot_vector = 0x00;
   void buzzer_boot_melody() { }
   void buzzer_rns_connect_melody() { }
   void buzzer_rns_disconnect_melody() { }
+  void buzzer_encoder_tick_melody() { }
+  void buzzer_encoder_click_melody() { }
 #endif
 
 // Centralises rns_link_state transitions so the RNS connect/disconnect chirp
@@ -1981,6 +2016,19 @@ void bt_conf_save(bool is_enabled) {
       eeprom_flush();
     #endif
 	}
+}
+
+void snd_conf_save(bool is_enabled) {
+	sound_enabled = is_enabled;
+	if (is_enabled) {
+		eeprom_update(eeprom_addr(ADDR_CONF_SND), SND_ENABLE_BYTE);
+	} else {
+		eeprom_update(eeprom_addr(ADDR_CONF_SND), SND_DISABLE_BYTE);
+	}
+  #if !HAS_EEPROM && MCU_VARIANT == MCU_NRF52
+    // have to do a flush because we're only writing 1 byte and it syncs after 8
+    eeprom_flush();
+  #endif
 }
 
 void di_conf_save(uint8_t dint) {

@@ -150,6 +150,10 @@ void setup() {
     input_init();
   #endif
 
+  #if HAS_ENCODER == true
+    encoder_init();
+  #endif
+
   #if HAS_NP == false
     pinMode(pin_led_rx, OUTPUT);
     pinMode(pin_led_tx, OUTPUT);
@@ -262,6 +266,11 @@ void setup() {
   #endif
 
   #if HAS_BUZZER == true
+    #if HAS_EEPROM
+      sound_enabled = (EEPROM.read(eeprom_addr(ADDR_CONF_SND)) != SND_DISABLE_BYTE);
+    #elif MCU_VARIANT == MCU_NRF52
+      sound_enabled = (eeprom_read(eeprom_addr(ADDR_CONF_SND)) != SND_DISABLE_BYTE);
+    #endif
     buzzer_init();
     buzzer_boot_melody();
   #endif
@@ -1178,6 +1187,12 @@ void serial_callback(uint8_t sbyte) {
           wifi_remote_init();
         }
       #endif
+    } else if (command == CMD_SND) {
+      #if HAS_BUZZER == true
+        if (sbyte == SND_ENABLE_BYTE || sbyte == SND_DISABLE_BYTE) {
+          snd_conf_save(sbyte == SND_ENABLE_BYTE);
+        }
+      #endif
     } else if (command == CMD_WIFI_SSID) {
       #if HAS_WIFI
         if (sbyte == FESC) { ESCAPE = true; }
@@ -1780,6 +1795,11 @@ void loop() {
     input_read();
   #endif
 
+  #if HAS_ENCODER == true
+    encoder_process();
+    menu_button_process();
+  #endif
+
   if (memory_low) {
     #if PLATFORM == PLATFORM_ESP32
       if (esp_get_free_heap_size() < 8192) {
@@ -1860,6 +1880,20 @@ void button_event(uint8_t event, unsigned long duration) {
   #if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
     if (display_blanked) {
       display_unblank();
+    #if HAS_ENCODER == true
+    } else if (menu_is_open()) {
+      // Settings menu owns the screen - don't let the main button's
+      // sleep/BT-pairing/console tiers fire while the user is mid-edit.
+      // Doubles as an alternate control everywhere except WiFi SSID/PSK
+      // text entry, where it stays a dedicated backspace key instead (see
+      // menu_main_button_del()).
+      if (menu_state == MENU_STATE_WIFI_TEXT_EDIT) {
+        menu_main_button_del();
+        display_unblank();
+      } else {
+        menu_button_press(duration);
+      }
+    #endif
     } else {
       if (duration > 10000) {
         #if HAS_CONSOLE
@@ -1872,6 +1906,10 @@ void button_event(uint8_t event, unsigned long duration) {
       } else if (duration > 5000) {
         #if HAS_BLUETOOTH || HAS_BLE
           if (bt_state != BT_STATE_CONNECTED) { bt_enable_pairing(); }
+        #endif
+      } else if (duration > 3000) {
+        #if HAS_ENCODER == true
+          menu_open_from_closed();
         #endif
       } else if (duration > 700) {
         #if HAS_SLEEP

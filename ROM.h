@@ -46,10 +46,13 @@
   #define ADDR_CONF_DIA  0xB9
   #define ADDR_CONF_WIFI 0xBA
   #define ADDR_CONF_WCHN 0xBB
+  #define ADDR_CONF_SND  0xBC
 
   #define INFO_LOCK_BYTE 0x73
   #define CONF_OK_BYTE   0x73
   #define BT_ENABLE_BYTE 0x73
+  #define SND_ENABLE_BYTE  0x01
+  #define SND_DISABLE_BYTE 0x00
 
   #define EEPROM_RESERVED 200
   
