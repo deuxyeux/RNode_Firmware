@@ -167,6 +167,7 @@ bool wifi_remote_available() {
     } else {
       // wifi_dbg("Client disconnected"); // TODO: Remove debug
       wifi_remote_close_all();
+      host_disconnected();
       return false;
     }
   } else {
@@ -187,7 +188,7 @@ uint8_t wifi_remote_read() {
   if (connection && connection.available()) { return connection.read(); }
   else {
     // wifi_dbg("Error: No data to read from TCP socket"); // TODO: Remove debug
-    if (connection) { wifi_remote_close_all(); }
+    if (connection) { wifi_remote_close_all(); host_disconnected(); }
     return 0xC0;
   }
 }
