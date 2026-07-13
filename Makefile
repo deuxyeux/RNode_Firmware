@@ -695,7 +695,7 @@ release-heltec_t096:
 release-promicro:
 	arduino-cli compile --log --fqbn promicro:nrf52:nicenanov2:softdevice=s140v6 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF5\""
 	cp build/promicro.nrf52.nicenanov2/RNode_Firmware.ino.hex build/rnode_firmware_promicro.hex
-	adafruit-nrfutil dfu genpkg --dev-type 0x0052 --application build/rnode_firmware_promicro.hex Release/rnode_firmware_promicro.zip
+	adafruit-nrfutil dfu genpkg --dev-type 0x0052 --sd-req 0xFFFE --application build/rnode_firmware_promicro.hex Release/rnode_firmware_promicro.zip
 
 release-techo:
 	arduino-cli compile --log --fqbn adafruit:nrf52:pca10056 -e --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x44\""
