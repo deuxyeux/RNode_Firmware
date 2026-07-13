@@ -604,9 +604,42 @@
       }
       if (wifi_changed) { wifi_remote_init(); }
     #endif
-    // Must be last: drot_conf_save() may call hard_reset() if the rotation
-    // actually changed, which would otherwise discard any of the above
-    // writes that hadn't happened yet.
+    #if MENU_HAS_HW_PAGE == true
+      // Flush an in-progress immediate-commit screen (Voltage/Battery cal,
+      // or the GPIO pin picker below) if a long-press exits the whole menu
+      // while one of those screens is still open. They normally commit on
+      // their own BACK/confirm (see menu_confirm_select()), but on
+      // encoder-only boards (no separate main button - see HAS_INPUT) a
+      // long-press from *inside* one of these screens skips that and jumps
+      // straight here instead, which used to silently discard the edit.
+      #if HAS_VSENSE == true
+        if (menu_state == MENU_STATE_HW_EDIT && hw_menu_cursor == HW_ITEM_VOLTAGE) {
+          uint8_t live_raw = (uint8_t)(vsense_divider_ratio * 10.0 + 0.5);
+          if (staged_vsense_divider_ratio_raw != live_raw) {
+            vsr_conf_save(staged_vsense_divider_ratio_raw);
+          }
+        }
+      #endif
+      #if HAS_BATTERY_DIVIDER == true
+        if (menu_state == MENU_STATE_HW_EDIT && hw_menu_cursor == HW_ITEM_BATTERY) {
+          uint8_t live_pct = (uint8_t)((battery_v_scale / BATTERY_V_SCALE_DEFAULT) * 100.0 + 0.5);
+          if (staged_battery_v_scale_pct != live_pct) {
+            bvs_conf_save(staged_battery_v_scale_pct);
+          }
+        }
+      #endif
+    #endif
+    // Must be last: gpio_conf_save()/drot_conf_save() may call hard_reset()
+    // if the value actually changed, which would otherwise discard any of
+    // the above writes that hadn't happened yet.
+    #if HAS_GPIO_MENU == true
+      if (menu_state == MENU_STATE_GPIO_PIN_EDIT) {
+        uint8_t new_pin = gpio_free_pin_candidates[staged_gpio_pin_idx];
+        if (new_pin != gpio_item_live_pin(gpio_menu_cursor)) {
+          gpio_conf_save(gpio_item_addr(gpio_menu_cursor), new_pin);
+        }
+      }
+    #endif
     drot_conf_save(staged_display_rotation);
     menu_state  = MENU_STATE_CLOSED;
     menu_cursor = 0;
