@@ -452,11 +452,13 @@ void update_pmu() {
 
 #if HAS_VSENSE == true
   // No PMU and no real battery to gauge on this board - just a resistor
-  // divider (R3 100k to VCC, R2 10k to GND) feeding the ADC through a 1k
-  // series resistor, so the only thing worth reporting is the raw voltage
-  // itself, not a charge percentage/state. Ratio: Vin = Vpin * (R2+R3)/R2 -
-  // the 1k series resistor is negligible since the ADC draws ~no current.
-  #define VSENSE_DIVIDER_RATIO 11.0
+  // divider feeding the ADC through a 1k series resistor, so the only
+  // thing worth reporting is the raw voltage itself, not a charge
+  // percentage/state. Ratio: Vin = Vpin * (R2+R3)/R2 - the 1k series
+  // resistor is negligible since the ADC draws ~no current. The ratio
+  // itself is a runtime var (vsense_divider_ratio, Config.h) so it can be
+  // overridden per-device via CMD_VSENSE_DIV for boards whose actual
+  // resistor values drift from the reference design.
   #define VSENSE_SAMPLE_INTERVAL 2000
   #define VSENSE_SAMPLES 8
   unsigned long last_vsense_update = 0;
@@ -465,7 +467,7 @@ void update_pmu() {
     if (millis()-last_vsense_update >= VSENSE_SAMPLE_INTERVAL) {
       uint32_t acc_mv = 0;
       for (uint8_t i = 0; i < VSENSE_SAMPLES; i++) { acc_mv += analogReadMilliVolts(PIN_VSENSE); }
-      vsense_voltage = ((float)(acc_mv/VSENSE_SAMPLES)/1000.0) * VSENSE_DIVIDER_RATIO;
+      vsense_voltage = ((float)(acc_mv/VSENSE_SAMPLES)/1000.0) * vsense_divider_ratio;
       last_vsense_update = millis();
     }
   }

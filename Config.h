@@ -239,6 +239,10 @@
     // charge state for - just a plain voltage readout). Independent of the
     // battery_ready/battery_percent state machine above.
     float vsense_voltage = 0.0;
+    // Divider ratio (R2+R3)/R2. Board-default until overridden and persisted
+    // to EEPROM (ADDR_CONF_VSR) via CMD_VSENSE_DIV, for boards whose actual
+    // resistor values drift from the reference design.
+    float vsense_divider_ratio = VSENSE_DIVIDER_RATIO_DEFAULT;
     uint8_t display_intensity = 0xFF;
     uint8_t display_addr = 0xFF;
     volatile bool display_updating = false;

@@ -334,6 +334,8 @@
       #define HAS_ENCODER true
       #define HAS_VSENSE true
       #define PIN_VSENSE 6
+      // R3 100k to VCC, R2 10k to GND: Vin = Vpin * (R2+R3)/R2 = Vpin * 11.0
+      #define VSENSE_DIVIDER_RATIO_DEFAULT 11.0
 
       const int pin_sclk = 1;
       const int pin_reset = 2;
@@ -1397,6 +1399,10 @@
 
   #ifndef HAS_VSENSE
     #define HAS_VSENSE false
+  #endif
+
+  #ifndef VSENSE_DIVIDER_RATIO_DEFAULT
+    #define VSENSE_DIVIDER_RATIO_DEFAULT 11.0
   #endif
 
   #ifndef LED_ON

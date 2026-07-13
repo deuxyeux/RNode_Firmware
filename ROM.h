@@ -47,6 +47,7 @@
   #define ADDR_CONF_WIFI 0xBA
   #define ADDR_CONF_WCHN 0xBB
   #define ADDR_CONF_SND  0xBC
+  #define ADDR_CONF_VSR  0xBD
 
   #define INFO_LOCK_BYTE 0x73
   #define CONF_OK_BYTE   0x73

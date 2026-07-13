@@ -58,6 +58,9 @@ void di_conf_save(uint8_t dint);
 void snd_conf_save(bool is_enabled);
 void wr_conf_save(uint8_t mode);
 void drot_conf_save(uint8_t val);
+#if HAS_VSENSE == true
+  void vsr_conf_save(uint8_t val);
+#endif
 void eeprom_update(int mapped_addr, uint8_t byte);
 void buzzer_encoder_tick_melody();
 void buzzer_encoder_click_melody();
@@ -1151,6 +1154,15 @@ void kiss_indicate_txpower() {
 	serial_write(FEND);
 }
 
+#if HAS_VSENSE == true
+void kiss_indicate_vsense_div() {
+	serial_write(FEND);
+	serial_write(CMD_VSENSE_DIV);
+	escaped_serial_write((uint8_t)(vsense_divider_ratio*10.0));
+	serial_write(FEND);
+}
+#endif
+
 void kiss_indicate_bandwidth() {
 	serial_write(FEND);
 	serial_write(CMD_BANDWIDTH);
@@ -2030,6 +2042,20 @@ void snd_conf_save(bool is_enabled) {
     eeprom_flush();
   #endif
 }
+
+#if HAS_VSENSE == true
+// Stored as ratio*10 (one decimal place is enough for divider tolerances).
+// 0x00 and 0xFF (erased EEPROM) both mean "unset" - fall back to the
+// board's VSENSE_DIVIDER_RATIO_DEFAULT instead of using them as-is.
+void vsr_conf_save(uint8_t val) {
+	eeprom_update(eeprom_addr(ADDR_CONF_VSR), val);
+  #if !HAS_EEPROM && MCU_VARIANT == MCU_NRF52
+    eeprom_flush();
+  #endif
+	if (val != 0x00 && val != 0xFF) { vsense_divider_ratio = (float)val / 10.0; }
+	else { vsense_divider_ratio = VSENSE_DIVIDER_RATIO_DEFAULT; }
+}
+#endif
 
 void di_conf_save(uint8_t dint) {
 	eeprom_update(eeprom_addr(ADDR_CONF_DINT), dint);

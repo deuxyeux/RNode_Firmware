@@ -29,6 +29,7 @@
   #define MENU_STATE_WIFI_TEXT_EDIT 5   // editing WiFi SSID/PSK via character wheel
   #define MENU_STATE_WIFI_TEXT_CONFIRM 6 // "Save?" dialog, long-press from text edit
   #define MENU_STATE_HW_LIST        7   // Hardware submenu list (read-only info)
+  #define MENU_STATE_HW_EDIT        8   // editing the Input Voltage divider ratio
 
   // CPU temperature (pmu_temperature, Power.h) is only measured on
   // IS_ESP32S3 boards or boards with a real PMU - mirrors the exact guard
@@ -146,6 +147,15 @@
 
   #if MENU_HAS_HW_PAGE == true
     uint8_t hw_menu_cursor = 0;
+    #if HAS_VSENSE == true
+      // Raw EEPROM format (ratio*10, see vsr_conf_save()/Utilities.h) -
+      // synced fresh from the live value on entering MENU_STATE_HW_EDIT
+      // (see menu_confirm_select()), not staged at whole-menu-open time
+      // like every other field, since this one commits to EEPROM the
+      // moment you back out of its own edit screen rather than waiting
+      // for SAVE & EXIT.
+      uint8_t staged_vsense_divider_ratio_raw = 0;
+    #endif
   #endif
 
   bool menu_is_open() {
@@ -259,6 +269,23 @@
     }
     staged_display_rotation = (uint8_t)v;
   }
+
+  #if MENU_HAS_HW_PAGE == true && HAS_VSENSE == true
+    // Stored/edited as ratio*10 (e.g. 110 = 11.0) - 1 and 254 keep clear of
+    // the 0x00/0xFF "unset, use board default" sentinels vsr_conf_save()
+    // and the boot-time EEPROM load both check for.
+    void step_vsense_divider(int8_t dir, bool wrap = false) {
+      int16_t v = (int16_t)staged_vsense_divider_ratio_raw + dir * (int16_t)accelerated_step();
+      if (wrap) {
+        if (v < 1)   v = 254;
+        if (v > 254) v = 1;
+      } else {
+        if (v < 1)   v = 1;
+        if (v > 254) v = 254;
+      }
+      staged_vsense_divider_ratio_raw = (uint8_t)v;
+    }
+  #endif
 
   #if HAS_WIFI == true
     void format_wifi_mode(uint8_t mode, char *buf) {
@@ -451,6 +478,12 @@
         buzzer_encoder_tick_melody();
         hw_menu_cursor = menu_clamp_cursor(hw_menu_cursor, dir, HW_ITEM_COUNT, wrap);
       }
+      #if HAS_VSENSE == true
+        else if (menu_state == MENU_STATE_HW_EDIT) {
+          buzzer_encoder_tick_melody();
+          step_vsense_divider(dir, wrap);
+        }
+      #endif
     #endif
   }
 
@@ -570,11 +603,37 @@
     #endif
     #if MENU_HAS_HW_PAGE == true
       else if (menu_state == MENU_STATE_HW_LIST) {
-        // Read-only info page - only BACK does anything.
+        // Mostly read-only info page - only BACK, and Input Voltage (if
+        // present), do anything.
         if (hw_menu_cursor == HW_ITEM_BACK) {
           menu_state = MENU_STATE_LIST;
         }
+        #if HAS_VSENSE == true
+          else if (hw_menu_cursor == HW_ITEM_VOLTAGE) {
+            // Sync from the live value fresh every time this screen is
+            // opened, not from a whole-menu-session staged copy - this
+            // field commits to EEPROM immediately on its own BACK/confirm,
+            // not deferred to SAVE & EXIT, so live vsense_divider_ratio is
+            // the only value that can ever be stale here.
+            staged_vsense_divider_ratio_raw = (uint8_t)(vsense_divider_ratio * 10.0 + 0.5);
+            menu_state = MENU_STATE_HW_EDIT;
+            last_numeric_rotate_ms = millis();
+          }
+        #endif
       }
+      #if HAS_VSENSE == true
+        else if (menu_state == MENU_STATE_HW_EDIT) {
+          // Commits straight to EEPROM here rather than staging until
+          // SAVE & EXIT - this is board calibration data, not a live
+          // setting, so there's no reason to make leaving it uncommitted
+          // discard the change like every other field does.
+          uint8_t live_raw = (uint8_t)(vsense_divider_ratio * 10.0 + 0.5);
+          if (staged_vsense_divider_ratio_raw != live_raw) {
+            vsr_conf_save(staged_vsense_divider_ratio_raw);
+          }
+          menu_state = MENU_STATE_HW_LIST;
+        }
+      #endif
     #endif
     // menu_state == MENU_STATE_CLOSED + short click: no-op (reserved).
   }
@@ -909,6 +968,16 @@
 
         draw_menu_list_disp("HARDWARE", labels, valbufs, HW_ITEM_COUNT, hw_menu_cursor);
       }
+      #if HAS_VSENSE == true
+        else if (menu_state == MENU_STATE_HW_EDIT) {
+          // Shown as the divider ratio (e.g. "11.0"), not the raw 0-254
+          // EEPROM byte or the live voltage reading - that's what's
+          // actually being calibrated here.
+          char valbuf[8];
+          sprintf(valbuf, "%.1f", staged_vsense_divider_ratio_raw / 10.0);
+          draw_menu_edit_disp("VOLTAGE DIVIDER", valbuf);
+        }
+      #endif
     #endif
   }
 

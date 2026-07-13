@@ -275,6 +275,15 @@ void setup() {
     buzzer_boot_melody();
   #endif
 
+  #if HAS_VSENSE == true
+    #if HAS_EEPROM
+      uint8_t vsr_raw = EEPROM.read(eeprom_addr(ADDR_CONF_VSR));
+    #elif MCU_VARIANT == MCU_NRF52
+      uint8_t vsr_raw = eeprom_read(eeprom_addr(ADDR_CONF_VSR));
+    #endif
+    if (vsr_raw != 0x00 && vsr_raw != 0xFF) { vsense_divider_ratio = (float)vsr_raw / 10.0; }
+  #endif
+
   #if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
     #if HAS_PMU == true || IS_ESP32S3
       pmu_ready = init_pmu();
@@ -1191,6 +1200,15 @@ void serial_callback(uint8_t sbyte) {
       #if HAS_BUZZER == true
         if (sbyte == SND_ENABLE_BYTE || sbyte == SND_DISABLE_BYTE) {
           snd_conf_save(sbyte == SND_ENABLE_BYTE);
+        }
+      #endif
+    } else if (command == CMD_VSENSE_DIV) {
+      #if HAS_VSENSE == true
+        if (sbyte == 0xFF) {
+          kiss_indicate_vsense_div();
+        } else {
+          vsr_conf_save(sbyte);
+          kiss_indicate_vsense_div();
         }
       #endif
     } else if (command == CMD_WIFI_SSID) {
