@@ -1810,7 +1810,19 @@ void kiss_dump_config() {
 #if !HAS_EEPROM && MCU_VARIANT == MCU_NRF52
 void eeprom_flush() {
     file.close();
-    file.open(EEPROM_FILE, FILE_O_WRITE);
+    // file.open()'s return value was previously discarded - if this ever
+    // failed (LittleFS busy/reallocating right after the close, timing,
+    // etc.), file's internal handle stays null, and the next eeprom_read()/
+    // eeprom_update() call dereferences that null pointer inside the
+    // library's read()/write()/seek() (none of which null-check it),
+    // hard-faulting the MCU. Since this runs on every single byte written,
+    // a burst of several conf_save calls (e.g. the flasher's Display
+    // "Apply") multiplies the chance of hitting one bad reopen. Retry
+    // rather than proceeding with a broken handle.
+    for (uint8_t attempt = 0; attempt < 5; attempt++) {
+        if (file.open(EEPROM_FILE, FILE_O_WRITE)) break;
+        delay(5);
+    }
     written_bytes = 0;
 }
 #endif
@@ -2085,11 +2097,27 @@ void drot_conf_save(uint8_t val) {
 			// flasher's "Apply" button) resend all display fields together, so
 			// an unrelated brightness/timeout change would otherwise also
 			// reboot the device via this unconditionally-resent rotation value.
+			//
+			// Compared against a fresh read each call (not cached in RAM) -
+			// a RAM cache was tried here to work around a flaky nRF52 flash
+			// read under a write-burst, but that turned out to be a red
+			// herring: the actual bug was eeprom_flush() not checking
+			// whether its file reopen succeeded (see eeprom_flush() below),
+			// and the cache went on to cause its own bugs (a 0xFF sentinel
+			// collision with "rotation never configured", plus a
+			// still-unexplained false positive on ESP32/MeshAdventurer-S3).
+			// With the real bug fixed at the storage layer, a plain fresh
+			// read is simpler and was already proven reliable pre-cache.
 			#if HAS_EEPROM
-				bool rotation_changed = EEPROM.read(eeprom_addr(ADDR_CONF_DROT)) != val;
+				uint8_t stored = EEPROM.read(eeprom_addr(ADDR_CONF_DROT));
 			#elif MCU_VARIANT == MCU_NRF52
-				bool rotation_changed = eeprom_read(eeprom_addr(ADDR_CONF_DROT)) != val;
+				uint8_t stored = eeprom_read(eeprom_addr(ADDR_CONF_DROT));
 			#endif
+			// Match the client's own normalization (an erased/unset byte is
+			// treated as rotation 0) so a board that's never had rotation
+			// configured doesn't reboot on its first apply either.
+			if (stored > 0x03) stored = 0x00;
+			bool rotation_changed = stored != val;
 			eeprom_update(eeprom_addr(ADDR_CONF_DROT), val);
 			if (rotation_changed) { hard_reset(); }
 		}
