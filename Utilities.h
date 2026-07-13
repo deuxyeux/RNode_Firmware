@@ -119,9 +119,14 @@ void buzzer_encoder_click_melody();
 #endif
 
 // Must come after ISR_VECT is defined above (Encoder.h's ISR uses it).
+// Menu.h is the shared settings-menu state machine, usable with just the
+// main button (HAS_MENU) or additionally with a rotary encoder
+// (HAS_ENCODER) - see Boards.h.
+#if HAS_MENU == true
+  #include "Menu.h"
+#endif
 #if HAS_ENCODER == true
   #include "Encoder.h"
-  #include "Menu.h"
 #endif
 
 uint8_t boot_vector = 0x00;

@@ -21,13 +21,18 @@ The fork contains several DIY devices by me and other developers and has a few s
 
 ## RNode Settings Menu system
 
-Boards with a rotary encoder (currently MeshAdventurer-S3) get an on-device settings menu, opened with a long-press (3s) of the main button and navigated with the encoder:
+Boards with a display and a main button get an on-device settings menu, opened with a long-press (3s) of the main button:
 
 - **Display Timeout** - how long before the screen blanks
 - **Brightness** - OLED contrast/backlight level
+- **Orientation** - screen rotation
 - **Sound** - mutes the buzzer entirely
+- **WiFi** - mode/SSID/PSK (ESP32 boards with WiFi only)
+- **Hardware** - read-only info: CPU temp (ESP32-S3 and nRF52 boards), input voltage, WiFi IP/netmask/MAC, Bluetooth MAC, depending on what the board actually has
 
-Changes are staged in RAM as you turn the encoder and only written to EEPROM (with the matching device reboot where needed) when you commit and exit the menu, so browsing settings never triggers spurious reboots or writes. Encoder rotation and button presses get short tick/click buzzer feedback (unless Sound is off).
+MeshAdventurer-S3 additionally has a rotary encoder, which turns/clicks through the same menu instead of tapping the main button. Boards without an encoder (currently ProMicro/FakeTec) navigate with just the main button: a short tap moves forward one step, a quick double-tap moves back, and a long press selects/confirms - the on-screen footer shows whichever scheme applies to the board being flashed.
+
+Changes are staged in RAM as you navigate and only written to EEPROM (with the matching device reboot where needed) when you commit and exit the menu, so browsing settings never triggers spurious reboots or writes. Navigation and button presses get short tick/click buzzer feedback (unless Sound is off).
 
 ## Improvements
 - RNode Settings Menu system - see above

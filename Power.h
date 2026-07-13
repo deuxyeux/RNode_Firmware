@@ -231,6 +231,12 @@ void kiss_indicate_temperature();
 void measure_temperature() {
   #if PLATFORM == PLATFORM_ESP32
     if (pmu_temp_sensor_ready) { pmu_temperature = temperatureRead(); } else { pmu_temperature = PMU_TEMP_MIN-1; }
+  #elif PLATFORM == PLATFORM_NRF52
+    // readCPUTemperature() (nRF5 core, wiring.c) reads the chip's on-die
+    // TEMP peripheral - via sd_temp_get() if the SoftDevice is currently
+    // enabled, or directly otherwise. Present on every nRF52840, unlike
+    // ESP32's temperatureRead() which needs IS_ESP32S3.
+    if (pmu_temp_sensor_ready) { pmu_temperature = readCPUTemperature(); } else { pmu_temperature = PMU_TEMP_MIN-1; }
   #endif
 }
 
@@ -479,6 +485,12 @@ bool init_pmu() {
     #if !HAS_PMU
       return true;
     #endif
+  #endif
+
+  #if PLATFORM == PLATFORM_NRF52
+    // The TEMP peripheral is a fixed part of every nRF52840, not something
+    // that depends on board-specific PMU hardware.
+    pmu_temp_sensor_ready = true;
   #endif
 
   #if BOARD_MODEL == BOARD_RNODE_NG_21 || BOARD_MODEL == BOARD_LORA32_V2_1 || BOARD_MODEL == BOARD_TDECK || BOARD_MODEL == BOARD_T3S3 || BOARD_MODEL == BOARD_TECHO || BOARD_MODEL == BOARD_PROMICRO

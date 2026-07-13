@@ -1344,6 +1344,24 @@
       #define CONFIG_QUEUE_SIZE 6144
       #define CONFIG_QUEUE_MAX_LENGTH 200
 
+      // RNode Settings menu (Menu.h). Most ProMicro/FakeTec builds only
+      // wire the single main button, so navigation defaults to that
+      // (tap = next, double-tap = back, hold = select/open - see
+      // menu_button_press()). If your build has an add-on rotary encoder
+      // wired up, define PROMICRO_HAS_ENCODER true and set
+      // PIN_ENCODER_UP/PIN_ENCODER_DOWN/PIN_ENCODER_PRESS to match your
+      // wiring (e.g. via build flags) before this header is compiled.
+      #define HAS_MENU true
+      #ifndef PROMICRO_HAS_ENCODER
+        #define PROMICRO_HAS_ENCODER false
+      #endif
+      #if PROMICRO_HAS_ENCODER
+        #define HAS_ENCODER true
+        #if !defined(PIN_ENCODER_UP) || !defined(PIN_ENCODER_DOWN) || !defined(PIN_ENCODER_PRESS)
+          #error PROMICRO_HAS_ENCODER is set but PIN_ENCODER_UP/PIN_ENCODER_DOWN/PIN_ENCODER_PRESS are not defined - set them to match your wiring.
+        #endif
+      #endif
+
       //Confused with the pin numbers??
       //https://github.com/pdcook/nRFMicro-Arduino-Core/blob/a83161e619da8668f726b52578a3dd89c1ef5956/variants/nice_nano/variant.h#L59
 
@@ -1395,6 +1413,15 @@
 
   #ifndef HAS_ENCODER
     #define HAS_ENCODER false
+  #endif
+
+  // Whether the RNode Settings menu (Menu.h) is compiled in at all. Boards
+  // with a rotary encoder always get it; boards without one can still opt
+  // in and navigate the menu with just the main button (see
+  // menu_button_press()/menu_button_process(), Menu.h) by defining
+  // HAS_MENU true explicitly in their board block above.
+  #ifndef HAS_MENU
+    #define HAS_MENU HAS_ENCODER
   #endif
 
   #ifndef HAS_VSENSE

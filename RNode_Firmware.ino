@@ -1819,6 +1819,8 @@ void loop() {
 
   #if HAS_ENCODER == true
     encoder_process();
+  #endif
+  #if HAS_MENU == true
     menu_button_process();
   #endif
 
@@ -1902,7 +1904,7 @@ void button_event(uint8_t event, unsigned long duration) {
   #if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
     if (display_blanked) {
       display_unblank();
-    #if HAS_ENCODER == true
+    #if HAS_MENU == true
     } else if (menu_is_open()) {
       // Settings menu owns the screen - don't let the main button's
       // sleep/BT-pairing/console tiers fire while the user is mid-edit.
@@ -1930,7 +1932,7 @@ void button_event(uint8_t event, unsigned long duration) {
           if (bt_state != BT_STATE_CONNECTED) { bt_enable_pairing(); }
         #endif
       } else if (duration > 3000) {
-        #if HAS_ENCODER == true
+        #if HAS_MENU == true
           menu_open_from_closed();
         #endif
       } else if (duration > 700) {

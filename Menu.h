@@ -31,14 +31,23 @@
   #define MENU_STATE_HW_LIST        7   // Hardware submenu list (read-only info)
   #define MENU_STATE_HW_EDIT        8   // editing the Input Voltage divider ratio
 
-  // CPU temperature (pmu_temperature, Power.h) is only measured on
-  // IS_ESP32S3 boards or boards with a real PMU - mirrors the exact guard
-  // RNode_Firmware.ino already uses for init_pmu()/update_pmu().
+  // The Hardware page exists whenever there's anything board-level worth
+  // showing (battery/voltage sensing via HAS_PMU, or an ESP32-S3's CPU
+  // temp) - mirrors the exact guard RNode_Firmware.ino already uses for
+  // init_pmu()/update_pmu().
   #if HAS_PMU == true || IS_ESP32S3
     #define MENU_HAS_HW_PAGE true
   #else
     #define MENU_HAS_HW_PAGE false
   #endif
+
+  // CPU temperature (pmu_temperature, Power.h) is only ever populated on
+  // IS_ESP32S3 boards (via temperatureRead()) and on nRF52 (every nRF52840
+  // has an on-die TEMP peripheral, read via readCPUTemperature() - see
+  // init_pmu()/measure_temperature(), Power.h). Plain (non-S3) ESP32 boards
+  // have no such sensor - HAS_PMU alone doesn't mean a temp reading exists,
+  // several boards set it purely for resistor/analogRead battery sensing.
+  #define MENU_HAS_CPU_TEMP (IS_ESP32S3 || MCU_VARIANT == MCU_NRF52)
 
   // Optional top-level items (WiFi, Hardware) shift indices around, so
   // build them up incrementally rather than hardcoding numbers per case.
@@ -73,8 +82,12 @@
   #endif
 
   #if MENU_HAS_HW_PAGE == true
-    #define HW_ITEM_TEMP 0
-    #define HW_NEXT_0    1
+    #if MENU_HAS_CPU_TEMP == true
+      #define HW_ITEM_TEMP 0
+      #define HW_NEXT_0    1
+    #else
+      #define HW_NEXT_0 0
+    #endif
 
     #if HAS_VSENSE == true
       #define HW_ITEM_VOLTAGE HW_NEXT_0
@@ -638,10 +651,12 @@
     // menu_state == MENU_STATE_CLOSED + short click: no-op (reserved).
   }
 
-  // The main (non-encoder) button doubles as an alternate control while the
-  // menu is open, everywhere except WIFI_TEXT_EDIT (which keeps it as a
-  // dedicated backspace key - see menu_main_button_del(), called separately
-  // by button_event() for that one state). Short press cycles forward
+  // The main button drives the menu everywhere except WIFI_TEXT_EDIT (which
+  // keeps it as a dedicated backspace key - see menu_main_button_del(),
+  // called separately by button_event() for that one state). On boards
+  // without an encoder (HAS_MENU without HAS_ENCODER - see Boards.h) this is
+  // the only control; on encoder boards it's an alternate one. Short press
+  // cycles forward
   // through the current level, same as one encoder detent; a quick second
   // short press (double-tap) cycles backward instead - see
   // menu_btn_pending/menu_button_process(). Long press confirms/selects,
@@ -725,7 +740,11 @@
     display.setTextColor(SSD1306_WHITE);
     display.drawFastHLine(4, 59, 120, SSD1306_WHITE);
     display.setCursor(6, 63);
-    display.print("turn:move press:open");
+    #if HAS_ENCODER == true
+      display.print("turn:move press:open");
+    #else
+      display.print("tap:next hold:open");
+    #endif
   }
 
   void draw_menu_edit_disp(const char *title, const char *valbuf) {
@@ -749,7 +768,11 @@
 
     display.drawFastHLine(4, 50, 120, SSD1306_WHITE);
     display.setCursor(6, 59);
-    display.print("turn:adjust press:ok");
+    #if HAS_ENCODER == true
+      display.print("turn:adjust press:ok");
+    #else
+      display.print("tap:adjust hold:ok");
+    #endif
   }
 
   #if HAS_WIFI == true
@@ -913,8 +936,10 @@
         const char *labels[HW_ITEM_COUNT];
         char valbufs[HW_ITEM_COUNT][24];
 
-        labels[HW_ITEM_TEMP] = "CPU Temp";
-        sprintf(valbufs[HW_ITEM_TEMP], "%.1fC", pmu_temperature);
+        #if MENU_HAS_CPU_TEMP == true
+          labels[HW_ITEM_TEMP] = "CPU Temp";
+          sprintf(valbufs[HW_ITEM_TEMP], "%.1fC", pmu_temperature);
+        #endif
 
         #if HAS_VSENSE == true
           labels[HW_ITEM_VOLTAGE] = "Input Voltage";
@@ -955,12 +980,27 @@
 
         #if HAS_BLUETOOTH == true || HAS_BLE == true
           labels[HW_ITEM_BT_MAC] = "BT";
-          {
-            uint8_t mac[6];
-            esp_read_mac(mac, ESP_MAC_BT);
-            sprintf(valbufs[HW_ITEM_BT_MAC], "%02X:%02X:%02X:%02X:%02X:%02X",
-              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-          }
+          #if MCU_VARIANT == MCU_ESP32
+            {
+              uint8_t mac[6];
+              esp_read_mac(mac, ESP_MAC_BT);
+              sprintf(valbufs[HW_ITEM_BT_MAC], "%02X:%02X:%02X:%02X:%02X:%02X",
+                mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+            }
+          #elif MCU_VARIANT == MCU_NRF52
+            // Bluefruit.getAddr() only returns a real address once the BLE
+            // stack has actually started (bt_start()/bt_ready, Bluetooth.h) -
+            // unlike ESP32's esp_read_mac(), there's no hardware-burned MAC
+            // readable before that.
+            if (bt_ready) {
+              ble_gap_addr_t gap_addr = Bluefruit.getAddr();
+              sprintf(valbufs[HW_ITEM_BT_MAC], "%02X:%02X:%02X:%02X:%02X:%02X",
+                gap_addr.addr[5], gap_addr.addr[4], gap_addr.addr[3],
+                gap_addr.addr[2], gap_addr.addr[1], gap_addr.addr[0]);
+            } else {
+              sprintf(valbufs[HW_ITEM_BT_MAC], "N/A");
+            }
+          #endif
         #endif
 
         labels[HW_ITEM_BACK] = "BACK";

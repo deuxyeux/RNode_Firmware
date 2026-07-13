@@ -45,18 +45,34 @@
   volatile uint8_t encoder_prev_ab = 0;
   volatile int8_t  encoder_quarter = 0;
   volatile int8_t  encoder_delta   = 0;
-  portMUX_TYPE encoder_mux = portMUX_INITIALIZER_UNLOCKED;
+
+  // ESP-IDF's spinlock (portMUX_TYPE) has no nRF52 equivalent - a plain
+  // global interrupt gate is all that's needed here anyway, since the
+  // critical sections just protect a couple of int8_t's from a single-core
+  // MCU's own ISR.
+  #if MCU_VARIANT == MCU_ESP32
+    portMUX_TYPE encoder_mux = portMUX_INITIALIZER_UNLOCKED;
+    #define ENCODER_ENTER_CRITICAL_ISR() portENTER_CRITICAL_ISR(&encoder_mux)
+    #define ENCODER_EXIT_CRITICAL_ISR()  portEXIT_CRITICAL_ISR(&encoder_mux)
+    #define ENCODER_ENTER_CRITICAL()     portENTER_CRITICAL(&encoder_mux)
+    #define ENCODER_EXIT_CRITICAL()      portEXIT_CRITICAL(&encoder_mux)
+  #else
+    #define ENCODER_ENTER_CRITICAL_ISR() noInterrupts()
+    #define ENCODER_EXIT_CRITICAL_ISR()  interrupts()
+    #define ENCODER_ENTER_CRITICAL()     noInterrupts()
+    #define ENCODER_EXIT_CRITICAL()      interrupts()
+  #endif
 
   void ISR_VECT encoder_isr() {
     uint8_t curr_ab = (digitalRead(PIN_ENCODER_UP) << 1) | digitalRead(PIN_ENCODER_DOWN);
     int8_t  step    = ENCODER_TABLE[(encoder_prev_ab << 2) | curr_ab];
     encoder_prev_ab = curr_ab;
     if (step != 0) {
-      portENTER_CRITICAL_ISR(&encoder_mux);
+      ENCODER_ENTER_CRITICAL_ISR();
       encoder_quarter += step;
       if (encoder_quarter >= ENCODER_STEPS_PER_DETENT)  { encoder_delta = 1;  encoder_quarter = 0; }
       if (encoder_quarter <= -ENCODER_STEPS_PER_DETENT) { encoder_delta = -1; encoder_quarter = 0; }
-      portEXIT_CRITICAL_ISR(&encoder_mux);
+      ENCODER_EXIT_CRITICAL_ISR();
     }
   }
 
@@ -82,10 +98,10 @@
   // ISR and runs the press-button debounce, dispatching into Menu.h.
   void encoder_process() {
     int8_t d = 0;
-    portENTER_CRITICAL(&encoder_mux);
+    ENCODER_ENTER_CRITICAL();
     d = encoder_delta;
     encoder_delta = 0;
-    portEXIT_CRITICAL(&encoder_mux);
+    ENCODER_EXIT_CRITICAL();
     if (d != 0) menu_encoder_rotate(d);
 
     int reading = digitalRead(PIN_ENCODER_PRESS);

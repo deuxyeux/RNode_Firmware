@@ -216,7 +216,7 @@ int page_interval = 4000;
 bool device_signatures_ok();
 bool device_firmware_ok();
 
-#if HAS_ENCODER == true
+#if HAS_MENU == true
   // MENU_STATE_* is #define'd in Menu.h, included after Display.h, so it
   // can't be referenced by name here - go through this bool wrapper instead.
   bool menu_is_open();
@@ -1872,7 +1872,7 @@ void update_display(bool blank = false) {
           display.fillScreen(SSD1306_WHITE);
         #endif
 
-        #if HAS_ENCODER == true
+        #if HAS_MENU == true
           // The settings menu is always laid out for the panel's native
           // 128x64 landscape shape, regardless of what rotation the main
           // content is using - the panel itself doesn't physically change
