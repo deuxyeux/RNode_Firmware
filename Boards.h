@@ -1344,23 +1344,83 @@
       #define CONFIG_QUEUE_SIZE 6144
       #define CONFIG_QUEUE_MAX_LENGTH 200
 
-      // RNode Settings menu (Menu.h). Most ProMicro/FakeTec builds only
-      // wire the single main button, so navigation defaults to that
-      // (tap = next, double-tap = back, hold = select/open - see
-      // menu_button_press()). If your build has an add-on rotary encoder
-      // wired up, define PROMICRO_HAS_ENCODER true and set
-      // PIN_ENCODER_UP/PIN_ENCODER_DOWN/PIN_ENCODER_PRESS to match your
-      // wiring (e.g. via build flags) before this header is compiled.
+      // RNode Settings menu (Menu.h). Main button navigation (tap = next,
+      // double-tap = back, hold = select/open - see menu_button_press())
+      // always works regardless of the below. Encoder support is compiled
+      // in unconditionally - on builds with no physical encoder wired up,
+      // this is harmless: the pins just sit as pulled-up inputs that never
+      // see a transition, so the ISR never fires. The three pins below are
+      // just a starting point, not a wiring requirement - they're
+      // reassignable at runtime via Hardware > GPIO on this board (see
+      // HAS_GPIO_MENU below), so there's no need to know your exact wiring
+      // ahead of time. Still overridable via build flags (e.g.
+      // -DPIN_ENCODER_UP=...) for anyone who'd rather fix them at compile
+      // time instead.
       #define HAS_MENU true
-      #ifndef PROMICRO_HAS_ENCODER
-        #define PROMICRO_HAS_ENCODER false
-      #endif
-      #if PROMICRO_HAS_ENCODER
+      // TEMPORARY diagnostic guard - defaults true (unconditional, as
+      // decided), but overridable via -DHAS_ENCODER=false for isolating
+      // the boot-hang report. Revert to a plain `#define HAS_ENCODER true`
+      // once the actual cause is confirmed/fixed.
+      #ifndef HAS_ENCODER
         #define HAS_ENCODER true
-        #if !defined(PIN_ENCODER_UP) || !defined(PIN_ENCODER_DOWN) || !defined(PIN_ENCODER_PRESS)
-          #error PROMICRO_HAS_ENCODER is set but PIN_ENCODER_UP/PIN_ENCODER_DOWN/PIN_ENCODER_PRESS are not defined - set them to match your wiring.
-        #endif
       #endif
+      #ifndef PIN_ENCODER_UP
+        #define PIN_ENCODER_UP 0
+      #endif
+      #ifndef PIN_ENCODER_DOWN
+        #define PIN_ENCODER_DOWN 1
+      #endif
+      #ifndef PIN_ENCODER_PRESS
+        #define PIN_ENCODER_PRESS 9
+      #endif
+
+      // Battery voltage sensing (measure_battery(), Power.h) goes through
+      // pin_vbat and a fixed volts-per-ADC-count constant, not a VSENSE
+      // resistor divider - there's no clean way to isolate "the divider"
+      // out of that constant, so the RNode Settings menu's Hardware page
+      // exposes a recalibration knob as a %/of-default correction instead
+      // (see BATTERY_V_SCALE_DEFAULT/battery_v_scale, Config.h/Power.h).
+      #define HAS_BATTERY_DIVIDER true
+      #define BATTERY_V_SCALE_DEFAULT 0.006263
+
+      // Buzzer (and, if HAS_ENCODER, the encoder's Up/Down/Press
+      // pins). This is a DIY board - builders solder these to whichever
+      // spare pads they used, so each is user-selectable at runtime via
+      // the RNode Settings menu (Hardware > GPIO - see HAS_GPIO_MENU,
+      // Menu.h) rather than fixed here. PIN_BUZZER/PIN_ENCODER_UP/DOWN/
+      // PRESS are just compiled-in defaults (overridden from EEPROM at
+      // boot if ever changed via the menu - see buzzer_pin/pin_encoder_up/
+      // down/press, Utilities.h). The menu also refuses to assign the same
+      // pin to two of these functions at once.
+      //
+      // The candidate list below is deliberately short and curated, not
+      // "every pin this firmware doesn't already use":
+      //  - D9/D18/D19/D20 have no competing role at all (LoRa SPI/DIO/BUSY,
+      //    display I2C, button, battery ADC, LED, VEXT claim the rest -
+      //    see the pin list above), confirmed genuinely free by an
+      //    independent source, Meshtastic's own variant for this exact
+      //    physical board (nrf52_promicro_diy_tcxo/variant.h), which labels
+      //    them "Free pin" outright.
+      //  - D3/D4/D5 are that same variant's GPS_TX/GPS_RX/PIN_GPS_EN -
+      //    unused by RNode_Firmware (no GPS support), so free here, but
+      //    only included because that role is a named, known one a builder
+      //    can consciously decide to give up, not an arbitrary pin.
+      //  - D0/D1 are this core's Serial1/UART TX/RX (nice_nano/variant.h:
+      //    D0 = P0.06 = TX, D1 = P0.08 = RX) - not used by this firmware's
+      //    console/KISS link (that's USB CDC, a separate peripheral), so
+      //    also free, on the same "named, known role" basis as the GPS
+      //    pins above.
+      // Most bare ProMicro/FakeTec builds don't have a buzzer installed at
+      // all (it's a DIY add-on, easy to skip), so - unlike boards where
+      // it's a standard always-populated feature - Sound defaults OFF
+      // here rather than the global default of ON (see SOUND_ENABLED_DEFAULT
+      // fallback below, sound_enabled, Utilities.h).
+      #define SOUND_ENABLED_DEFAULT false
+      #define HAS_BUZZER true
+      #define PIN_BUZZER 5
+      #define HAS_GPIO_MENU true
+      #define GPIO_FREE_PIN_CANDIDATE_COUNT 9
+      const uint8_t gpio_free_pin_candidates[GPIO_FREE_PIN_CANDIDATE_COUNT] = {0, 1, 3, 4, 5, 9, 18, 19, 20};
 
       //Confused with the pin numbers??
       //https://github.com/pdcook/nRFMicro-Arduino-Core/blob/a83161e619da8668f726b52578a3dd89c1ef5956/variants/nice_nano/variant.h#L59
@@ -1426,6 +1486,27 @@
 
   #ifndef HAS_VSENSE
     #define HAS_VSENSE false
+  #endif
+
+  #ifndef HAS_BATTERY_DIVIDER
+    #define HAS_BATTERY_DIVIDER false
+  #endif
+
+  #ifndef BATTERY_V_SCALE_DEFAULT
+    #define BATTERY_V_SCALE_DEFAULT 0.0
+  #endif
+
+  // Whether the RNode Settings menu's Hardware page has a "GPIO" submenu
+  // for reassigning peripherals (currently just the buzzer) to a different
+  // physical pin at runtime - see PROMICRO's board block for the pattern.
+  #ifndef HAS_GPIO_MENU
+    #define HAS_GPIO_MENU false
+  #endif
+
+  // Whether the buzzer defaults to enabled at first boot (before the user
+  // has ever touched Sound in the menu) - see sound_enabled, Utilities.h.
+  #ifndef SOUND_ENABLED_DEFAULT
+    #define SOUND_ENABLED_DEFAULT true
   #endif
 
   #ifndef VSENSE_DIVIDER_RATIO_DEFAULT
