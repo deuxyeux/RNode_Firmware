@@ -64,7 +64,7 @@
   #endif
 
   void ISR_VECT encoder_isr() {
-    uint8_t curr_ab = (digitalRead(PIN_ENCODER_UP) << 1) | digitalRead(PIN_ENCODER_DOWN);
+    uint8_t curr_ab = (digitalRead(pin_encoder_up) << 1) | digitalRead(pin_encoder_down);
     int8_t  step    = ENCODER_TABLE[(encoder_prev_ab << 2) | curr_ab];
     encoder_prev_ab = curr_ab;
     if (step != 0) {
@@ -86,12 +86,12 @@
   unsigned long enc_btn_down_last = 0;
 
   void encoder_init() {
-    pinMode(PIN_ENCODER_UP, INPUT_PULLUP);
-    pinMode(PIN_ENCODER_DOWN, INPUT_PULLUP);
-    pinMode(PIN_ENCODER_PRESS, INPUT_PULLUP);
-    encoder_prev_ab = (digitalRead(PIN_ENCODER_UP) << 1) | digitalRead(PIN_ENCODER_DOWN);
-    attachInterrupt(digitalPinToInterrupt(PIN_ENCODER_UP),   encoder_isr, CHANGE);
-    attachInterrupt(digitalPinToInterrupt(PIN_ENCODER_DOWN), encoder_isr, CHANGE);
+    pinMode(pin_encoder_up, INPUT_PULLUP);
+    pinMode(pin_encoder_down, INPUT_PULLUP);
+    pinMode(pin_encoder_press, INPUT_PULLUP);
+    encoder_prev_ab = (digitalRead(pin_encoder_up) << 1) | digitalRead(pin_encoder_down);
+    attachInterrupt(digitalPinToInterrupt(pin_encoder_up),   encoder_isr, CHANGE);
+    attachInterrupt(digitalPinToInterrupt(pin_encoder_down), encoder_isr, CHANGE);
   }
 
   // Called every loop() iteration: drains rotation steps captured by the
@@ -104,7 +104,7 @@
     ENCODER_EXIT_CRITICAL();
     if (d != 0) menu_encoder_rotate(d);
 
-    int reading = digitalRead(PIN_ENCODER_PRESS);
+    int reading = digitalRead(pin_encoder_press);
     if (reading != enc_btn_debounce_state) {
       enc_btn_debounce_last = millis();
       enc_btn_debounce_state = reading;

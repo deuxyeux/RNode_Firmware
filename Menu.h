@@ -29,7 +29,9 @@
   #define MENU_STATE_WIFI_TEXT_EDIT 5   // editing WiFi SSID/PSK via character wheel
   #define MENU_STATE_WIFI_TEXT_CONFIRM 6 // "Save?" dialog, long-press from text edit
   #define MENU_STATE_HW_LIST        7   // Hardware submenu list (read-only info)
-  #define MENU_STATE_HW_EDIT        8   // editing the Input Voltage divider ratio
+  #define MENU_STATE_HW_EDIT        8   // editing the Input Voltage/Battery Cal field
+  #define MENU_STATE_GPIO_LIST      9   // Hardware > GPIO submenu list
+  #define MENU_STATE_GPIO_PIN_EDIT  10  // picking a physical pin for whichever GPIO_ITEM_* is selected
 
   // The Hardware page exists whenever there's anything board-level worth
   // showing (battery/voltage sensing via HAS_PMU, or an ESP32-S3's CPU
@@ -56,11 +58,25 @@
   #define MENU_ITEM_ORIENTATION        2
   #define MENU_ITEM_SOUND              3
 
-  #if HAS_WIFI == true
-    #define MENU_ITEM_WIFI  4
-    #define MENU_NEXT_IDX_A 5
+  #if HAS_ENCODER == true
+    // Whether a physical encoder is actually populated - some boards have
+    // it PCB-provisioned but optionally installed (MeshAdventurer-S3), or
+    // as a DIY add-on that most builds skip (PROMICRO) - so this is a
+    // runtime toggle (encoder_enabled, Utilities.h), not the compile-time
+    // HAS_ENCODER capability flag. Only changes the on-screen footer hint
+    // (turn/press vs tap/hold) - the encoder itself is always serviced
+    // regardless, same as before this existed.
+    #define MENU_ITEM_ENCODER 4
+    #define MENU_NEXT_IDX_0   5
   #else
-    #define MENU_NEXT_IDX_A 4
+    #define MENU_NEXT_IDX_0 4
+  #endif
+
+  #if HAS_WIFI == true
+    #define MENU_ITEM_WIFI  MENU_NEXT_IDX_0
+    #define MENU_NEXT_IDX_A (MENU_NEXT_IDX_0 + 1)
+  #else
+    #define MENU_NEXT_IDX_A MENU_NEXT_IDX_0
   #endif
 
   #if MENU_HAS_HW_PAGE == true
@@ -96,13 +112,20 @@
       #define HW_NEXT_A HW_NEXT_0
     #endif
 
-    #if HAS_WIFI == true
-      #define HW_ITEM_WIFI_IP  HW_NEXT_A
-      #define HW_ITEM_WIFI_NM  (HW_NEXT_A + 1)
-      #define HW_ITEM_WIFI_MAC (HW_NEXT_A + 2)
-      #define HW_NEXT_B        (HW_NEXT_A + 3)
+    #if HAS_BATTERY_DIVIDER == true
+      #define HW_ITEM_BATTERY HW_NEXT_A
+      #define HW_NEXT_A2      (HW_NEXT_A + 1)
     #else
-      #define HW_NEXT_B HW_NEXT_A
+      #define HW_NEXT_A2 HW_NEXT_A
+    #endif
+
+    #if HAS_WIFI == true
+      #define HW_ITEM_WIFI_IP  HW_NEXT_A2
+      #define HW_ITEM_WIFI_NM  (HW_NEXT_A2 + 1)
+      #define HW_ITEM_WIFI_MAC (HW_NEXT_A2 + 2)
+      #define HW_NEXT_B        (HW_NEXT_A2 + 3)
+    #else
+      #define HW_NEXT_B HW_NEXT_A2
     #endif
 
     #if HAS_BLUETOOTH == true || HAS_BLE == true
@@ -112,8 +135,29 @@
       #define HW_NEXT_C HW_NEXT_B
     #endif
 
-    #define HW_ITEM_BACK  HW_NEXT_C
+    #if HAS_GPIO_MENU == true
+      #define HW_ITEM_GPIO HW_NEXT_C
+      #define HW_NEXT_D    (HW_NEXT_C + 1)
+    #else
+      #define HW_NEXT_D HW_NEXT_C
+    #endif
+
+    #define HW_ITEM_BACK  HW_NEXT_D
     #define HW_ITEM_COUNT (HW_ITEM_BACK + 1)
+
+    #if HAS_GPIO_MENU == true
+      #define GPIO_ITEM_BUZZER 0
+      #if HAS_ENCODER == true
+        #define GPIO_ITEM_ENC_UP    1
+        #define GPIO_ITEM_ENC_DOWN  2
+        #define GPIO_ITEM_ENC_PRESS 3
+        #define GPIO_NEXT_0 4
+      #else
+        #define GPIO_NEXT_0 1
+      #endif
+      #define GPIO_ITEM_BACK  GPIO_NEXT_0
+      #define GPIO_ITEM_COUNT (GPIO_ITEM_BACK + 1)
+    #endif
   #endif
 
   uint8_t menu_state      = MENU_STATE_CLOSED;
@@ -138,6 +182,9 @@
   // (display_intensity itself no longer reflects "unchanged" by then).
   uint8_t live_display_brightness   = 0;
   bool    staged_sound_enabled      = true;
+  #if HAS_ENCODER == true
+    bool staged_encoder_enabled = false;
+  #endif
   #if HAS_WIFI == true
     uint8_t wifi_menu_cursor = 0;
     uint8_t staged_wifi_mode = WR_WIFI_OFF;
@@ -168,6 +215,24 @@
       // moment you back out of its own edit screen rather than waiting
       // for SAVE & EXIT.
       uint8_t staged_vsense_divider_ratio_raw = 0;
+    #endif
+    #if HAS_BATTERY_DIVIDER == true
+      // Same immediate-commit pattern as staged_vsense_divider_ratio_raw
+      // above, but a %/of-default correction (see bvs_conf_save(),
+      // Utilities.h) rather than a raw ratio*10.
+      uint8_t staged_battery_v_scale_pct = 100;
+    #endif
+    #if HAS_GPIO_MENU == true
+      uint8_t gpio_menu_cursor = 0;
+      // Index into gpio_free_pin_candidates[] (Boards.h), not the pin
+      // number itself - shared by every GPIO_ITEM_* field (Buzzer, and if
+      // HAS_ENCODER, Encoder Up/Down/Press), synced fresh from whichever
+      // one's live pin variable on entering MENU_STATE_GPIO_PIN_EDIT (see
+      // menu_confirm_select()) - gpio_menu_cursor says which. Commits
+      // immediately (and reboots if changed - see gpio_conf_save()) on
+      // leaving its own edit screen, same as the Input Voltage/Battery Cal
+      // fields above.
+      uint8_t staged_gpio_pin_idx = 0;
     #endif
   #endif
 
@@ -300,6 +365,92 @@
     }
   #endif
 
+  #if MENU_HAS_HW_PAGE == true && HAS_BATTERY_DIVIDER == true
+    // Stored/edited as a %/of-default correction (e.g. 103 = 103%) - 1 and
+    // 254 keep clear of the 0x00/0xFF "unset, use board default" sentinels
+    // bvs_conf_save() and the boot-time EEPROM load both check for.
+    void step_battery_v_scale_pct(int8_t dir, bool wrap = false) {
+      int16_t v = (int16_t)staged_battery_v_scale_pct + dir * (int16_t)accelerated_step();
+      if (wrap) {
+        if (v < 1)   v = 254;
+        if (v > 254) v = 1;
+      } else {
+        if (v < 1)   v = 1;
+        if (v > 254) v = 254;
+      }
+      staged_battery_v_scale_pct = (uint8_t)v;
+    }
+  #endif
+
+  #if HAS_GPIO_MENU == true
+    void format_gpio_pin(uint8_t idx, char *buf) {
+      sprintf(buf, "D%u", gpio_free_pin_candidates[idx]);
+    }
+
+    // Shared by menu_confirm_select()'s sync-on-open/commit-on-close for
+    // MENU_STATE_GPIO_PIN_EDIT - which live variable and EEPROM address a
+    // given GPIO_ITEM_* corresponds to.
+    uint8_t gpio_item_live_pin(uint8_t item) {
+      if (item == GPIO_ITEM_BUZZER) return buzzer_pin;
+      #if HAS_ENCODER == true
+        if (item == GPIO_ITEM_ENC_UP)    return pin_encoder_up;
+        if (item == GPIO_ITEM_ENC_DOWN)  return pin_encoder_down;
+        if (item == GPIO_ITEM_ENC_PRESS) return pin_encoder_press;
+      #endif
+      return buzzer_pin; // unreachable
+    }
+
+    uint8_t gpio_item_addr(uint8_t item) {
+      if (item == GPIO_ITEM_BUZZER) return ADDR_CONF_BUZ;
+      #if HAS_ENCODER == true
+        if (item == GPIO_ITEM_ENC_UP)    return ADDR_CONF_EUP;
+        if (item == GPIO_ITEM_ENC_DOWN)  return ADDR_CONF_EDN;
+        if (item == GPIO_ITEM_ENC_PRESS) return ADDR_CONF_EPR;
+      #endif
+      return ADDR_CONF_BUZ; // unreachable
+    }
+
+    uint8_t gpio_idx_for_pin(uint8_t pin) {
+      for (uint8_t i = 0; i < GPIO_FREE_PIN_CANDIDATE_COUNT; i++) {
+        if (gpio_free_pin_candidates[i] == pin) return i;
+      }
+      return 0; // unreachable - every live pin variable is always one of the candidates
+    }
+
+    // True if `pin` is currently the live value of some *other* GPIO_ITEM_*
+    // field than the one being edited (gpio_menu_cursor) - the picker below
+    // skips these so the same physical pin can't accidentally end up doing
+    // two jobs at once.
+    bool gpio_pin_taken_elsewhere(uint8_t pin) {
+      if (gpio_menu_cursor != GPIO_ITEM_BUZZER && pin == buzzer_pin) return true;
+      #if HAS_ENCODER == true
+        if (gpio_menu_cursor != GPIO_ITEM_ENC_UP    && pin == pin_encoder_up)    return true;
+        if (gpio_menu_cursor != GPIO_ITEM_ENC_DOWN  && pin == pin_encoder_down)  return true;
+        if (gpio_menu_cursor != GPIO_ITEM_ENC_PRESS && pin == pin_encoder_press) return true;
+      #endif
+      return false;
+    }
+
+    // A handful of discrete named choices, not a continuous range - reuses
+    // menu_clamp_cursor() (the same list-cursor helper hw_menu_cursor/
+    // wifi_menu_cursor use) rather than accelerated_step()'s numeric ramp.
+    // Skips candidates already claimed by a different GPIO_ITEM_* field
+    // (gpio_pin_taken_elsewhere()) - bounded to one full lap so it can
+    // never spin forever, and simply stops at a clamped edge (dir not
+    // wrapping) even if that candidate is taken, same as every other
+    // clamped field.
+    void step_gpio_pin_idx(int8_t dir, bool wrap = false) {
+      uint8_t idx = staged_gpio_pin_idx;
+      for (uint8_t tries = 0; tries < GPIO_FREE_PIN_CANDIDATE_COUNT; tries++) {
+        uint8_t prev = idx;
+        idx = menu_clamp_cursor(idx, dir, GPIO_FREE_PIN_CANDIDATE_COUNT, wrap);
+        if (idx == prev) break;
+        if (!gpio_pin_taken_elsewhere(gpio_free_pin_candidates[idx])) break;
+      }
+      staged_gpio_pin_idx = idx;
+    }
+  #endif
+
   #if HAS_WIFI == true
     void format_wifi_mode(uint8_t mode, char *buf) {
       if      (mode == WR_WIFI_STA) sprintf(buf, "STATION");
@@ -366,6 +517,9 @@
     staged_display_brightness = display_intensity;
     live_display_brightness   = display_intensity;
     staged_sound_enabled      = sound_enabled;
+    #if HAS_ENCODER == true
+      staged_encoder_enabled = encoder_enabled;
+    #endif
     // display_rotation itself is only a local variable inside display_init(),
     // applied once at boot - not a persisted global - so read the actual
     // EEPROM value fresh here, same as WiFi SSID/PSK above.
@@ -417,6 +571,11 @@
     if (staged_sound_enabled != sound_enabled) {
       snd_conf_save(staged_sound_enabled);
     }
+    #if HAS_ENCODER == true
+      if (staged_encoder_enabled != encoder_enabled) {
+        enc_conf_save(staged_encoder_enabled);
+      }
+    #endif
     #if HAS_WIFI == true
       bool wifi_changed = false;
       if (staged_wifi_mode != wifi_mode) {
@@ -470,6 +629,11 @@
       } else if (menu_edit_field == MENU_ITEM_SOUND) {
         staged_sound_enabled = !staged_sound_enabled;
       }
+      #if HAS_ENCODER == true
+        else if (menu_edit_field == MENU_ITEM_ENCODER) {
+          staged_encoder_enabled = !staged_encoder_enabled;
+        }
+      #endif
     }
     #if HAS_WIFI == true
       else if (menu_state == MENU_STATE_WIFI_LIST) {
@@ -491,10 +655,24 @@
         buzzer_encoder_tick_melody();
         hw_menu_cursor = menu_clamp_cursor(hw_menu_cursor, dir, HW_ITEM_COUNT, wrap);
       }
-      #if HAS_VSENSE == true
+      #if HAS_VSENSE == true || HAS_BATTERY_DIVIDER == true
         else if (menu_state == MENU_STATE_HW_EDIT) {
           buzzer_encoder_tick_melody();
-          step_vsense_divider(dir, wrap);
+          #if HAS_VSENSE == true
+            if (hw_menu_cursor == HW_ITEM_VOLTAGE) { step_vsense_divider(dir, wrap); }
+          #endif
+          #if HAS_BATTERY_DIVIDER == true
+            if (hw_menu_cursor == HW_ITEM_BATTERY) { step_battery_v_scale_pct(dir, wrap); }
+          #endif
+        }
+      #endif
+      #if HAS_GPIO_MENU == true
+        else if (menu_state == MENU_STATE_GPIO_LIST) {
+          buzzer_encoder_tick_melody();
+          gpio_menu_cursor = menu_clamp_cursor(gpio_menu_cursor, dir, GPIO_ITEM_COUNT, wrap);
+        } else if (menu_state == MENU_STATE_GPIO_PIN_EDIT) {
+          buzzer_encoder_tick_melody();
+          step_gpio_pin_idx(dir, wrap);
         }
       #endif
     #endif
@@ -616,8 +794,8 @@
     #endif
     #if MENU_HAS_HW_PAGE == true
       else if (menu_state == MENU_STATE_HW_LIST) {
-        // Mostly read-only info page - only BACK, and Input Voltage (if
-        // present), do anything.
+        // Mostly read-only info page - only BACK, and Input Voltage/Battery
+        // Voltage (if present), do anything.
         if (hw_menu_cursor == HW_ITEM_BACK) {
           menu_state = MENU_STATE_LIST;
         }
@@ -633,18 +811,67 @@
             last_numeric_rotate_ms = millis();
           }
         #endif
+        #if HAS_BATTERY_DIVIDER == true
+          else if (hw_menu_cursor == HW_ITEM_BATTERY) {
+            // Same immediate-commit-on-its-own-screen pattern as Input
+            // Voltage above - see bvs_conf_save().
+            staged_battery_v_scale_pct = (uint8_t)((battery_v_scale / BATTERY_V_SCALE_DEFAULT) * 100.0 + 0.5);
+            menu_state = MENU_STATE_HW_EDIT;
+            last_numeric_rotate_ms = millis();
+          }
+        #endif
+        #if HAS_GPIO_MENU == true
+          else if (hw_menu_cursor == HW_ITEM_GPIO) {
+            menu_state = MENU_STATE_GPIO_LIST;
+            gpio_menu_cursor = 0;
+          }
+        #endif
       }
-      #if HAS_VSENSE == true
+      #if HAS_VSENSE == true || HAS_BATTERY_DIVIDER == true
         else if (menu_state == MENU_STATE_HW_EDIT) {
           // Commits straight to EEPROM here rather than staging until
           // SAVE & EXIT - this is board calibration data, not a live
           // setting, so there's no reason to make leaving it uncommitted
           // discard the change like every other field does.
-          uint8_t live_raw = (uint8_t)(vsense_divider_ratio * 10.0 + 0.5);
-          if (staged_vsense_divider_ratio_raw != live_raw) {
-            vsr_conf_save(staged_vsense_divider_ratio_raw);
-          }
+          #if HAS_VSENSE == true
+            if (hw_menu_cursor == HW_ITEM_VOLTAGE) {
+              uint8_t live_raw = (uint8_t)(vsense_divider_ratio * 10.0 + 0.5);
+              if (staged_vsense_divider_ratio_raw != live_raw) {
+                vsr_conf_save(staged_vsense_divider_ratio_raw);
+              }
+            }
+          #endif
+          #if HAS_BATTERY_DIVIDER == true
+            if (hw_menu_cursor == HW_ITEM_BATTERY) {
+              uint8_t live_pct = (uint8_t)((battery_v_scale / BATTERY_V_SCALE_DEFAULT) * 100.0 + 0.5);
+              if (staged_battery_v_scale_pct != live_pct) {
+                bvs_conf_save(staged_battery_v_scale_pct);
+              }
+            }
+          #endif
           menu_state = MENU_STATE_HW_LIST;
+        }
+      #endif
+      #if HAS_GPIO_MENU == true
+        else if (menu_state == MENU_STATE_GPIO_LIST) {
+          if (gpio_menu_cursor == GPIO_ITEM_BACK) {
+            menu_state = MENU_STATE_HW_LIST;
+          } else {
+            // Sync from the live pin fresh every time this screen is
+            // opened, same reasoning as Input Voltage/Battery Cal above.
+            staged_gpio_pin_idx = gpio_idx_for_pin(gpio_item_live_pin(gpio_menu_cursor));
+            menu_state = MENU_STATE_GPIO_PIN_EDIT;
+          }
+        } else if (menu_state == MENU_STATE_GPIO_PIN_EDIT) {
+          // Commits straight to EEPROM (and reboots if changed, since a
+          // pin reassignment only takes effect at boot - see
+          // gpio_conf_save()), same immediate-commit pattern as Input
+          // Voltage/Battery Cal above.
+          uint8_t new_pin = gpio_free_pin_candidates[staged_gpio_pin_idx];
+          if (new_pin != gpio_item_live_pin(gpio_menu_cursor)) {
+            gpio_conf_save(gpio_item_addr(gpio_menu_cursor), new_pin);
+          }
+          menu_state = MENU_STATE_GPIO_LIST;
         }
       #endif
     #endif
@@ -740,8 +967,12 @@
     display.setTextColor(SSD1306_WHITE);
     display.drawFastHLine(4, 59, 120, SSD1306_WHITE);
     display.setCursor(6, 63);
+    // Whether an encoder is actually populated is a runtime choice
+    // (encoder_enabled) on boards where it's optional, not the compile-time
+    // HAS_ENCODER capability flag - see MENU_ITEM_ENCODER.
     #if HAS_ENCODER == true
-      display.print("turn:move press:open");
+      if (encoder_enabled) display.print("turn:move press:open");
+      else                 display.print("tap:next hold:open");
     #else
       display.print("tap:next hold:open");
     #endif
@@ -769,7 +1000,8 @@
     display.drawFastHLine(4, 50, 120, SSD1306_WHITE);
     display.setCursor(6, 59);
     #if HAS_ENCODER == true
-      display.print("turn:adjust press:ok");
+      if (encoder_enabled) display.print("turn:adjust press:ok");
+      else                 display.print("tap:adjust hold:ok");
     #else
       display.print("tap:adjust hold:ok");
     #endif
@@ -862,6 +1094,11 @@
       labels[MENU_ITEM_SOUND] = "Sound";
       sprintf(valbufs[MENU_ITEM_SOUND], staged_sound_enabled ? "ON" : "OFF");
 
+      #if HAS_ENCODER == true
+        labels[MENU_ITEM_ENCODER] = "Encoder";
+        sprintf(valbufs[MENU_ITEM_ENCODER], staged_encoder_enabled ? "ON" : "OFF");
+      #endif
+
       #if HAS_WIFI == true
         labels[MENU_ITEM_WIFI] = "WiFi";
         sprintf(valbufs[MENU_ITEM_WIFI], ">"); // opens a submenu, not an inline value
@@ -890,7 +1127,14 @@
       } else if (menu_edit_field == MENU_ITEM_ORIENTATION) {
         title = "ORIENTATION";
         format_orientation(staged_display_rotation, valbuf);
-      } else {
+      }
+      #if HAS_ENCODER == true
+        else if (menu_edit_field == MENU_ITEM_ENCODER) {
+          title = "ENCODER";
+          sprintf(valbuf, staged_encoder_enabled ? "ON" : "OFF");
+        }
+      #endif
+      else {
         sprintf(valbuf, staged_sound_enabled ? "ON" : "OFF");
       }
       draw_menu_edit_disp(title, valbuf);
@@ -944,6 +1188,12 @@
         #if HAS_VSENSE == true
           labels[HW_ITEM_VOLTAGE] = "Input Voltage";
           sprintf(valbufs[HW_ITEM_VOLTAGE], "%.2fV", vsense_voltage);
+        #endif
+
+        #if HAS_BATTERY_DIVIDER == true
+          labels[HW_ITEM_BATTERY] = "Battery Voltage";
+          if (battery_ready) sprintf(valbufs[HW_ITEM_BATTERY], "%.2fV", battery_voltage);
+          else                sprintf(valbufs[HW_ITEM_BATTERY], "N/A");
         #endif
 
         #if HAS_WIFI == true
@@ -1003,19 +1253,71 @@
           #endif
         #endif
 
+        #if HAS_GPIO_MENU == true
+          labels[HW_ITEM_GPIO] = "GPIO";
+          sprintf(valbufs[HW_ITEM_GPIO], ">"); // opens a submenu, not an inline value
+        #endif
+
         labels[HW_ITEM_BACK] = "BACK";
         valbufs[HW_ITEM_BACK][0] = 0;
 
         draw_menu_list_disp("HARDWARE", labels, valbufs, HW_ITEM_COUNT, hw_menu_cursor);
       }
-      #if HAS_VSENSE == true
+      #if HAS_VSENSE == true || HAS_BATTERY_DIVIDER == true
         else if (menu_state == MENU_STATE_HW_EDIT) {
-          // Shown as the divider ratio (e.g. "11.0"), not the raw 0-254
-          // EEPROM byte or the live voltage reading - that's what's
-          // actually being calibrated here.
           char valbuf[8];
-          sprintf(valbuf, "%.1f", staged_vsense_divider_ratio_raw / 10.0);
-          draw_menu_edit_disp("VOLTAGE DIVIDER", valbuf);
+          #if HAS_VSENSE == true
+            if (hw_menu_cursor == HW_ITEM_VOLTAGE) {
+              // Shown as the divider ratio (e.g. "11.0"), not the raw 0-254
+              // EEPROM byte or the live voltage reading - that's what's
+              // actually being calibrated here.
+              sprintf(valbuf, "%.1f", staged_vsense_divider_ratio_raw / 10.0);
+              draw_menu_edit_disp("VOLTAGE DIVIDER", valbuf);
+            }
+          #endif
+          #if HAS_BATTERY_DIVIDER == true
+            if (hw_menu_cursor == HW_ITEM_BATTERY) {
+              // Shown as a percentage of the compiled-in default scale, not
+              // the raw 0-254 EEPROM byte - see bvs_conf_save().
+              sprintf(valbuf, "%u%%", staged_battery_v_scale_pct);
+              draw_menu_edit_disp("BATTERY CAL", valbuf);
+            }
+          #endif
+        }
+      #endif
+      #if HAS_GPIO_MENU == true
+        else if (menu_state == MENU_STATE_GPIO_LIST) {
+          const char *labels[GPIO_ITEM_COUNT];
+          char valbufs[GPIO_ITEM_COUNT][24];
+
+          labels[GPIO_ITEM_BUZZER] = "Buzzer";
+          format_gpio_pin(gpio_idx_for_pin(buzzer_pin), valbufs[GPIO_ITEM_BUZZER]);
+
+          #if HAS_ENCODER == true
+            labels[GPIO_ITEM_ENC_UP] = "Encoder Up";
+            format_gpio_pin(gpio_idx_for_pin(pin_encoder_up), valbufs[GPIO_ITEM_ENC_UP]);
+
+            labels[GPIO_ITEM_ENC_DOWN] = "Encoder Down";
+            format_gpio_pin(gpio_idx_for_pin(pin_encoder_down), valbufs[GPIO_ITEM_ENC_DOWN]);
+
+            labels[GPIO_ITEM_ENC_PRESS] = "Encoder Press";
+            format_gpio_pin(gpio_idx_for_pin(pin_encoder_press), valbufs[GPIO_ITEM_ENC_PRESS]);
+          #endif
+
+          labels[GPIO_ITEM_BACK] = "BACK";
+          valbufs[GPIO_ITEM_BACK][0] = 0;
+
+          draw_menu_list_disp("GPIO", labels, valbufs, GPIO_ITEM_COUNT, gpio_menu_cursor);
+        } else if (menu_state == MENU_STATE_GPIO_PIN_EDIT) {
+          char valbuf[8];
+          format_gpio_pin(staged_gpio_pin_idx, valbuf);
+          const char *title = "BUZZER PIN";
+          #if HAS_ENCODER == true
+            if      (gpio_menu_cursor == GPIO_ITEM_ENC_UP)    title = "ENCODER UP PIN";
+            else if (gpio_menu_cursor == GPIO_ITEM_ENC_DOWN)  title = "ENCODER DOWN PIN";
+            else if (gpio_menu_cursor == GPIO_ITEM_ENC_PRESS) title = "ENCODER PRESS PIN";
+          #endif
+          draw_menu_edit_disp(title, valbuf);
         }
       #endif
     #endif

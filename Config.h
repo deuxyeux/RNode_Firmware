@@ -243,6 +243,12 @@
     // to EEPROM (ADDR_CONF_VSR) via CMD_VSENSE_DIV, for boards whose actual
     // resistor values drift from the reference design.
     float vsense_divider_ratio = VSENSE_DIVIDER_RATIO_DEFAULT;
+    // Board-default volts-per-ADC-count constant used by measure_battery()
+    // (Power.h) for boards sensing through pin_vbat rather than a VSENSE
+    // divider. Board-default until overridden and persisted to EEPROM
+    // (ADDR_CONF_BVS) via bvs_conf_save(), as a %/of-default correction -
+    // see BATTERY_V_SCALE_DEFAULT, Boards.h.
+    float battery_v_scale = BATTERY_V_SCALE_DEFAULT;
     uint8_t display_intensity = 0xFF;
     uint8_t display_addr = 0xFF;
     volatile bool display_updating = false;

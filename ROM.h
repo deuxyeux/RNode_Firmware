@@ -48,12 +48,20 @@
   #define ADDR_CONF_WCHN 0xBB
   #define ADDR_CONF_SND  0xBC
   #define ADDR_CONF_VSR  0xBD
+  #define ADDR_CONF_BVS  0xBE
+  #define ADDR_CONF_BUZ  0xBF
+  #define ADDR_CONF_EUP  0xC0
+  #define ADDR_CONF_EDN  0xC1
+  #define ADDR_CONF_EPR  0xC2
+  #define ADDR_CONF_ENA  0xC3
 
   #define INFO_LOCK_BYTE 0x73
   #define CONF_OK_BYTE   0x73
   #define BT_ENABLE_BYTE 0x73
   #define SND_ENABLE_BYTE  0x01
   #define SND_DISABLE_BYTE 0x00
+  #define ENC_ENABLE_BYTE  0x01
+  #define ENC_DISABLE_BYTE 0x00
 
   #define EEPROM_RESERVED 200
   

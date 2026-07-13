@@ -151,6 +151,37 @@ void setup() {
   #endif
 
   #if HAS_ENCODER == true
+    #if HAS_GPIO_MENU == true
+      // Must run before encoder_init(), which reads pin_encoder_up/down/
+      // press to set up the actual hardware pins.
+      #if HAS_EEPROM
+        uint8_t eup_raw = EEPROM.read(eeprom_addr(ADDR_CONF_EUP));
+        uint8_t edn_raw = EEPROM.read(eeprom_addr(ADDR_CONF_EDN));
+        uint8_t epr_raw = EEPROM.read(eeprom_addr(ADDR_CONF_EPR));
+      #elif MCU_VARIANT == MCU_NRF52
+        uint8_t eup_raw = eeprom_read(eeprom_addr(ADDR_CONF_EUP));
+        uint8_t edn_raw = eeprom_read(eeprom_addr(ADDR_CONF_EDN));
+        uint8_t epr_raw = eeprom_read(eeprom_addr(ADDR_CONF_EPR));
+      #endif
+      // Only 0xFF (erased EEPROM) means "unset" here - unlike VSR/BVS's
+      // ratio/percentage settings, 0x00 is a legitimate value (D0 is a
+      // real candidate pin), so it must NOT be treated as a sentinel.
+      if (eup_raw != 0xFF) {
+        for (uint8_t i = 0; i < GPIO_FREE_PIN_CANDIDATE_COUNT; i++) {
+          if (gpio_free_pin_candidates[i] == eup_raw) { pin_encoder_up = eup_raw; break; }
+        }
+      }
+      if (edn_raw != 0xFF) {
+        for (uint8_t i = 0; i < GPIO_FREE_PIN_CANDIDATE_COUNT; i++) {
+          if (gpio_free_pin_candidates[i] == edn_raw) { pin_encoder_down = edn_raw; break; }
+        }
+      }
+      if (epr_raw != 0xFF) {
+        for (uint8_t i = 0; i < GPIO_FREE_PIN_CANDIDATE_COUNT; i++) {
+          if (gpio_free_pin_candidates[i] == epr_raw) { pin_encoder_press = epr_raw; break; }
+        }
+      }
+    #endif
     encoder_init();
   #endif
 
@@ -267,12 +298,49 @@ void setup() {
 
   #if HAS_BUZZER == true
     #if HAS_EEPROM
-      sound_enabled = (EEPROM.read(eeprom_addr(ADDR_CONF_SND)) != SND_DISABLE_BYTE);
+      uint8_t snd_raw = EEPROM.read(eeprom_addr(ADDR_CONF_SND));
     #elif MCU_VARIANT == MCU_NRF52
-      sound_enabled = (eeprom_read(eeprom_addr(ADDR_CONF_SND)) != SND_DISABLE_BYTE);
+      uint8_t snd_raw = eeprom_read(eeprom_addr(ADDR_CONF_SND));
+    #endif
+    // Explicit ON/OFF only ever get written as SND_ENABLE_BYTE/
+    // SND_DISABLE_BYTE (see the KISS handler and snd_conf_save()) - any
+    // other value (erased EEPROM reads 0xFF, not 0x00) means "never
+    // touched", so leave sound_enabled at its board default
+    // (SOUND_ENABLED_DEFAULT, Boards.h) instead of forcing it either way.
+    if (snd_raw == SND_ENABLE_BYTE) sound_enabled = true;
+    else if (snd_raw == SND_DISABLE_BYTE) sound_enabled = false;
+    #if HAS_GPIO_MENU == true
+      // Must run before buzzer_init(), which reads buzzer_pin to set up
+      // the actual hardware pin.
+      #if HAS_EEPROM
+        uint8_t buz_raw = EEPROM.read(eeprom_addr(ADDR_CONF_BUZ));
+      #elif MCU_VARIANT == MCU_NRF52
+        uint8_t buz_raw = eeprom_read(eeprom_addr(ADDR_CONF_BUZ));
+      #endif
+      // Only 0xFF (erased EEPROM) means "unset" here - see the equivalent
+      // comment on the encoder-pin loads above, same reasoning (D0 is a
+      // legitimate candidate pin, not a sentinel).
+      if (buz_raw != 0xFF) {
+        for (uint8_t i = 0; i < GPIO_FREE_PIN_CANDIDATE_COUNT; i++) {
+          if (gpio_free_pin_candidates[i] == buz_raw) { buzzer_pin = buz_raw; break; }
+        }
+      }
     #endif
     buzzer_init();
     buzzer_boot_melody();
+  #endif
+
+  #if HAS_ENCODER == true
+    // No board-specific default here (unlike Sound above) - an encoder is
+    // never a guaranteed always-there feature on any board that has this
+    // setting, so encoder_enabled's declared default (false) always
+    // applies unless explicitly turned on via the menu.
+    #if HAS_EEPROM
+      uint8_t enc_en_raw = EEPROM.read(eeprom_addr(ADDR_CONF_ENA));
+    #elif MCU_VARIANT == MCU_NRF52
+      uint8_t enc_en_raw = eeprom_read(eeprom_addr(ADDR_CONF_ENA));
+    #endif
+    encoder_enabled = (enc_en_raw == ENC_ENABLE_BYTE);
   #endif
 
   #if HAS_VSENSE == true
@@ -282,6 +350,15 @@ void setup() {
       uint8_t vsr_raw = eeprom_read(eeprom_addr(ADDR_CONF_VSR));
     #endif
     if (vsr_raw != 0x00 && vsr_raw != 0xFF) { vsense_divider_ratio = (float)vsr_raw / 10.0; }
+  #endif
+
+  #if HAS_BATTERY_DIVIDER == true
+    #if HAS_EEPROM
+      uint8_t bvs_raw = EEPROM.read(eeprom_addr(ADDR_CONF_BVS));
+    #elif MCU_VARIANT == MCU_NRF52
+      uint8_t bvs_raw = eeprom_read(eeprom_addr(ADDR_CONF_BVS));
+    #endif
+    if (bvs_raw != 0x00 && bvs_raw != 0xFF) { battery_v_scale = BATTERY_V_SCALE_DEFAULT * ((float)bvs_raw / 100.0); }
   #endif
 
   #if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52

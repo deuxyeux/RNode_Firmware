@@ -50,9 +50,32 @@ uint8_t eeprom_read(uint32_t mapped_addr);
 
 void set_rns_link_state(uint8_t new_state);
 
-// Default ON: preserves the buzzer's always-on behavior for anyone who has
-// never touched the Sound setting (erased EEPROM reads 0xFF, not 0x00).
-bool sound_enabled = true;
+// Board default (SOUND_ENABLED_DEFAULT, Boards.h) - true everywhere the
+// buzzer is a standard always-populated feature (preserving the historical
+// always-on behavior for anyone who never touches Sound in the menu), false
+// on boards where it's a DIY add-on most builds skip (e.g. PROMICRO).
+bool sound_enabled = SOUND_ENABLED_DEFAULT;
+#if HAS_BUZZER == true
+  // Declared here (not down with the rest of the buzzer_*() functions)
+  // because Menu.h - which reads this for the GPIO submenu - is #include'd
+  // further down in this same file, before that point is reached.
+  uint8_t buzzer_pin = PIN_BUZZER;
+#endif
+#if HAS_ENCODER == true
+  // Same reasoning as buzzer_pin above - declared here, not down with
+  // Encoder.h, so Menu.h (included before Encoder.h) can already see them.
+  uint8_t pin_encoder_up    = PIN_ENCODER_UP;
+  uint8_t pin_encoder_down  = PIN_ENCODER_DOWN;
+  uint8_t pin_encoder_press = PIN_ENCODER_PRESS;
+  // Whether a physical encoder is actually populated - defaults OFF
+  // (unlike sound_enabled, this has no board-specific default: an encoder
+  // is always either a PCB-provisioned-but-optional part, e.g.
+  // MeshAdventurer-S3, or a DIY add-on, e.g. PROMICRO - never a guaranteed
+  // always-there feature). Only affects the menu's on-screen footer hint
+  // (turn/press vs tap/hold) - the encoder itself is always serviced
+  // regardless of this setting.
+  bool encoder_enabled = false;
+#endif
 void db_conf_save(uint8_t val);
 void di_conf_save(uint8_t dint);
 void snd_conf_save(bool is_enabled);
@@ -60,6 +83,15 @@ void wr_conf_save(uint8_t mode);
 void drot_conf_save(uint8_t val);
 #if HAS_VSENSE == true
   void vsr_conf_save(uint8_t val);
+#endif
+#if HAS_BATTERY_DIVIDER == true
+  void bvs_conf_save(uint8_t val);
+#endif
+#if HAS_ENCODER == true
+  void enc_conf_save(bool is_enabled);
+#endif
+#if HAS_GPIO_MENU == true
+  void gpio_conf_save(uint8_t addr, uint8_t val);
 #endif
 void eeprom_update(int mapped_addr, uint8_t byte);
 void buzzer_encoder_tick_melody();
@@ -229,9 +261,42 @@ uint8_t boot_vector = 0x00;
 #endif
 
 #if HAS_BUZZER == true
+  // buzzer_pin itself is declared earlier in this file - see the comment
+  // there.
   void buzzer_init() {
-    pinMode(PIN_BUZZER, OUTPUT);
-    noTone(PIN_BUZZER);
+    pinMode(buzzer_pin, OUTPUT);
+    noTone(buzzer_pin);
+    // On at least the nRF52 core, noTone() disconnects the PWM peripheral
+    // from the pin (PSEL.OUT -> NOT_CONNECTED) but never explicitly drives
+    // it LOW afterward - the pin is left wherever the GPIO peripheral's own
+    // OUT bit happens to be, not guaranteed low. A passive piezo element
+    // left on an undriven/floating gate can self-oscillate from its own
+    // vibration-induced feedback voltage (silenced by physically damping
+    // the resonance, e.g. tapping it) - force a real, known LOW here so
+    // the gate is always actively held off, not just released.
+    digitalWrite(buzzer_pin, LOW);
+
+    #if MCU_VARIANT == MCU_NRF52
+      // Belt-and-suspenders on top of the digitalWrite(LOW) above: keep the
+      // SoC's own weak pull-down enabled on this pin even while it's an
+      // output (nRF52's PIN_CNF register allows DIR and PULL to be set
+      // independently, unlike MCUs where pull config only applies in INPUT
+      // mode) - so the gate has a defined level even during windows
+      // nothing is actively driving it at all (e.g. the PWM-disconnect gap
+      // above, or before setup() ever reaches this point). Arduino's
+      // pinMode()/digitalWrite() translate the sketch-facing pin number to
+      // the SoC's native flat P0.xx/P1.xx numbering via g_ADigitalPinMap
+      // before touching hardware - the low-level nrf_gpio_cfg() call below
+      // doesn't do that translation itself, so it's done explicitly here.
+      nrf_gpio_cfg(
+        g_ADigitalPinMap[buzzer_pin],
+        NRF_GPIO_PIN_DIR_OUTPUT,
+        NRF_GPIO_PIN_INPUT_DISCONNECT,
+        NRF_GPIO_PIN_PULLDOWN,
+        NRF_GPIO_PIN_S0S1,
+        NRF_GPIO_PIN_NOSENSE
+      );
+    #endif
   }
 
   // Avoid tone()'s duration overload: its internal auto-stop timer can
@@ -240,9 +305,10 @@ uint8_t boot_vector = 0x00;
   void buzzer_play_notes(const uint16_t *notes, uint8_t count, uint16_t note_ms) {
     if (!sound_enabled) return;
     for (uint8_t i = 0; i < count; i++) {
-      tone(PIN_BUZZER, notes[i]);
+      tone(buzzer_pin, notes[i]);
       delay(note_ms);
-      noTone(PIN_BUZZER);
+      noTone(buzzer_pin);
+      digitalWrite(buzzer_pin, LOW); // see buzzer_init()
       delay(10);
     }
   }
@@ -277,7 +343,7 @@ uint8_t boot_vector = 0x00;
     buzzer_async_index = 0;
     buzzer_async_in_gap = false;
     buzzer_async_playing = true;
-    tone(PIN_BUZZER, notes[0]);
+    tone(buzzer_pin, notes[0]);
     buzzer_async_phase_started = millis();
   }
 
@@ -286,7 +352,8 @@ uint8_t boot_vector = 0x00;
     unsigned long now = millis();
     if (!buzzer_async_in_gap) {
       if (now - buzzer_async_phase_started >= buzzer_async_note_ms) {
-        noTone(PIN_BUZZER);
+        noTone(buzzer_pin);
+        digitalWrite(buzzer_pin, LOW); // see buzzer_init()
         buzzer_async_in_gap = true;
         buzzer_async_phase_started = now;
       }
@@ -295,7 +362,7 @@ uint8_t boot_vector = 0x00;
       if (buzzer_async_index >= buzzer_async_count) {
         buzzer_async_playing = false;
       } else {
-        tone(PIN_BUZZER, buzzer_async_notes[buzzer_async_index]);
+        tone(buzzer_pin, buzzer_async_notes[buzzer_async_index]);
         buzzer_async_in_gap = false;
         buzzer_async_phase_started = now;
       }
@@ -2060,6 +2127,20 @@ void snd_conf_save(bool is_enabled) {
   #endif
 }
 
+#if HAS_ENCODER == true
+void enc_conf_save(bool is_enabled) {
+	encoder_enabled = is_enabled;
+	if (is_enabled) {
+		eeprom_update(eeprom_addr(ADDR_CONF_ENA), ENC_ENABLE_BYTE);
+	} else {
+		eeprom_update(eeprom_addr(ADDR_CONF_ENA), ENC_DISABLE_BYTE);
+	}
+  #if !HAS_EEPROM && MCU_VARIANT == MCU_NRF52
+    eeprom_flush();
+  #endif
+}
+#endif
+
 #if HAS_VSENSE == true
 // Stored as ratio*10 (one decimal place is enough for divider tolerances).
 // 0x00 and 0xFF (erased EEPROM) both mean "unset" - fall back to the
@@ -2071,6 +2152,48 @@ void vsr_conf_save(uint8_t val) {
   #endif
 	if (val != 0x00 && val != 0xFF) { vsense_divider_ratio = (float)val / 10.0; }
 	else { vsense_divider_ratio = VSENSE_DIVIDER_RATIO_DEFAULT; }
+}
+#endif
+
+#if HAS_BATTERY_DIVIDER == true
+// Stored as a %/of-default correction against BATTERY_V_SCALE_DEFAULT, not
+// a divider ratio like VSENSE - measure_battery()'s pin_vbat constant
+// already bakes the physical divider and this MCU's ADC characteristics
+// together, so there's no clean way to isolate "the divider" alone; this
+// recalibrates the whole scale instead, nudged against a multimeter
+// reading. 0x00 and 0xFF (erased EEPROM) both mean "unset" - fall back to
+// the board's BATTERY_V_SCALE_DEFAULT (100%) instead of using them as-is.
+void bvs_conf_save(uint8_t val) {
+	eeprom_update(eeprom_addr(ADDR_CONF_BVS), val);
+  #if !HAS_EEPROM && MCU_VARIANT == MCU_NRF52
+    eeprom_flush();
+  #endif
+	if (val != 0x00 && val != 0xFF) { battery_v_scale = BATTERY_V_SCALE_DEFAULT * ((float)val / 100.0); }
+	else { battery_v_scale = BATTERY_V_SCALE_DEFAULT; }
+}
+#endif
+
+#if HAS_GPIO_MENU == true
+// Persists a physical peripheral-pin reassignment - currently the buzzer
+// (ADDR_CONF_BUZ) and, if HAS_ENCODER, the optional encoder's Up/Down/Press
+// pins (ADDR_CONF_EUP/EDN/EPR) - picked from a short curated list of
+// genuinely free GPIOs (Boards.h) via the RNode Settings menu's Hardware >
+// GPIO submenu, not entered freely, so val is always one of those
+// candidates. Reassigning a pin only takes effect at boot (buzzer_init()/
+// encoder_init() each read their own pin variable once, in setup()), so
+// this reboots immediately when the value actually changes - same pattern
+// as drot_conf_save()'s display-rotation reboot.
+void gpio_conf_save(uint8_t addr, uint8_t val) {
+  #if HAS_EEPROM
+    uint8_t stored = EEPROM.read(eeprom_addr(addr));
+  #elif MCU_VARIANT == MCU_NRF52
+    uint8_t stored = eeprom_read(eeprom_addr(addr));
+  #endif
+	eeprom_update(eeprom_addr(addr), val);
+  #if !HAS_EEPROM && MCU_VARIANT == MCU_NRF52
+    eeprom_flush();
+  #endif
+	if (stored != val) { hard_reset(); }
 }
 #endif
 
