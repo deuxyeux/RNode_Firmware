@@ -1461,12 +1461,30 @@ void kiss_indicate_disp() {
 	serial_write(FEND);
 	serial_write(CMD_DISP_READ);
 	#if HAS_DISPLAY
-		uint8_t *da = disp_area.getBuffer();
-		uint8_t *sa = stat_area.getBuffer();
-		size_t da_len = ((disp_area.width()+7)/8)*disp_area.height();
-		size_t sa_len = ((stat_area.width()+7)/8)*stat_area.height();
-		for (size_t i = 0; i < da_len; i++) { escaped_serial_write(da[i]); }
-		for (size_t i = 0; i < sa_len; i++) { escaped_serial_write(sa[i]); }
+		// Leading format byte, since the two payloads below aren't otherwise
+		// distinguishable by length alone (the disp_area/stat_area split's
+		// default geometry and a raw DISP_W x DISP_H buffer both happen to
+		// total the same byte count on boards that have a Settings menu).
+		#if HAS_MENU == true
+			// The menu draws straight to display's own buffer instead of
+			// disp_area/stat_area (which it never touches), so reading those
+			// while the menu is open would return stale main-screen content
+			// instead of what's actually visible. Read display's buffer
+			// directly instead - whatever was last drawn there (main content
+			// or the menu) is always what's currently on the physical panel.
+			escaped_serial_write(0x01);
+			uint8_t *fb = display.getBuffer();
+			size_t fb_len = ((DISP_W+7)/8)*DISP_H;
+			for (size_t i = 0; i < fb_len; i++) { escaped_serial_write(fb[i]); }
+		#else
+			escaped_serial_write(0x00);
+			uint8_t *da = disp_area.getBuffer();
+			uint8_t *sa = stat_area.getBuffer();
+			size_t da_len = ((disp_area.width()+7)/8)*disp_area.height();
+			size_t sa_len = ((stat_area.width()+7)/8)*stat_area.height();
+			for (size_t i = 0; i < da_len; i++) { escaped_serial_write(da[i]); }
+			for (size_t i = 0; i < sa_len; i++) { escaped_serial_write(sa[i]); }
+		#endif
 	#else
 		serial_write(0xFF);
 	#endif
