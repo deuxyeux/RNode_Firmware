@@ -106,6 +106,7 @@ class ST7789Spi : public OLEDDisplay {
       SPISettings           _spiSettings;
       uint16_t            _RGB=0xFFFF;
       uint8_t             _buffheight;
+      uint8_t             _rotation=0;
   public:
     /* pass _cs as -1 to indicate "do not use CS pin", for cases where it is hard wired low */
     ST7789Spi(SPIClass *spiClass,uint8_t _rst, uint8_t _dc, uint8_t _cs, OLEDDISPLAY_GEOMETRY g = GEOMETRY_RAWMODE,uint16_t width=240,uint16_t height=320,int mosi=-1,int miso=-1,int clk=-1) {
@@ -263,6 +264,7 @@ class ST7789Spi : public OLEDDisplay {
   }
 
   virtual void setRotation(uint8_t r) {
+    _rotation = r;
     uint8_t madctl = ST77XX_MADCTL_RGB|ST77XX_MADCTL_MV|ST77XX_MADCTL_MX;
     if (r == 1) { madctl = 0xC0; }
     if (r == 2) { madctl = ST77XX_MADCTL_RGB|ST77XX_MADCTL_MV|ST77XX_MADCTL_MY; }
@@ -270,6 +272,10 @@ class ST7789Spi : public OLEDDisplay {
     sendCommand(ST77XX_MADCTL);
     WriteData(madctl);
     delay(10);
+  }
+
+  virtual uint8_t getRotation() {
+    return _rotation;
   }
 
   void setRGB(uint16_t c)
