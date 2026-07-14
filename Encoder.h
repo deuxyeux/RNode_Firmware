@@ -102,7 +102,11 @@
     d = encoder_delta;
     encoder_delta = 0;
     ENCODER_EXIT_CRITICAL();
-    if (d != 0) menu_encoder_rotate(d);
+    // Rotation/button state above is still tracked regardless (so nothing's
+    // left half-updated if this gets re-enabled later), but only actually
+    // reaches the menu if the board's encoder is flagged as populated -
+    // see encoder_enabled, MENU_ITEM_ENCODER.
+    if (d != 0 && encoder_enabled) menu_encoder_rotate(d);
 
     int reading = digitalRead(pin_encoder_press);
     if (reading != enc_btn_debounce_state) {
@@ -115,7 +119,7 @@
         enc_btn_state = reading;
         if (enc_btn_state == ENC_PRESSED) {
           enc_btn_down_last = millis();
-        } else {
+        } else if (encoder_enabled) {
           menu_encoder_button(millis() - enc_btn_down_last);
         }
       }
