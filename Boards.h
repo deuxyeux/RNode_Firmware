@@ -334,8 +334,11 @@
       #define HAS_ENCODER true
       #define HAS_VSENSE true
       #define PIN_VSENSE 6
-      // R3 100k to VCC, R2 10k to GND: Vin = Vpin * (R2+R3)/R2 = Vpin * 11.0
-      #define VSENSE_DIVIDER_RATIO_DEFAULT 11.0
+      // Empirically calibrated default (real resistor tolerances drift from
+      // the nominal R3 100k/R2 10k math) - still overridable per-board via
+      // the Settings menu's Voltage Divider Ratio field (vsense_divider_ratio,
+      // Config.h), persisted to EEPROM (ADDR_CONF_VSR) via CMD_VSENSE_DIV.
+      #define VSENSE_DIVIDER_RATIO_DEFAULT 12.9
 
       const int pin_sclk = 1;
       const int pin_reset = 2;
