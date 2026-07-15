@@ -286,6 +286,14 @@
       #define LORA_LNA_GAIN  30
       #define LORA_LNA_GVT   14
 
+      // RNode Settings menu (Menu.h), button-only navigation (tap = next,
+      // double-tap = back, hold = select/open - see menu_button_press()).
+      // No encoder, buzzer, or voltage divider on this board, so
+      // HAS_ENCODER/HAS_BUZZER/HAS_VSENSE/HAS_BATTERY_DIVIDER all stay at
+      // their default false (Boards.h fallback block below) - the Hardware
+      // page still shows CPU temp via IS_ESP32S3 above.
+      #define HAS_MENU true
+
       const int pin_cs = 17;
       const int pin_sclk = 16;
       const int pin_miso = 15;

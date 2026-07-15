@@ -383,6 +383,8 @@ void setup() {
         if (wifi_mode == WR_WIFI_STA || wifi_mode == WR_WIFI_AP) { wifi_remote_init(); }
       #endif
       #if HAS_ETHERNET == true
+        eth_speed_mode = EEPROM.read(eeprom_addr(ADDR_CONF_ETHSPD));
+        if (eth_speed_mode > ETH_SPEED_10_HALF) eth_speed_mode = ETH_SPEED_AUTO; // erased EEPROM (0xFF) => default
         init_ethernet();
       #endif
       kiss_indicate_reset();
@@ -1354,6 +1356,38 @@ void serial_callback(uint8_t sbyte) {
 
         if (frame_len == 4) { for (uint8_t i = 0; i<4; i++) { eeprom_update(config_addr(ADDR_CONF_NM+i), cmdbuf[i]); } }
       #endif
+    } else if (command == CMD_ETH_IP) {
+      #if HAS_ETHERNET == true
+        if (sbyte == FESC) { ESCAPE = true; }
+        else {
+          if (ESCAPE) {
+            if (sbyte == TFEND) sbyte = FEND;
+            if (sbyte == TFESC) sbyte = FESC;
+            ESCAPE = false;
+          }
+          if (frame_len < CMD_L) cmdbuf[frame_len++] = sbyte;
+        }
+
+        if (frame_len == 4) { for (uint8_t i = 0; i<4; i++) { eeprom_update(config_addr(ADDR_CONF_ETH_IP+i), cmdbuf[i]); } }
+      #endif
+    } else if (command == CMD_ETH_NM) {
+      #if HAS_ETHERNET == true
+        if (sbyte == FESC) { ESCAPE = true; }
+        else {
+          if (ESCAPE) {
+            if (sbyte == TFEND) sbyte = FEND;
+            if (sbyte == TFESC) sbyte = FESC;
+            ESCAPE = false;
+          }
+          if (frame_len < CMD_L) cmdbuf[frame_len++] = sbyte;
+        }
+
+        if (frame_len == 4) { for (uint8_t i = 0; i<4; i++) { eeprom_update(config_addr(ADDR_CONF_ETH_NM+i), cmdbuf[i]); } }
+      #endif
+    } else if (command == CMD_ETH_SPEED) {
+      #if HAS_ETHERNET == true
+        if (sbyte <= ETH_SPEED_10_HALF) { ethspd_conf_save(sbyte); }
+      #endif
     } else if (command == CMD_BT_CTRL) {
       #if HAS_BLUETOOTH || HAS_BLE
         if (sbyte == 0x00) {
@@ -1899,6 +1933,7 @@ void loop() {
   #endif
   #if HAS_MENU == true
     menu_button_process();
+    menu_timeout_process();
   #endif
 
   if (memory_low) {

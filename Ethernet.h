@@ -19,7 +19,33 @@ bool eth_is_connected = false;
 bool eth_link_up = false;
 IPAddress eth_device_ip;
 
+// Persisted forced speed/duplex setting (ETH_SPEED_*, Config.h) - populated
+// from EEPROM (ADDR_CONF_ETHSPD) in setup() before init_ethernet() runs, so
+// it's already valid by the time init_ethernet() reads it below.
+uint8_t eth_speed_mode = ETH_SPEED_AUTO;
+
 char eth_hostname[11];
+
+// Applies whatever's currently in ADDR_CONF_ETH_IP/NM to the interface - a
+// static IP/netmask if both are valid, otherwise ETH.config() with its
+// all-zero defaults, which (see NetworkInterface::config(), esp32 core)
+// stops and restarts the DHCP client rather than actually zeroing the
+// address. Safe to call any time after ETH.begin() (unlike the speed/
+// duplex setters, config() only needs the netif to already exist, which
+// begin() is what creates) - used both at boot (init_ethernet() below) and
+// live from the menu whenever IP Address/Netmask is changed (see
+// ethaddr_conf_save(), Utilities.h). addr4_read() (Utilities.h) is shared
+// with WiFi's own static IP (ADDR_CONF_IP/NM, Remote.h).
+void eth_apply_addr_config() {
+    uint8_t ip[4]; uint8_t nm[4];
+    if (addr4_read(ADDR_CONF_ETH_IP, ip) && addr4_read(ADDR_CONF_ETH_NM, nm)) {
+        IPAddress eth_static_ip(ip[0], ip[1], ip[2], ip[3]);
+        IPAddress eth_static_nm(nm[0], nm[1], nm[2], nm[3]);
+        ETH.config(eth_static_ip, eth_static_ip, eth_static_nm);
+    } else {
+        ETH.config();
+    }
+}
 
 void onEthEvent(WiFiEvent_t event) {
     switch (event) {
@@ -52,6 +78,19 @@ void onEthEvent(WiFiEvent_t event) {
 void init_ethernet() {
     eth_spi.begin(pin_eth_sclk, pin_eth_miso, pin_eth_mosi, pin_eth_cs);
     WiFi.onEvent(onEthEvent);
+    // Must be set before ETH.begin() - ETHClass::setAutoNegotiation()/
+    // setLinkSpeed()/setFullDuplex() (esp32 core) refuse to do anything once
+    // the interface has started, so a changed setting only takes effect at
+    // boot (see ethspd_conf_save(), Utilities.h, which reboots on change).
+    // Leaving autonegotiation on (the default) for AUTO is deliberate - no
+    // setter calls needed, matches this board's original always-auto behavior.
+    if (eth_speed_mode != ETH_SPEED_AUTO) {
+        bool full_duplex = (eth_speed_mode == ETH_SPEED_100_FULL || eth_speed_mode == ETH_SPEED_10_FULL);
+        uint16_t speed = (eth_speed_mode == ETH_SPEED_100_FULL || eth_speed_mode == ETH_SPEED_100_HALF) ? 100 : 10;
+        ETH.setAutoNegotiation(false);
+        ETH.setLinkSpeed(speed);
+        ETH.setFullDuplex(full_duplex);
+    }
     ETH.begin(
         ETH_PHY_W5500,
         0,
@@ -61,6 +100,9 @@ void init_ethernet() {
         eth_spi,
         20000000
     );
+    // Must come after ETH.begin(), the opposite ordering from the speed/
+    // duplex setters above - see eth_apply_addr_config() above.
+    eth_apply_addr_config();
     remote_listener.begin();
     remote_listener.setTimeout(WR_SOCKET_TIMEOUT);
     wr_state = WR_STATE_ON;

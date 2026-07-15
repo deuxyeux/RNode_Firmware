@@ -54,6 +54,25 @@
 	uint8_t wr_state = WR_STATE_OFF;
 	uint8_t wr_channel = WR_CHANNEL_DEFAULT;
 
+	// How long the RNode Settings menu (Menu.h) can sit with no button/
+	// encoder input before it gives up and closes itself, discarding any
+	// unsaved (whole-session-staged) edits - see menu_close_without_saving(),
+	// Menu.h. Applies to every board with HAS_MENU, not just ones with a
+	// physical encoder.
+	#define SETTINGS_MENU_TIMEOUT 127
+
+	// Forced link speed/duplex for the W5500 (MeshPoE-S3 only, HAS_ETHERNET -
+	// see Ethernet.h). AUTO leaves autonegotiation on (the esp32 core's
+	// default) - the others force a specific combo via
+	// ETH.setAutoNegotiation(false) before ETH.begin(), since the W5500 PHY
+	// driver requires the interface to not be autonegotiating to accept a
+	// forced speed/duplex. The W5500 itself only does 10/100, no gigabit.
+	#define ETH_SPEED_AUTO      0x00
+	#define ETH_SPEED_100_FULL  0x01
+	#define ETH_SPEED_100_HALF  0x02
+	#define ETH_SPEED_10_FULL   0x03
+	#define ETH_SPEED_10_HALF   0x04
+
 	#define M_FRQ_S 27388122
 	#define M_FRQ_R 27388061
 	bool console_active = false;

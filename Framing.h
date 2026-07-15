@@ -73,6 +73,18 @@
   #define CMD_WIFI_NM     0x85
   #define CMD_SND         0x86
   #define CMD_VSENSE_DIV  0x87
+  // Wired Ethernet's own static IP/netmask (MeshPoE-S3 only, HAS_ETHERNET) -
+  // same wire format as CMD_WIFI_IP/NM above, just a separate address pair
+  // (ADDR_CONF_ETH_IP/NM, ROM.h) so WiFi and Ethernet can each have their
+  // own independent static config.
+  #define CMD_ETH_IP      0x88
+  #define CMD_ETH_NM      0x89
+  // Forced link speed/duplex for the wired Ethernet PHY (MeshPoE-S3 only,
+  // HAS_ETHERNET) - single byte, one of the ETH_SPEED_* constants (Config.h).
+  // Persisted via ethspd_conf_save() (Utilities.h), which reboots the device
+  // immediately if the value actually changed - same as the on-device
+  // Settings menu's Ethernet > Speed field.
+  #define CMD_ETH_SPEED   0x8A
 
   #define CMD_BOARD       0x47
   #define CMD_PLATFORM    0x48

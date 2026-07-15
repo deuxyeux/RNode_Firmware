@@ -32,6 +32,10 @@
   #define MENU_STATE_HW_EDIT        8   // editing the Input Voltage/Battery Cal field
   #define MENU_STATE_GPIO_LIST      9   // Hardware > GPIO submenu list
   #define MENU_STATE_GPIO_PIN_EDIT  10  // picking a physical pin for whichever GPIO_ITEM_* is selected
+  #define MENU_STATE_ETH_LIST       11  // Ethernet submenu list (MeshPoE-S3 only, HAS_ETHERNET)
+  #define MENU_STATE_ETH_EDIT       12  // editing the Ethernet Speed field
+  #define MENU_STATE_ETH_ADDR_EDIT  13  // editing one octet of the IP Address or Netmask field
+  #define MENU_STATE_WIFI_ADDR_EDIT 14  // editing one octet of WiFi's own IP Address or Netmask field
 
   // The Hardware page exists whenever there's anything board-level worth
   // showing (battery/voltage sensing via HAS_PMU, or an ESP32-S3's CPU
@@ -56,7 +60,17 @@
   #define MENU_ITEM_DISPLAY_TIMEOUT    0
   #define MENU_ITEM_DISPLAY_BRIGHTNESS 1
   #define MENU_ITEM_ORIENTATION        2
-  #define MENU_ITEM_SOUND              3
+
+  #if HAS_BUZZER == true
+    // No point offering a Sound toggle on boards with no buzzer to make any
+    // sound with - sound_enabled/snd_conf_save() (Utilities.h) stay
+    // unconditional (the KISS CMD_SOUND command is always accepted
+    // regardless of hardware), only this menu entry is gated.
+    #define MENU_ITEM_SOUND 3
+    #define MENU_NEXT_IDX_S 4
+  #else
+    #define MENU_NEXT_IDX_S 3
+  #endif
 
   #if HAS_ENCODER == true
     // Whether a physical encoder is actually populated - some boards have
@@ -66,10 +80,10 @@
     // HAS_ENCODER capability flag. Only changes the on-screen footer hint
     // (turn/press vs tap/hold) - the encoder itself is always serviced
     // regardless, same as before this existed.
-    #define MENU_ITEM_ENCODER 4
-    #define MENU_NEXT_IDX_0   5
+    #define MENU_ITEM_ENCODER MENU_NEXT_IDX_S
+    #define MENU_NEXT_IDX_0   (MENU_NEXT_IDX_S + 1)
   #else
-    #define MENU_NEXT_IDX_0 4
+    #define MENU_NEXT_IDX_0 MENU_NEXT_IDX_S
   #endif
 
   #if HAS_WIFI == true
@@ -79,22 +93,57 @@
     #define MENU_NEXT_IDX_A MENU_NEXT_IDX_0
   #endif
 
-  #if MENU_HAS_HW_PAGE == true
-    #define MENU_ITEM_HARDWARE MENU_NEXT_IDX_A
-    #define MENU_NEXT_IDX_B (MENU_NEXT_IDX_A + 1)
+  #if HAS_ETHERNET == true
+    // MeshPoE-S3 only - see Boards.h. Sits right after WiFi.
+    #define MENU_ITEM_ETHERNET MENU_NEXT_IDX_A
+    #define MENU_NEXT_IDX_A2   (MENU_NEXT_IDX_A + 1)
   #else
-    #define MENU_NEXT_IDX_B MENU_NEXT_IDX_A
+    #define MENU_NEXT_IDX_A2 MENU_NEXT_IDX_A
+  #endif
+
+  #if MENU_HAS_HW_PAGE == true
+    #define MENU_ITEM_HARDWARE MENU_NEXT_IDX_A2
+    #define MENU_NEXT_IDX_B (MENU_NEXT_IDX_A2 + 1)
+  #else
+    #define MENU_NEXT_IDX_B MENU_NEXT_IDX_A2
   #endif
 
   #define MENU_ITEM_SAVE_EXIT MENU_NEXT_IDX_B
   #define MENU_ITEM_COUNT     (MENU_ITEM_SAVE_EXIT + 1)
 
   #if HAS_WIFI == true
-    #define WIFI_ITEM_MODE  0
-    #define WIFI_ITEM_SSID  1
-    #define WIFI_ITEM_PSK   2
-    #define WIFI_ITEM_BACK  3
-    #define WIFI_ITEM_COUNT 4
+    #define WIFI_ITEM_MODE     0
+    #define WIFI_ITEM_SSID     1
+    #define WIFI_ITEM_PSK      2
+    // Static IP/netmask (ADDR_CONF_IP/NM, ROM.h) - same all-zero/all-0xFF-
+    // means-unset convention as everywhere else (see addr4_read(),
+    // Utilities.h). Unlike Mode/SSID/PSK's WIFI_TEXT_EDIT flow, these don't
+    // get their own "Save?" confirm dialog - MENU_STATE_WIFI_ADDR_EDIT
+    // finishing just updates staged_wifi_ip/nm in RAM, still deferred to
+    // SAVE & EXIT like every other field in this list.
+    #define WIFI_ITEM_IP       3
+    #define WIFI_ITEM_NETMASK  4
+    // Single-confirm action (same as MENU_ITEM_SAVE_EXIT), not a field -
+    // stages both back to 0.0.0.0, still deferred to SAVE & EXIT.
+    #define WIFI_ITEM_CLEAR    5
+    #define WIFI_ITEM_BACK     6
+    #define WIFI_ITEM_COUNT    7
+  #endif
+
+  #if HAS_ETHERNET == true
+    #define ETH_ITEM_LINK_STATUS 0
+    #define ETH_ITEM_SPEED       1
+    // No separate DHCP/Manual mode flag - same "all-zero or all-0xFF means
+    // unset, fall back to DHCP" convention wifi_remote_start_sta() (Remote.h)
+    // already uses for its own static IP. Setting IP Address to 0.0.0.0 (or
+    // just never touching it) is how you get DHCP here too.
+    #define ETH_ITEM_IP           2
+    #define ETH_ITEM_NETMASK      3
+    // A single-confirm action, not a field - same as MENU_ITEM_SAVE_EXIT -
+    // zeroes both ADDR_CONF_ETH_IP/NM back to "unset" (DHCP).
+    #define ETH_ITEM_CLEAR        4
+    #define ETH_ITEM_BACK         5
+    #define ETH_ITEM_COUNT        6
   #endif
 
   #if MENU_HAS_HW_PAGE == true
@@ -135,11 +184,18 @@
       #define HW_NEXT_C HW_NEXT_B
     #endif
 
-    #if HAS_GPIO_MENU == true
-      #define HW_ITEM_GPIO HW_NEXT_C
-      #define HW_NEXT_D    (HW_NEXT_C + 1)
+    #if HAS_ETHERNET == true
+      #define HW_ITEM_ETH_MAC HW_NEXT_C
+      #define HW_NEXT_C2      (HW_NEXT_C + 1)
     #else
-      #define HW_NEXT_D HW_NEXT_C
+      #define HW_NEXT_C2 HW_NEXT_C
+    #endif
+
+    #if HAS_GPIO_MENU == true
+      #define HW_ITEM_GPIO HW_NEXT_C2
+      #define HW_NEXT_D    (HW_NEXT_C2 + 1)
+    #else
+      #define HW_NEXT_D HW_NEXT_C2
     #endif
 
     #define HW_ITEM_BACK  HW_NEXT_D
@@ -172,6 +228,12 @@
   bool menu_btn_pending = false;
   unsigned long menu_btn_last_click = 0;
 
+  // Idle-close watchdog (SETTINGS_MENU_TIMEOUT, Config.h) - bumped on every
+  // real button/encoder input (see menu_button_press()/menu_encoder_rotate()/
+  // menu_encoder_button()), checked from menu_timeout_process() (polled from
+  // loop(), same as menu_button_process()).
+  unsigned long menu_last_activity_ms = 0;
+
   uint8_t staged_display_timeout    = 0;   // seconds, 0-255, 0 = OFF
   uint8_t staged_display_brightness = 0;   // 0-255, raw SSD1306 contrast
   uint8_t staged_display_rotation   = 0;   // 0-3 = 0/90/180/270 degrees
@@ -181,7 +243,9 @@
   // commit time so a live-applied value still gets persisted to EEPROM
   // (display_intensity itself no longer reflects "unchanged" by then).
   uint8_t live_display_brightness   = 0;
-  bool    staged_sound_enabled      = true;
+  #if HAS_BUZZER == true
+    bool staged_sound_enabled = true;
+  #endif
   #if HAS_ENCODER == true
     bool staged_encoder_enabled = false;
   #endif
@@ -197,12 +261,40 @@
     char    live_wifi_ssid[33] = {0};
     char    live_wifi_psk[33]  = {0};
 
+    // Same staged/live split as SSID/PSK above (deferred to SAVE & EXIT,
+    // see menu_commit_and_exit()) - not immediate-commit like Ethernet's
+    // own IP Address/Netmask, since Mode/SSID/PSK in this same submenu
+    // already establish the deferred pattern. wifi_addr_octet_idx is
+    // shared by both fields, same as eth_addr_octet_idx.
+    uint8_t staged_wifi_ip[4] = {0, 0, 0, 0};
+    uint8_t staged_wifi_nm[4] = {0, 0, 0, 0};
+    uint8_t live_wifi_ip[4]   = {0, 0, 0, 0};
+    uint8_t live_wifi_nm[4]   = {0, 0, 0, 0};
+    uint8_t wifi_addr_octet_idx = 0;
+
     // Working state while actively in MENU_STATE_WIFI_TEXT_EDIT, reset fresh
     // every time SSID or PSK is opened from the WiFi list.
     uint8_t text_edit_field = 0;   // WIFI_ITEM_SSID or WIFI_ITEM_PSK
     char    text_edit_buf[33] = {0};
     uint8_t wheel_index = 0;
     uint8_t text_confirm_cursor = 0;   // 0 = SAVE, 1 = DISCARD
+  #endif
+
+  #if HAS_ETHERNET == true
+    uint8_t eth_menu_cursor = 0;
+    // Synced fresh from the live value on entering MENU_STATE_ETH_EDIT (see
+    // menu_confirm_select()), not staged at whole-menu-open time like most
+    // fields - this one commits to EEPROM (and reboots if changed) the
+    // moment you back out of its own edit screen, same immediate-commit
+    // pattern as the Hardware page's Voltage Divider Ratio/GPIO pin fields.
+    uint8_t staged_eth_speed_mode = ETH_SPEED_AUTO;
+    // Same immediate-commit-on-its-own-screen pattern as staged_eth_speed_mode
+    // above. Shared by both IP Address and Netmask - which one's being
+    // edited is always whichever eth_menu_cursor pointed at when
+    // MENU_STATE_ETH_ADDR_EDIT was entered.
+    uint8_t staged_eth_ip[4]      = {0, 0, 0, 0};
+    uint8_t staged_eth_nm[4]      = {0, 0, 0, 0};
+    uint8_t eth_addr_octet_idx    = 0;
   #endif
 
   #if MENU_HAS_HW_PAGE == true
@@ -512,11 +604,57 @@
     void menu_main_button_del() { }
   #endif
 
+  #if HAS_WIFI == true || HAS_ETHERNET == true
+    // Shared by WiFi's IP Address/Netmask (WIFI_ITEM_IP/NETMASK, Remote.h's
+    // ADDR_CONF_IP/NM) and, on MeshPoE-S3, wired Ethernet's own
+    // (ETH_ITEM_IP/NETMASK, Ethernet.h's ADDR_CONF_ETH_IP/NM) - both submenus
+    // pass in whichever staged octets/index are theirs.
+    void format_addr_octets(uint8_t *octets, char *buf) {
+      sprintf(buf, "%u.%u.%u.%u", octets[0], octets[1], octets[2], octets[3]);
+    }
+
+    void step_addr_octet(uint8_t *octets, uint8_t octet_idx, int8_t dir, bool wrap = false) {
+      int16_t v = (int16_t)octets[octet_idx] + dir;
+      if (wrap) {
+        if (v < 0)   v = 255;
+        if (v > 255) v = 0;
+      } else {
+        if (v < 0)   v = 0;
+        if (v > 255) v = 255;
+      }
+      octets[octet_idx] = (uint8_t)v;
+    }
+  #endif
+
+  #if HAS_ETHERNET == true
+    void format_eth_speed_mode(uint8_t mode, char *buf) {
+      if      (mode == ETH_SPEED_100_FULL) sprintf(buf, "100/FULL");
+      else if (mode == ETH_SPEED_100_HALF) sprintf(buf, "100/HALF");
+      else if (mode == ETH_SPEED_10_FULL)  sprintf(buf, "10/FULL");
+      else if (mode == ETH_SPEED_10_HALF)  sprintf(buf, "10/HALF");
+      else                                  sprintf(buf, "AUTO");
+    }
+
+    void step_eth_speed_mode(int8_t dir, bool wrap = false) {
+      int8_t v = (int8_t)staged_eth_speed_mode + (dir > 0 ? 1 : -1);
+      if (wrap) {
+        if (v < ETH_SPEED_AUTO)     v = ETH_SPEED_10_HALF;
+        if (v > ETH_SPEED_10_HALF)  v = ETH_SPEED_AUTO;
+      } else {
+        if (v < ETH_SPEED_AUTO)     v = ETH_SPEED_AUTO;
+        if (v > ETH_SPEED_10_HALF)  v = ETH_SPEED_10_HALF;
+      }
+      staged_eth_speed_mode = (uint8_t)v;
+    }
+  #endif
+
   void menu_stage_from_live() {
     staged_display_timeout    = display_blanking_enabled ? (uint8_t)(display_blanking_timeout / 1000) : 0;
     staged_display_brightness = display_intensity;
     live_display_brightness   = display_intensity;
-    staged_sound_enabled      = sound_enabled;
+    #if HAS_BUZZER == true
+      staged_sound_enabled = sound_enabled;
+    #endif
     #if HAS_ENCODER == true
       staged_encoder_enabled = encoder_enabled;
     #endif
@@ -546,6 +684,24 @@
       }
       strncpy(staged_wifi_ssid, live_wifi_ssid, 33);
       strncpy(staged_wifi_psk,  live_wifi_psk,  33);
+
+      // Unlike Ethernet's IP Address, staged_wifi_ip must start out exactly
+      // equal to live_wifi_ip (no default-value substitution) - this runs
+      // at whole-menu-open time, not when IP Address is actually opened for
+      // editing, so any mismatch here would get silently written by SAVE &
+      // EXIT even if the user never touched IP Address at all this session.
+      if (addr4_read(ADDR_CONF_IP, live_wifi_ip)) {
+        for (uint8_t i = 0; i < 4; i++) { staged_wifi_ip[i] = live_wifi_ip[i]; }
+      } else {
+        live_wifi_ip[0] = live_wifi_ip[1] = live_wifi_ip[2] = live_wifi_ip[3] = 0;
+        staged_wifi_ip[0] = staged_wifi_ip[1] = staged_wifi_ip[2] = staged_wifi_ip[3] = 0;
+      }
+      if (addr4_read(ADDR_CONF_NM, live_wifi_nm)) {
+        for (uint8_t i = 0; i < 4; i++) { staged_wifi_nm[i] = live_wifi_nm[i]; }
+      } else {
+        live_wifi_nm[0] = live_wifi_nm[1] = live_wifi_nm[2] = live_wifi_nm[3] = 0;
+        staged_wifi_nm[0] = staged_wifi_nm[1] = staged_wifi_nm[2] = staged_wifi_nm[3] = 0;
+      }
     #endif
   }
 
@@ -568,9 +724,11 @@
       display_intensity = staged_display_brightness;
       di_conf_save(staged_display_brightness);
     }
-    if (staged_sound_enabled != sound_enabled) {
-      snd_conf_save(staged_sound_enabled);
-    }
+    #if HAS_BUZZER == true
+      if (staged_sound_enabled != sound_enabled) {
+        snd_conf_save(staged_sound_enabled);
+      }
+    #endif
     #if HAS_ENCODER == true
       if (staged_encoder_enabled != encoder_enabled) {
         enc_conf_save(staged_encoder_enabled);
@@ -602,6 +760,23 @@
         }
         wifi_changed = true;
       }
+      {
+        bool ip_changed = false;
+        bool nm_changed = false;
+        for (uint8_t i = 0; i < 4; i++) { if (staged_wifi_ip[i] != live_wifi_ip[i]) { ip_changed = true; break; } }
+        for (uint8_t i = 0; i < 4; i++) { if (staged_wifi_nm[i] != live_wifi_nm[i]) { nm_changed = true; break; } }
+        if (ip_changed) {
+          for (uint8_t i = 0; i < 4; i++) { eeprom_update(config_addr(ADDR_CONF_IP+i), staged_wifi_ip[i]); }
+          wifi_changed = true;
+        }
+        if (nm_changed) {
+          for (uint8_t i = 0; i < 4; i++) { eeprom_update(config_addr(ADDR_CONF_NM+i), staged_wifi_nm[i]); }
+          wifi_changed = true;
+        }
+      }
+      // wifi_remote_init() re-reads static IP/netmask from EEPROM itself
+      // (see wifi_remote_start_sta(), Remote.h), same as it already does
+      // for SSID/PSK above - no separate "apply" call needed.
       if (wifi_changed) { wifi_remote_init(); }
     #endif
     #if MENU_HAS_HW_PAGE == true
@@ -629,8 +804,9 @@
         }
       #endif
     #endif
-    // Must be last: gpio_conf_save()/drot_conf_save() may call hard_reset()
-    // if the value actually changed, which would otherwise discard any of
+    // Must be last: gpio_conf_save()/ethspd_conf_save()/drot_conf_save() may
+    // call hard_reset() if the value actually changed, which would otherwise
+    // discard any of
     // the above writes that hadn't happened yet.
     #if HAS_GPIO_MENU == true
       if (menu_state == MENU_STATE_GPIO_PIN_EDIT) {
@@ -640,13 +816,74 @@
         }
       }
     #endif
+    #if HAS_ETHERNET == true
+      if (menu_state == MENU_STATE_ETH_EDIT) {
+        if (staged_eth_speed_mode != eth_speed_mode) {
+          ethspd_conf_save(staged_eth_speed_mode);
+        }
+      } else if (menu_state == MENU_STATE_ETH_ADDR_EDIT) {
+        // Safe to commit at any octet index, not just the last one - the
+        // not-yet-visited octets still hold their synced-at-entry starting
+        // values (see menu_confirm_select()), so staged_eth_ip/nm is always
+        // a complete, valid 4-byte value, never a partial one.
+        int addr_base = (eth_menu_cursor == ETH_ITEM_IP) ? ADDR_CONF_ETH_IP : ADDR_CONF_ETH_NM;
+        uint8_t *staged = (eth_menu_cursor == ETH_ITEM_IP) ? staged_eth_ip : staged_eth_nm;
+        uint8_t live[4];
+        addr4_read(addr_base, live);
+        bool addr_changed = false;
+        for (uint8_t i = 0; i < 4; i++) { if (staged[i] != live[i]) { addr_changed = true; break; } }
+        if (addr_changed) {
+          ethaddr_conf_save(addr_base, staged);
+          // Same auto-netmask as the normal completion path in
+          // menu_confirm_select() - see the comment there.
+          if (eth_menu_cursor == ETH_ITEM_IP) {
+            uint8_t nm_tmp[4];
+            if (!addr4_read(ADDR_CONF_ETH_NM, nm_tmp)) {
+              uint8_t nm_255[4] = {255, 255, 255, 0};
+              ethaddr_conf_save(ADDR_CONF_ETH_NM, nm_255);
+            }
+          }
+          eth_apply_addr_config();
+        }
+      }
+    #endif
     drot_conf_save(staged_display_rotation);
     menu_state  = MENU_STATE_CLOSED;
     menu_cursor = 0;
     display_unblank();
   }
 
+  // Idle-timeout close (see menu_timeout_process()) - discards every
+  // deferred, whole-session-staged edit (Display Timeout/Brightness/
+  // Orientation/Sound/Encoder/WiFi Mode/SSID/PSK) instead of persisting them
+  // like menu_commit_and_exit() does. Fields that commit immediately on
+  // their own confirm (Voltage Divider, Battery Cal, GPIO pin, Ethernet
+  // Speed) already wrote to EEPROM the moment they were confirmed, so
+  // there's nothing to discard for those either way.
+  void menu_close_without_saving() {
+    // Brightness gets a live preview the instant it's confirmed (see
+    // menu_confirm_select()), unlike every other field - undo that here so
+    // an unsaved preview doesn't linger after the menu gives up on it.
+    display_intensity = live_display_brightness;
+    menu_state  = MENU_STATE_CLOSED;
+    menu_cursor = 0;
+    display_unblank();
+  }
+
+  // Polled from loop() (same as menu_button_process()) - closes the menu
+  // without saving if it's been sitting open with no button/encoder input
+  // for SETTINGS_MENU_TIMEOUT seconds (Config.h). menu_last_activity_ms is
+  // bumped by every real input event (menu_button_press()/
+  // menu_encoder_rotate()/menu_encoder_button()), so this only fires on
+  // genuine inactivity, not e.g. while the user is mid-scroll.
+  void menu_timeout_process() {
+    if (menu_is_open() && millis() - menu_last_activity_ms > (unsigned long)SETTINGS_MENU_TIMEOUT * 1000UL) {
+      menu_close_without_saving();
+    }
+  }
+
   void menu_encoder_rotate(int8_t dir, bool wrap) {
+    menu_last_activity_ms = millis();
     display_unblank();
     if (menu_state == MENU_STATE_LIST) {
       buzzer_encoder_tick_melody();
@@ -659,9 +896,12 @@
         step_brightness(dir, wrap);
       } else if (menu_edit_field == MENU_ITEM_ORIENTATION) {
         step_orientation(dir, wrap);
-      } else if (menu_edit_field == MENU_ITEM_SOUND) {
-        staged_sound_enabled = !staged_sound_enabled;
       }
+      #if HAS_BUZZER == true
+        else if (menu_edit_field == MENU_ITEM_SOUND) {
+          staged_sound_enabled = !staged_sound_enabled;
+        }
+      #endif
       #if HAS_ENCODER == true
         else if (menu_edit_field == MENU_ITEM_ENCODER) {
           staged_encoder_enabled = !staged_encoder_enabled;
@@ -681,6 +921,23 @@
       } else if (menu_state == MENU_STATE_WIFI_TEXT_CONFIRM) {
         buzzer_encoder_tick_melody();
         text_confirm_cursor = menu_clamp_cursor(text_confirm_cursor, dir, 2, wrap);
+      } else if (menu_state == MENU_STATE_WIFI_ADDR_EDIT) {
+        buzzer_encoder_tick_melody();
+        uint8_t *octets = (wifi_menu_cursor == WIFI_ITEM_IP) ? staged_wifi_ip : staged_wifi_nm;
+        step_addr_octet(octets, wifi_addr_octet_idx, dir, wrap);
+      }
+    #endif
+    #if HAS_ETHERNET == true
+      else if (menu_state == MENU_STATE_ETH_LIST) {
+        buzzer_encoder_tick_melody();
+        eth_menu_cursor = menu_clamp_cursor(eth_menu_cursor, dir, ETH_ITEM_COUNT, wrap);
+      } else if (menu_state == MENU_STATE_ETH_EDIT) {
+        buzzer_encoder_tick_melody();
+        step_eth_speed_mode(dir, wrap);
+      } else if (menu_state == MENU_STATE_ETH_ADDR_EDIT) {
+        buzzer_encoder_tick_melody();
+        uint8_t *octets = (eth_menu_cursor == ETH_ITEM_IP) ? staged_eth_ip : staged_eth_nm;
+        step_addr_octet(octets, eth_addr_octet_idx, dir, wrap);
       }
     #endif
     #if MENU_HAS_HW_PAGE == true
@@ -722,10 +979,17 @@
       menu_stage_from_live();
       menu_state  = MENU_STATE_LIST;
       menu_cursor = 0;
+      // Reached both via menu_encoder_button() (already sets this) and
+      // directly from button_event() on a plain main-button hold (which
+      // doesn't) - set unconditionally so the idle-close timer (see
+      // menu_timeout_process()) always starts fresh from the actual open,
+      // not from menu_last_activity_ms's stale/zero value.
+      menu_last_activity_ms = millis();
     }
   }
 
   void menu_encoder_button(unsigned long duration) {
+    menu_last_activity_ms = millis();
     display_unblank();
 
     if (duration > 700) {
@@ -769,6 +1033,12 @@
           wifi_menu_cursor = 0;
         }
       #endif
+      #if HAS_ETHERNET == true
+        else if (menu_cursor == MENU_ITEM_ETHERNET) {
+          menu_state = MENU_STATE_ETH_LIST;
+          eth_menu_cursor = 0;
+        }
+      #endif
       #if MENU_HAS_HW_PAGE == true
         else if (menu_cursor == MENU_ITEM_HARDWARE) {
           menu_state = MENU_STATE_HW_LIST;
@@ -796,9 +1066,29 @@
           menu_state = MENU_STATE_LIST;
         } else if (wifi_menu_cursor == WIFI_ITEM_MODE) {
           menu_state = MENU_STATE_WIFI_EDIT;
-        } else {
-          // SSID or PSK: fresh text-edit session, preloaded from the
-          // current staged value, wheel starts at 'a'.
+        } else if (wifi_menu_cursor == WIFI_ITEM_IP || wifi_menu_cursor == WIFI_ITEM_NETMASK) {
+          // A starting point to adjust from is friendlier than dialing
+          // every octet up from zero - but only applied here, the moment
+          // IP Address is actually opened for editing, not at whole-menu-
+          // open time (see menu_stage_from_live()) - staying unset/DHCP
+          // until someone actually opens this field is the whole point.
+          // Only IP Address gets one; Netmask has no similarly obvious
+          // default.
+          if (wifi_menu_cursor == WIFI_ITEM_IP &&
+              staged_wifi_ip[0] == 0 && staged_wifi_ip[1] == 0 && staged_wifi_ip[2] == 0 && staged_wifi_ip[3] == 0) {
+            staged_wifi_ip[0] = 192; staged_wifi_ip[1] = 168; staged_wifi_ip[2] = 0; staged_wifi_ip[3] = 32;
+          }
+          wifi_addr_octet_idx = 0;
+          menu_state = MENU_STATE_WIFI_ADDR_EDIT;
+        } else if (wifi_menu_cursor == WIFI_ITEM_CLEAR) {
+          // Single-confirm action (same as SAVE & EXIT above) - stays on
+          // WIFI_LIST, deferred to the whole menu's SAVE & EXIT like
+          // everything else here.
+          staged_wifi_ip[0] = staged_wifi_ip[1] = staged_wifi_ip[2] = staged_wifi_ip[3] = 0;
+          staged_wifi_nm[0] = staged_wifi_nm[1] = staged_wifi_nm[2] = staged_wifi_nm[3] = 0;
+        } else if (wifi_menu_cursor == WIFI_ITEM_SSID || wifi_menu_cursor == WIFI_ITEM_PSK) {
+          // Fresh text-edit session, preloaded from the current staged
+          // value, wheel starts at 'a'.
           text_edit_field = wifi_menu_cursor;
           const char *src = (text_edit_field == WIFI_ITEM_SSID) ? staged_wifi_ssid : staged_wifi_psk;
           strncpy(text_edit_buf, src, 32); text_edit_buf[32] = 0;
@@ -807,6 +1097,29 @@
         }
       } else if (menu_state == MENU_STATE_WIFI_EDIT) {
         menu_state = MENU_STATE_WIFI_LIST; // confirms staged value, no write yet
+      } else if (menu_state == MENU_STATE_WIFI_ADDR_EDIT) {
+        if (wifi_addr_octet_idx < 3) {
+          // Not the last octet yet - just advance, same screen.
+          wifi_addr_octet_idx++;
+        } else {
+          // A manually-set IP with no netmask configured yet is a common
+          // footgun - default to the overwhelmingly common /24 rather than
+          // requiring a separate trip through Netmask too. Only fills in an
+          // unset netmask (checked against the staged working copy, not
+          // live EEPROM - both stay in sync for the whole menu session
+          // here, unlike Ethernet's per-field-immediate-commit design)
+          // - leaves an already-set one alone.
+          if (wifi_menu_cursor == WIFI_ITEM_IP) {
+            bool nm_unset = (staged_wifi_nm[0] == 0 && staged_wifi_nm[1] == 0 && staged_wifi_nm[2] == 0 && staged_wifi_nm[3] == 0);
+            if (nm_unset) {
+              staged_wifi_nm[0] = 255; staged_wifi_nm[1] = 255; staged_wifi_nm[2] = 255; staged_wifi_nm[3] = 0;
+            }
+          }
+          // No write here - deferred to SAVE & EXIT (menu_commit_and_exit())
+          // like every other field in this submenu, unlike Ethernet's own
+          // IP Address/Netmask which commit immediately.
+          menu_state = MENU_STATE_WIFI_LIST;
+        }
       } else if (menu_state == MENU_STATE_WIFI_TEXT_EDIT) {
         uint8_t len = strlen(text_edit_buf);
         if (wheel_index == WHEEL_DEL_IDX) {
@@ -823,6 +1136,84 @@
         }
         // DISCARD: leave staged_wifi_ssid/psk untouched.
         menu_state = MENU_STATE_WIFI_LIST;
+      }
+    #endif
+    #if HAS_ETHERNET == true
+      else if (menu_state == MENU_STATE_ETH_LIST) {
+        // Link Status is read-only - only BACK, Speed, IP Address, and
+        // Netmask do anything.
+        if (eth_menu_cursor == ETH_ITEM_BACK) {
+          menu_state = MENU_STATE_LIST;
+        } else if (eth_menu_cursor == ETH_ITEM_SPEED) {
+          staged_eth_speed_mode = eth_speed_mode;
+          menu_state = MENU_STATE_ETH_EDIT;
+        } else if (eth_menu_cursor == ETH_ITEM_IP || eth_menu_cursor == ETH_ITEM_NETMASK) {
+          int addr_base = (eth_menu_cursor == ETH_ITEM_IP) ? ADDR_CONF_ETH_IP : ADDR_CONF_ETH_NM;
+          uint8_t *staged = (eth_menu_cursor == ETH_ITEM_IP) ? staged_eth_ip : staged_eth_nm;
+          if (!addr4_read(addr_base, staged)) {
+            // Never configured - a starting point to adjust from is friendlier
+            // than making someone dial every octet up from zero. Netmask has
+            // no similarly obvious default, so it still starts at 0.0.0.0.
+            if (eth_menu_cursor == ETH_ITEM_IP) {
+              staged[0] = 192; staged[1] = 168; staged[2] = 0; staged[3] = 32;
+            } else {
+              staged[0] = staged[1] = staged[2] = staged[3] = 0;
+            }
+          }
+          eth_addr_octet_idx = 0;
+          menu_state = MENU_STATE_ETH_ADDR_EDIT;
+        } else if (eth_menu_cursor == ETH_ITEM_CLEAR) {
+          // Single-confirm action (same as SAVE & EXIT above), not a field -
+          // stays on ETH_LIST, which redraws showing "DHCP" for both rows.
+          uint8_t ip_tmp[4]; uint8_t nm_tmp[4];
+          bool ip_set = addr4_read(ADDR_CONF_ETH_IP, ip_tmp);
+          bool nm_set = addr4_read(ADDR_CONF_ETH_NM, nm_tmp);
+          if (ip_set || nm_set) {
+            uint8_t zero[4] = {0, 0, 0, 0};
+            ethaddr_conf_save(ADDR_CONF_ETH_IP, zero);
+            ethaddr_conf_save(ADDR_CONF_ETH_NM, zero);
+            eth_apply_addr_config();
+          }
+        }
+      } else if (menu_state == MENU_STATE_ETH_EDIT) {
+        // Commits straight to EEPROM here rather than staging until SAVE &
+        // EXIT - this only takes effect at boot (see ethspd_conf_save(),
+        // Utilities.h), so there's no reason to make leaving it uncommitted
+        // discard the change like every other field does.
+        if (staged_eth_speed_mode != eth_speed_mode) {
+          ethspd_conf_save(staged_eth_speed_mode);
+        }
+        menu_state = MENU_STATE_ETH_LIST;
+      } else if (menu_state == MENU_STATE_ETH_ADDR_EDIT) {
+        if (eth_addr_octet_idx < 3) {
+          // Not the last octet yet - just advance, same screen.
+          eth_addr_octet_idx++;
+        } else {
+          // Last octet confirmed - commit and apply live (no reboot needed,
+          // see ethaddr_conf_save()/eth_apply_addr_config()).
+          int addr_base = (eth_menu_cursor == ETH_ITEM_IP) ? ADDR_CONF_ETH_IP : ADDR_CONF_ETH_NM;
+          uint8_t *staged = (eth_menu_cursor == ETH_ITEM_IP) ? staged_eth_ip : staged_eth_nm;
+          uint8_t live[4];
+          addr4_read(addr_base, live);
+          bool addr_changed = false;
+          for (uint8_t i = 0; i < 4; i++) { if (staged[i] != live[i]) { addr_changed = true; break; } }
+          if (addr_changed) {
+            ethaddr_conf_save(addr_base, staged);
+            // A manually-set IP with no netmask configured yet is a common
+            // footgun - default to the overwhelmingly common /24 rather
+            // than requiring a separate trip through Netmask too. Leaves an
+            // already-set netmask alone - only fills in an unset one.
+            if (eth_menu_cursor == ETH_ITEM_IP) {
+              uint8_t nm_tmp[4];
+              if (!addr4_read(ADDR_CONF_ETH_NM, nm_tmp)) {
+                uint8_t nm_255[4] = {255, 255, 255, 0};
+                ethaddr_conf_save(ADDR_CONF_ETH_NM, nm_255);
+              }
+            }
+            eth_apply_addr_config();
+          }
+          menu_state = MENU_STATE_ETH_LIST;
+        }
       }
     #endif
     #if MENU_HAS_HW_PAGE == true
@@ -923,6 +1314,7 @@
   // same as an encoder short-click. 150-499ms is a dead zone (no-op) so an
   // imprecise press doesn't do either by accident.
   void menu_button_press(unsigned long duration) {
+    menu_last_activity_ms = millis();
     display_unblank();
     if (duration < 150) {
       unsigned long now = millis();
@@ -1022,12 +1414,23 @@
     display.setTextSize(2);
     int16_t x1, y1; uint16_t w, h;
     display.getTextBounds(valbuf, 0, 0, &x1, &y1, &w, &h);
-    display.setCursor(64 - w/2, 32);
+    // y=36, not the arrows' own 34 - Org_01 glyphs render above the
+    // setCursor() baseline, not straddling it (see [[feedback_org01_font_baseline]]),
+    // and that headroom roughly doubles at size 2 vs the arrows' size 1, so
+    // matching baselines would leave the value looking a few px too high.
+    // This offset centers the two visually instead of literally.
+    display.setCursor(64 - w/2, 36);
     display.print(valbuf);
     display.setTextSize(1);
-    display.setCursor(18, 34);
+    // Pinned near the box edges (4..124) rather than the old fixed 18/106 -
+    // frees up the center for wider size-2 values like "100/HALF" (Speed,
+    // ETH_ITEM_SPEED) without colliding with the arrows. ">" is measured
+    // rather than hardcoded so it can't run past the 124 edge.
+    display.setCursor(5, 34);
     display.print("<");
-    display.setCursor(106, 34);
+    int16_t ax1, ay1; uint16_t aw, ah;
+    display.getTextBounds(">", 0, 0, &ax1, &ay1, &aw, &ah);
+    display.setCursor(123 - aw, 34);
     display.print(">");
 
     display.drawFastHLine(4, 50, 120, SSD1306_WHITE);
@@ -1039,6 +1442,82 @@
       display.print("tap:adjust hold:ok");
     #endif
   }
+
+  #if HAS_WIFI == true || HAS_ETHERNET == true
+    // Shared by WiFi's IP Address/Netmask and, on MeshPoE-S3, wired
+    // Ethernet's own - shows the whole address at once (max
+    // "255.255.255.255", 15 chars, comfortably fits at size 1 - unlike the
+    // 32-char SSID/PSK wheel below, no windowing needed) with the octet
+    // currently being adjusted highlighted - same fillRect+invert-color
+    // trick draw_menu_text_edit_disp() uses for its wheel candidate, just
+    // per octet instead of per character. Already-confirmed octets sit to
+    // the left of the highlight, not-yet-visited ones (still holding
+    // whatever they started this edit session with) to its right, so the
+    // highlight visibly moves rightward - and everything left of it
+    // accumulates legible - as each octet is confirmed.
+    void draw_menu_addr_edit_disp(const char *title, uint8_t *octets, uint8_t active_idx) {
+      display.setFont(SMALL_FONT);
+      display.setTextSize(1);
+      display.setTextColor(SSD1306_WHITE);
+      display.setCursor(6, 9);
+      display.print(title);
+      display.drawFastHLine(4, 15, 120, SSD1306_WHITE);
+
+      // Same font as the SSID/PSK screen's typed content (TEXT_ENTRY_FONT,
+      // Tamsyn6x12 - see draw_menu_text_edit_disp()) - title/divider/footer
+      // stay on SMALL_FONT/Org_01, same split that screen uses. Narrower
+      // per-glyph than Org_01 at the size Org_01 would otherwise need to be
+      // legible here, so the full "255.255.255.255" fits comfortably.
+      display.setFont(TEXT_ENTRY_FONT);
+      display.setTextSize(1);
+
+      char full[16];
+      format_addr_octets(octets, full);
+      int16_t fx1, fy1; uint16_t fw, fh;
+      display.getTextBounds(full, 0, 0, &fx1, &fy1, &fw, &fh);
+      uint16_t x = 64 - fw/2;
+      const uint16_t y = 32;
+
+      char seg[4];
+      int16_t sx1, sy1; uint16_t sw, sh;
+      for (uint8_t i = 0; i < 4; i++) {
+        sprintf(seg, "%u", octets[i]);
+        display.getTextBounds(seg, 0, 0, &sx1, &sy1, &sw, &sh);
+        if (i == active_idx) {
+          // Same box geometry as draw_menu_text_edit_disp()'s wheel
+          // candidate - Tamsyn6x12 glyphs span roughly baseline-9 to
+          // baseline+4, a taller box than Org_01 would need.
+          display.fillRect(x - 1, 21, sw + 2, 18, SSD1306_WHITE);
+          display.setTextColor(SSD1306_BLACK);
+        } else {
+          display.setTextColor(SSD1306_WHITE);
+        }
+        display.setCursor(x, y);
+        display.print(seg);
+        x += sw;
+        display.setTextColor(SSD1306_WHITE);
+        if (i < 3) {
+          display.setCursor(x, y);
+          display.print(".");
+          int16_t dx1, dy1; uint16_t dw, dh;
+          display.getTextBounds(".", 0, 0, &dx1, &dy1, &dw, &dh);
+          x += dw;
+        }
+      }
+
+      display.setFont(SMALL_FONT);
+      display.setTextSize(1);
+      display.setTextColor(SSD1306_WHITE);
+      display.drawFastHLine(4, 50, 120, SSD1306_WHITE);
+      display.setCursor(6, 59);
+      #if HAS_ENCODER == true
+        if (encoder_enabled) display.print("turn:adjust press:ok");
+        else                 display.print("tap:adjust hold:ok");
+      #else
+        display.print("tap:adjust hold:ok");
+      #endif
+    }
+  #endif
 
   #if HAS_WIFI == true
     // Character-count windowed (not pixel-precise) so a 32-char SSID/PSK
@@ -1124,8 +1603,10 @@
       labels[MENU_ITEM_ORIENTATION] = "Orientation";
       format_orientation(staged_display_rotation, valbufs[MENU_ITEM_ORIENTATION]);
 
-      labels[MENU_ITEM_SOUND] = "Sound";
-      sprintf(valbufs[MENU_ITEM_SOUND], staged_sound_enabled ? "ON" : "OFF");
+      #if HAS_BUZZER == true
+        labels[MENU_ITEM_SOUND] = "Sound";
+        sprintf(valbufs[MENU_ITEM_SOUND], staged_sound_enabled ? "ON" : "OFF");
+      #endif
 
       #if HAS_ENCODER == true
         labels[MENU_ITEM_ENCODER] = "Encoder";
@@ -1135,6 +1616,11 @@
       #if HAS_WIFI == true
         labels[MENU_ITEM_WIFI] = "WiFi";
         sprintf(valbufs[MENU_ITEM_WIFI], ">"); // opens a submenu, not an inline value
+      #endif
+
+      #if HAS_ETHERNET == true
+        labels[MENU_ITEM_ETHERNET] = "Ethernet";
+        sprintf(valbufs[MENU_ITEM_ETHERNET], ">"); // opens a submenu, not an inline value
       #endif
 
       #if MENU_HAS_HW_PAGE == true
@@ -1149,7 +1635,7 @@
 
     } else if (menu_state == MENU_STATE_EDIT) {
       char valbuf[8];
-      const char *title = "SOUND";
+      const char *title = "";
       if (menu_edit_field == MENU_ITEM_DISPLAY_TIMEOUT) {
         title = "DISPLAY TIMEOUT";
         if (staged_display_timeout == 0) sprintf(valbuf, "OFF");
@@ -1161,15 +1647,18 @@
         title = "ORIENTATION";
         format_orientation(staged_display_rotation, valbuf);
       }
+      #if HAS_BUZZER == true
+        else if (menu_edit_field == MENU_ITEM_SOUND) {
+          title = "SOUND";
+          sprintf(valbuf, staged_sound_enabled ? "ON" : "OFF");
+        }
+      #endif
       #if HAS_ENCODER == true
         else if (menu_edit_field == MENU_ITEM_ENCODER) {
           title = "ENCODER";
           sprintf(valbuf, staged_encoder_enabled ? "ON" : "OFF");
         }
       #endif
-      else {
-        sprintf(valbuf, staged_sound_enabled ? "ON" : "OFF");
-      }
       draw_menu_edit_disp(title, valbuf);
     }
     #if HAS_WIFI == true
@@ -1189,6 +1678,21 @@
         labels[WIFI_ITEM_PSK] = "PSK";
         sprintf(valbufs[WIFI_ITEM_PSK], strlen(staged_wifi_psk) > 0 ? "SET" : "");
 
+        // "DHCP" (rather than "0.0.0.0") when unset - matching the same
+        // all-zero-means-unset convention Ethernet's page uses. Shows
+        // staged_wifi_ip/nm (the working copy), same as SSID/PSK above -
+        // not live EEPROM, since this whole submenu defers to SAVE & EXIT.
+        labels[WIFI_ITEM_IP] = "IP Address";
+        if (staged_wifi_ip[0]==0 && staged_wifi_ip[1]==0 && staged_wifi_ip[2]==0 && staged_wifi_ip[3]==0) sprintf(valbufs[WIFI_ITEM_IP], "DHCP");
+        else format_addr_octets(staged_wifi_ip, valbufs[WIFI_ITEM_IP]);
+
+        labels[WIFI_ITEM_NETMASK] = "Netmask";
+        if (staged_wifi_nm[0]==0 && staged_wifi_nm[1]==0 && staged_wifi_nm[2]==0 && staged_wifi_nm[3]==0) sprintf(valbufs[WIFI_ITEM_NETMASK], "DHCP");
+        else format_addr_octets(staged_wifi_nm, valbufs[WIFI_ITEM_NETMASK]);
+
+        labels[WIFI_ITEM_CLEAR] = "Clear IP/NM";
+        valbufs[WIFI_ITEM_CLEAR][0] = 0;
+
         labels[WIFI_ITEM_BACK] = "BACK";
         valbufs[WIFI_ITEM_BACK][0] = 0;
         draw_menu_list_disp("WIFI", labels, valbufs, WIFI_ITEM_COUNT, wifi_menu_cursor);
@@ -1196,6 +1700,10 @@
         char valbuf[8];
         format_wifi_mode(staged_wifi_mode, valbuf);
         draw_menu_edit_disp("MODE", valbuf);
+      } else if (menu_state == MENU_STATE_WIFI_ADDR_EDIT) {
+        const char *title = (wifi_menu_cursor == WIFI_ITEM_IP) ? "IP ADDRESS" : "NETMASK";
+        uint8_t *staged = (wifi_menu_cursor == WIFI_ITEM_IP) ? staged_wifi_ip : staged_wifi_nm;
+        draw_menu_addr_edit_disp(title, staged, wifi_addr_octet_idx);
       } else if (menu_state == MENU_STATE_WIFI_TEXT_EDIT) {
         const char *title = (text_edit_field == WIFI_ITEM_SSID) ? "SSID" : "PSK";
         draw_menu_text_edit_disp(title, text_edit_buf, wheel_index);
@@ -1206,6 +1714,54 @@
         valbufs[1][0] = 0;
         const char *title = (text_edit_field == WIFI_ITEM_SSID) ? "SAVE SSID?" : "SAVE PSK?";
         draw_menu_list_disp(title, labels, valbufs, 2, text_confirm_cursor);
+      }
+    #endif
+    #if HAS_ETHERNET == true
+      else if (menu_state == MENU_STATE_ETH_LIST) {
+        const char *labels[ETH_ITEM_COUNT];
+        char valbufs[ETH_ITEM_COUNT][24];
+
+        // eth_link_up (Ethernet.h) tracks ARDUINO_EVENT_ETH_CONNECTED/
+        // _DISCONNECTED - ETH.linkSpeed() (10 or 100, the W5500 has no
+        // gigabit mode) is otherwise stale/meaningless while link is down.
+        labels[ETH_ITEM_LINK_STATUS] = "Link Status";
+        if (eth_link_up) sprintf(valbufs[ETH_ITEM_LINK_STATUS], "%uM UP", ETH.linkSpeed());
+        else             sprintf(valbufs[ETH_ITEM_LINK_STATUS], "DOWN");
+
+        labels[ETH_ITEM_SPEED] = "Speed";
+        format_eth_speed_mode(eth_speed_mode, valbufs[ETH_ITEM_SPEED]);
+
+        // "DHCP" (rather than "0.0.0.0") when unset, matching the same
+        // all-zero/all-0xFF-means-unset convention addr4_read() (Utilities.h)
+        // already checks - there's no separate DHCP/Manual mode flag.
+        labels[ETH_ITEM_IP] = "IP Address";
+        {
+          uint8_t ip_octets[4];
+          if (addr4_read(ADDR_CONF_ETH_IP, ip_octets)) format_addr_octets(ip_octets, valbufs[ETH_ITEM_IP]);
+          else                                             sprintf(valbufs[ETH_ITEM_IP], "DHCP");
+        }
+
+        labels[ETH_ITEM_NETMASK] = "Netmask";
+        {
+          uint8_t nm_octets[4];
+          if (addr4_read(ADDR_CONF_ETH_NM, nm_octets)) format_addr_octets(nm_octets, valbufs[ETH_ITEM_NETMASK]);
+          else                                             sprintf(valbufs[ETH_ITEM_NETMASK], "DHCP");
+        }
+
+        labels[ETH_ITEM_CLEAR] = "Clear IP/NM";
+        valbufs[ETH_ITEM_CLEAR][0] = 0;
+
+        labels[ETH_ITEM_BACK] = "BACK";
+        valbufs[ETH_ITEM_BACK][0] = 0;
+        draw_menu_list_disp("ETHERNET", labels, valbufs, ETH_ITEM_COUNT, eth_menu_cursor);
+      } else if (menu_state == MENU_STATE_ETH_EDIT) {
+        char valbuf[9];
+        format_eth_speed_mode(staged_eth_speed_mode, valbuf);
+        draw_menu_edit_disp("SPEED", valbuf);
+      } else if (menu_state == MENU_STATE_ETH_ADDR_EDIT) {
+        const char *title = (eth_menu_cursor == ETH_ITEM_IP) ? "IP ADDRESS" : "NETMASK";
+        uint8_t *staged = (eth_menu_cursor == ETH_ITEM_IP) ? staged_eth_ip : staged_eth_nm;
+        draw_menu_addr_edit_disp(title, staged, eth_addr_octet_idx);
       }
     #endif
     #if MENU_HAS_HW_PAGE == true
@@ -1284,6 +1840,25 @@
               sprintf(valbufs[HW_ITEM_BT_MAC], "N/A");
             }
           #endif
+        #endif
+
+        #if HAS_ETHERNET == true
+          // Unlike WiFi/BT's hardware-burned MAC (readable via esp_read_mac()
+          // at any time), the W5500's MAC is a locally-administered address
+          // ETH.begin() derives from the base MAC and hands to the netif
+          // (see ETH.cpp) - only valid once init_ethernet() has run, which
+          // happens unconditionally at boot on this board, so this is
+          // effectively always populated by the time the menu is reachable.
+          labels[HW_ITEM_ETH_MAC] = "Eth";
+          {
+            uint8_t mac[6];
+            if (ETH.macAddress(mac) != NULL) {
+              sprintf(valbufs[HW_ITEM_ETH_MAC], "%02X:%02X:%02X:%02X:%02X:%02X",
+                mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+            } else {
+              sprintf(valbufs[HW_ITEM_ETH_MAC], "N/A");
+            }
+          }
         #endif
 
         #if HAS_GPIO_MENU == true

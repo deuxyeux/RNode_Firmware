@@ -50,6 +50,31 @@ uint8_t eeprom_read(uint32_t mapped_addr);
 
 void set_rns_link_state(uint8_t new_state);
 
+#if HAS_WIFI == true || HAS_ETHERNET == true
+// Reads a 4-byte IP/netmask from the config region (config_addr(), not
+// eeprom_addr() - shared by WiFi's ADDR_CONF_IP/NM and, on MeshPoE-S3,
+// wired Ethernet's own ADDR_CONF_ETH_IP/NM, see ROM.h) into out[4] -
+// returns false if the stored bytes are all-zero (never configured) or
+// all-0xFF (erased EEPROM), either of which means "unset, fall back to
+// DHCP". Declared here (not down with the rest of the network code) so
+// both Remote.h and Ethernet.h - included further down in this same file -
+// can already see it.
+bool addr4_read(int addr_base, uint8_t *out) {
+  bool all_zero = true;
+  bool all_ff = true;
+  for (uint8_t i = 0; i < 4; i++) {
+    #if HAS_EEPROM
+      out[i] = EEPROM.read(config_addr(addr_base+i));
+    #elif MCU_VARIANT == MCU_NRF52
+      out[i] = eeprom_read(config_addr(addr_base+i));
+    #endif
+    if (out[i] != 0x00) all_zero = false;
+    if (out[i] != 0xFF) all_ff = false;
+  }
+  return !(all_zero || all_ff);
+}
+#endif
+
 // Board default (SOUND_ENABLED_DEFAULT, Boards.h) - true everywhere the
 // buzzer is a standard always-populated feature (preserving the historical
 // always-on behavior for anyone who never touches Sound in the menu), false
@@ -92,6 +117,10 @@ void drot_conf_save(uint8_t val);
 #endif
 #if HAS_GPIO_MENU == true
   void gpio_conf_save(uint8_t addr, uint8_t val);
+#endif
+#if HAS_ETHERNET == true
+  void ethspd_conf_save(uint8_t val);
+  void ethaddr_conf_save(int addr_base, uint8_t *val);
 #endif
 void eeprom_update(int mapped_addr, uint8_t byte);
 void buzzer_encoder_tick_melody();
@@ -2212,6 +2241,41 @@ void gpio_conf_save(uint8_t addr, uint8_t val) {
     eeprom_flush();
   #endif
 	if (stored != val) { hard_reset(); }
+}
+#endif
+
+#if HAS_ETHERNET == true
+// Persists the forced link speed/duplex (ETH_SPEED_*, Config.h) picked from
+// the RNode Settings menu's Ethernet page. Only takes effect at boot -
+// ETH.setAutoNegotiation()/setLinkSpeed()/setFullDuplex() (esp32 core)
+// refuse once ETH.begin() has already run (see init_ethernet(),
+// Ethernet.h) - so this reboots immediately when the value actually
+// changes, same pattern as gpio_conf_save()'s pin-reassignment reboot.
+void ethspd_conf_save(uint8_t val) {
+  #if HAS_EEPROM
+    uint8_t stored = EEPROM.read(eeprom_addr(ADDR_CONF_ETHSPD));
+  #elif MCU_VARIANT == MCU_NRF52
+    uint8_t stored = eeprom_read(eeprom_addr(ADDR_CONF_ETHSPD));
+  #endif
+	eeprom_update(eeprom_addr(ADDR_CONF_ETHSPD), val);
+  #if !HAS_EEPROM && MCU_VARIANT == MCU_NRF52
+    eeprom_flush();
+  #endif
+	if (stored != val) { hard_reset(); }
+}
+
+// Persists a static IP/netmask (ADDR_CONF_ETH_IP/NM, ROM.h) - or, called
+// with an all-zero val, clears it back to "unset" (DHCP) - in the config
+// region (config_addr(), not eeprom_addr() - same region wifi_remote_
+// start_sta()'s ADDR_CONF_IP/NM live in, see ROM.h). Unlike ethspd_conf_
+// save() above, this never reboots: NetworkInterface::config() (esp32 core)
+// can reconfigure the interface, or hand it back to DHCP, at any time after
+// boot - the caller applies the change live via eth_apply_addr_config()
+// (Ethernet.h) after calling this.
+void ethaddr_conf_save(int addr_base, uint8_t *val) {
+	for (uint8_t i = 0; i < 4; i++) {
+		eeprom_update(config_addr(addr_base+i), val[i]);
+	}
 }
 #endif
 

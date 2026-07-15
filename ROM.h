@@ -54,6 +54,7 @@
   #define ADDR_CONF_EDN  0xC1
   #define ADDR_CONF_EPR  0xC2
   #define ADDR_CONF_ENA  0xC3
+  #define ADDR_CONF_ETHSPD 0xC4
 
   #define INFO_LOCK_BYTE 0x73
   #define CONF_OK_BYTE   0x73
@@ -70,6 +71,12 @@
   #define ADDR_CONF_PSK  0x21
   #define ADDR_CONF_IP   0x42
   #define ADDR_CONF_NM   0x46
+  // Wired Ethernet's own static IP/netmask (MeshPoE-S3 only, HAS_ETHERNET) -
+  // deliberately separate from ADDR_CONF_IP/NM above, which are WiFi STA-only
+  // (see wifi_remote_start_sta(), Remote.h) - a board can have both a WiFi
+  // static IP and a wired Ethernet static IP configured independently.
+  #define ADDR_CONF_ETH_IP 0x4A
+  #define ADDR_CONF_ETH_NM 0x4E
   //////////////////////////////////
 
 #endif
