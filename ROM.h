@@ -55,6 +55,11 @@
   #define ADDR_CONF_EPR  0xC2
   #define ADDR_CONF_ENA  0xC3
   #define ADDR_CONF_ETHSPD 0xC4
+  // Display-only UTC offset for the RTC (RTC.h/Menu.h) - raw byte, not a
+  // plain signed value (see rtc_get_tz_offset_qh(), RTC.h) so 0x00/0xFF
+  // (unset/erased EEPROM) stay unambiguous, same convention as
+  // ADDR_CONF_VSR/BVS above.
+  #define ADDR_CONF_TZ   0xC5
 
   #define INFO_LOCK_BYTE 0x73
   #define CONF_OK_BYTE   0x73

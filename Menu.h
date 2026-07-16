@@ -38,6 +38,8 @@
   #define MENU_STATE_WIFI_ADDR_EDIT 14  // editing one octet of WiFi's own IP Address or Netmask field
   #define MENU_STATE_RTC_LIST       15  // RTC submenu list (HAS_RTC boards)
   #define MENU_STATE_RTC_EDIT       16  // Set Time/Date: sequential Year/Month/Day/Hour/Minute/Second editor
+  #define MENU_STATE_RTC_NTP_RESULT 17  // Sync NTP result popup - dismiss (any confirm) returns to MENU_STATE_RTC_LIST
+  #define MENU_STATE_RTC_TZ_EDIT    18  // editing the Timezone display-offset field
 
   // The Hardware page exists whenever there's anything board-level worth
   // showing (battery/voltage sensing via HAS_PMU, or an ESP32-S3's CPU
@@ -168,16 +170,17 @@
   #endif
 
   #if HAS_RTC == true
-    #define RTC_ITEM_TIME  0   // read-only readout
-    #define RTC_ITEM_DATE  1   // read-only readout
-    #define RTC_ITEM_SET   2   // opens the sequential Set Time/Date editor
+    #define RTC_ITEM_TIME     0   // read-only readout, local (Timezone-shifted)
+    #define RTC_ITEM_DATE     1   // read-only readout, local (Timezone-shifted)
+    #define RTC_ITEM_TIMEZONE 2   // display-only UTC offset - see rtc_get_tz_offset_qh(), RTC.h
+    #define RTC_ITEM_SET      3   // opens the sequential Set Time/Date editor
     // Only present where rtc_sync_ntp() (RTC.h) actually compiles - see
     // its own MCU_VARIANT/HAS_WIFI/HAS_ETHERNET guard.
     #if MCU_VARIANT == MCU_ESP32 && (HAS_WIFI == true || HAS_ETHERNET == true)
-      #define RTC_ITEM_SYNC_NTP 3
-      #define RTC_NEXT_0 4
+      #define RTC_ITEM_SYNC_NTP 4
+      #define RTC_NEXT_0 5
     #else
-      #define RTC_NEXT_0 3
+      #define RTC_NEXT_0 4
     #endif
     #define RTC_ITEM_BACK  RTC_NEXT_0
     #define RTC_ITEM_COUNT (RTC_ITEM_BACK + 1)
@@ -384,6 +387,20 @@
     // Which of the 6 fields above is currently being adjusted - 0=Year,
     // 1=Month, 2=Day, 3=Hour, 4=Minute, 5=Second (see step_rtc_field()).
     uint8_t rtc_edit_field_idx = 0;
+
+    #if MCU_VARIANT == MCU_ESP32 && (HAS_WIFI == true || HAS_ETHERNET == true)
+      // rtc_sync_ntp()'s return value (NTP_SYNC_OK/NTP_SYNC_ERR_*, RTC.h)
+      // from the most recent Sync NTP attempt - drives the result popup
+      // (MENU_STATE_RTC_NTP_RESULT).
+      uint8_t rtc_ntp_result = NTP_SYNC_OK;
+    #endif
+
+    // Working copy while inside MENU_STATE_RTC_TZ_EDIT - quarter-hours
+    // from UTC, synced fresh from the live value on entry (see
+    // rtc_get_tz_offset_qh(), RTC.h) and committed immediately on
+    // confirm (tz_conf_save(), Utilities.h) - display-only, nothing to
+    // reboot or re-init, same reasoning as Ethernet's Speed field.
+    int8_t staged_tz_offset_qh = 0;
   #endif
 
   #if MENU_HAS_HW_PAGE == true
@@ -788,6 +805,27 @@
       uint8_t max_day = rtc_days_in_month(staged_rtc_year, staged_rtc_month);
       if (staged_rtc_day > max_day) staged_rtc_day = max_day;
     }
+
+    // "UTC" for a zero offset, else "+HH:MM"/"-HH:MM" - quarter-hour steps
+    // (see TZ_OFFSET_QH_MIN/MAX, RTC.h) can land on a non-zero minute part
+    // (e.g. UTC+05:30), so this always prints both fields rather than
+    // special-casing whole hours.
+    void format_tz_offset(int8_t offset_qh, char *buf) {
+      if (offset_qh == 0) { sprintf(buf, "UTC"); return; }
+      int16_t total_min = (int16_t)offset_qh * 15;
+      char sign = (total_min < 0) ? '-' : '+';
+      int16_t abs_min = (total_min < 0) ? -total_min : total_min;
+      sprintf(buf, "%c%02d:%02d", sign, abs_min / 60, abs_min % 60);
+    }
+
+    // Plain +-1-per-detent (one quarter-hour), no accelerated_step() ramp -
+    // same reasoning as step_rtc_field() above.
+    void step_tz_offset(int8_t dir, bool wrap = false) {
+      int16_t v = (int16_t)staged_tz_offset_qh + dir;
+      if (wrap) { if (v < TZ_OFFSET_QH_MIN) v = TZ_OFFSET_QH_MAX; if (v > TZ_OFFSET_QH_MAX) v = TZ_OFFSET_QH_MIN; }
+      else      { if (v < TZ_OFFSET_QH_MIN) v = TZ_OFFSET_QH_MIN; if (v > TZ_OFFSET_QH_MAX) v = TZ_OFFSET_QH_MAX; }
+      staged_tz_offset_qh = (int8_t)v;
+    }
   #endif
 
   void menu_stage_from_live() {
@@ -979,6 +1017,10 @@
         int32_t days = rtc_days_from_civil(staged_rtc_year, staged_rtc_month, staged_rtc_day);
         uint32_t epoch = (uint32_t)days * 86400UL + (uint32_t)staged_rtc_hour * 3600UL + (uint32_t)staged_rtc_minute * 60UL + staged_rtc_second;
         rtc_set_unixtime(epoch);
+      } else if (menu_state == MENU_STATE_RTC_TZ_EDIT) {
+        uint8_t live_raw = (uint8_t)(rtc_get_tz_offset_qh() + TZ_OFFSET_RAW_ZERO);
+        uint8_t new_raw  = (uint8_t)(staged_tz_offset_qh + TZ_OFFSET_RAW_ZERO);
+        if (new_raw != live_raw) { tz_conf_save(new_raw); }
       }
     #endif
     // Must be last: gpio_conf_save()/ethspd_conf_save()/drot_conf_save() may
@@ -1122,6 +1164,9 @@
       } else if (menu_state == MENU_STATE_RTC_EDIT) {
         buzzer_encoder_tick_melody();
         step_rtc_field(rtc_edit_field_idx, dir, wrap);
+      } else if (menu_state == MENU_STATE_RTC_TZ_EDIT) {
+        buzzer_encoder_tick_melody();
+        step_tz_offset(dir, wrap);
       }
     #endif
     #if MENU_HAS_HW_PAGE == true
@@ -1380,7 +1425,10 @@
             ethaddr_conf_save(ADDR_CONF_ETH_NM, zero);
             ethaddr_conf_save(ADDR_CONF_ETH_GW, zero);
             ethaddr_conf_save(ADDR_CONF_ETH_DNS, zero);
-            eth_apply_addr_config();
+            // true: actually un-applying a previously-set static config
+            // here, unlike init_ethernet()'s boot-time call - see
+            // eth_apply_addr_config()'s own comment (Ethernet.h).
+            eth_apply_addr_config(true);
           }
         }
       } else if (menu_state == MENU_STATE_ETH_EDIT) {
@@ -1448,15 +1496,23 @@
           staged_rtc_day   = (uint8_t)d;
           rtc_edit_field_idx = 0;
           menu_state = MENU_STATE_RTC_EDIT;
+        } else if (rtc_menu_cursor == RTC_ITEM_TIMEZONE) {
+          // Sync fresh from the live value, same immediate-commit
+          // reasoning as Set Time/Date above.
+          staged_tz_offset_qh = rtc_get_tz_offset_qh();
+          menu_state = MENU_STATE_RTC_TZ_EDIT;
         }
         #if MCU_VARIANT == MCU_ESP32 && (HAS_WIFI == true || HAS_ETHERNET == true)
           else if (rtc_menu_cursor == RTC_ITEM_SYNC_NTP) {
             // Blocks briefly (up to NTP_SYNC_TIMEOUT_MS, RTC.h, on failure)
-            // - acceptable for an explicit, rarely-used action. No separate
-            // success/fail dialog: RTC_LIST's Time/Date rows above already
-            // recompute from the live RTC on every redraw, so a successful
-            // sync is immediately visible once this returns.
-            rtc_sync_ntp();
+            // - acceptable for an explicit, rarely-used action. Result
+            // (success, or which of the specific ways it can fail) shown
+            // via MENU_STATE_RTC_NTP_RESULT below - RTC_LIST's Time/Date
+            // rows also already recompute from the live RTC on every
+            // redraw, so a successful sync is visible there too once
+            // the popup's dismissed.
+            rtc_ntp_result = rtc_sync_ntp();
+            menu_state = MENU_STATE_RTC_NTP_RESULT;
           }
         #endif
       } else if (menu_state == MENU_STATE_RTC_EDIT) {
@@ -1471,7 +1527,21 @@
           rtc_set_unixtime(epoch);
           menu_state = MENU_STATE_RTC_LIST;
         }
+      } else if (menu_state == MENU_STATE_RTC_TZ_EDIT) {
+        // Commits straight to EEPROM here rather than staging until SAVE &
+        // EXIT - display-only, nothing to reboot or re-init, same
+        // immediate-commit pattern as Set Time/Date above.
+        uint8_t live_raw = (uint8_t)(rtc_get_tz_offset_qh() + TZ_OFFSET_RAW_ZERO);
+        uint8_t new_raw  = (uint8_t)(staged_tz_offset_qh + TZ_OFFSET_RAW_ZERO);
+        if (new_raw != live_raw) { tz_conf_save(new_raw); }
+        menu_state = MENU_STATE_RTC_LIST;
       }
+      #if MCU_VARIANT == MCU_ESP32 && (HAS_WIFI == true || HAS_ETHERNET == true)
+        else if (menu_state == MENU_STATE_RTC_NTP_RESULT) {
+          // Single "OK" item - any confirm dismisses back to RTC_LIST.
+          menu_state = MENU_STATE_RTC_LIST;
+        }
+      #endif
     #endif
     #if MENU_HAS_HW_PAGE == true
       else if (menu_state == MENU_STATE_HW_LIST) {
@@ -1790,7 +1860,12 @@
       display.setTextSize(1);
       display.setTextColor(SSD1306_WHITE);
       display.setCursor(6, 9);
-      display.print("SET TIME/DATE");
+      // "UTC" suffix - the RTC list's own Time/Date rows show local
+      // (Timezone-shifted) time, but this editor always reads/writes the
+      // RTC in UTC, same as CMD_TIME/rtc_sync_ntp() - worth being explicit
+      // about here since it'd otherwise be the one screen on this page
+      // that doesn't match what's shown everywhere else.
+      display.print("SET TIME/DATE UTC");
       display.drawFastHLine(4, 15, 120, SSD1306_WHITE);
 
       display.setFont(TEXT_ENTRY_FONT);
@@ -2146,7 +2221,11 @@
         const char *labels[RTC_ITEM_COUNT];
         char valbufs[RTC_ITEM_COUNT][24];
 
-        uint32_t epoch = rtc_get_unixtime();
+        // Time/Date are shown in local (Timezone-shifted) time - everything
+        // else in this firmware (CMD_TIME, rtc_sync_ntp(), the RTC chip
+        // itself) stays strictly UTC; rtc_apply_tz_offset() (RTC.h) only
+        // shifts this display copy of the epoch.
+        uint32_t epoch = rtc_apply_tz_offset(rtc_get_unixtime());
         int32_t days = (int32_t)(epoch / 86400UL);
         uint32_t rem  = epoch % 86400UL;
         uint8_t hh = (uint8_t)(rem / 3600); rem %= 3600;
@@ -2163,6 +2242,9 @@
         if (rtc_present) sprintf(valbufs[RTC_ITEM_DATE], "%04d-%02u-%02u", (int)yy, mo, dd);
         else              sprintf(valbufs[RTC_ITEM_DATE], "N/A");
 
+        labels[RTC_ITEM_TIMEZONE] = "Timezone";
+        format_tz_offset(rtc_get_tz_offset_qh(), valbufs[RTC_ITEM_TIMEZONE]);
+
         #if MCU_VARIANT == MCU_ESP32 && (HAS_WIFI == true || HAS_ETHERNET == true)
           labels[RTC_ITEM_SYNC_NTP] = "Sync NTP";
           valbufs[RTC_ITEM_SYNC_NTP][0] = 0;
@@ -2177,7 +2259,26 @@
         draw_menu_list_disp("RTC", labels, valbufs, RTC_ITEM_COUNT, rtc_menu_cursor);
       } else if (menu_state == MENU_STATE_RTC_EDIT) {
         draw_menu_datetime_edit_disp(rtc_edit_field_idx);
+      } else if (menu_state == MENU_STATE_RTC_TZ_EDIT) {
+        char valbuf[8];
+        format_tz_offset(staged_tz_offset_qh, valbuf);
+        draw_menu_edit_disp("TIMEZONE", valbuf);
       }
+      #if MCU_VARIANT == MCU_ESP32 && (HAS_WIFI == true || HAS_ETHERNET == true)
+        else if (menu_state == MENU_STATE_RTC_NTP_RESULT) {
+          const char *labels[1] = { "OK" };
+          char valbufs[1][24];
+          valbufs[0][0] = 0;
+
+          const char *title = "SYNC OK";
+          if      (rtc_ntp_result == NTP_SYNC_ERR_NO_RTC)    title = "NO RTC FOUND";
+          else if (rtc_ntp_result == NTP_SYNC_ERR_NO_NET)    title = "NO NETWORK";
+          else if (rtc_ntp_result == NTP_SYNC_ERR_TIMEOUT)   title = "NTP TIMEOUT";
+          else if (rtc_ntp_result == NTP_SYNC_ERR_RTC_WRITE) title = "RTC WRITE FAIL";
+
+          draw_menu_list_disp(title, labels, valbufs, 1, 0);
+        }
+      #endif
     #endif
     #if MENU_HAS_HW_PAGE == true
       else if (menu_state == MENU_STATE_HW_LIST) {

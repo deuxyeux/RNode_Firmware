@@ -1539,7 +1539,16 @@ void display_indicate_tx() {
 #endif
 
 #define START_PAGE 0
-const uint8_t pages = 4;
+// One extra rotating info page for Date/Time when HAS_RTC - same "always
+// in the rotation, falls back to the BT MAC page when not applicable"
+// treatment as the WiFi/Ethernet IP pages below, just conditional on
+// HAS_RTC since (unlike WiFi/Ethernet) it's still a rare board capability,
+// not worth extending the rotation on every other board for.
+#if HAS_RTC == true
+  const uint8_t pages = 5;
+#else
+  const uint8_t pages = 4;
+#endif
 uint8_t disp_page = START_PAGE;
 #if HAS_WIFI
   extern IPAddress wr_device_ip;
@@ -1547,6 +1556,16 @@ uint8_t disp_page = START_PAGE;
 #if HAS_ETHERNET
   extern bool eth_is_connected;
   extern IPAddress eth_device_ip;
+#endif
+#if HAS_RTC == true
+  // RTC.h is #include'd later (Utilities.h) than this file, same reason
+  // the WiFi/Ethernet globals above are forward-declared rather than
+  // #include'd directly.
+  extern bool rtc_present;
+  uint32_t rtc_get_unixtime();
+  void rtc_civil_from_days(int32_t z, int32_t &y, uint32_t &m, uint32_t &d);
+  bool rtc_time_valid();
+  uint32_t rtc_apply_tz_offset(uint32_t utc_epoch);
 #endif
 
 #if HAS_WIFI || HAS_ETHERNET
@@ -1561,6 +1580,33 @@ void draw_disp_ip_line(const char* label, IPAddress ip) {
   disp_area.fillRect(0, 20, disp_area.width(), 17, SSD1306_BLACK);
   disp_area.setCursor(3, 34-8); disp_area.print(label);
   disp_area.setCursor(ipxpos, 34); disp_area.print(ip);
+}
+#endif
+
+#if HAS_RTC == true
+// Date on the label row, time on the value row - unlike draw_disp_ip_line()
+// above, both are fixed-width (always the same digit count), so neither
+// needs that function's per-glyph width math to right-align - a plain
+// left-aligned print is already stable. Shows local (Timezone-shifted)
+// time - see rtc_apply_tz_offset(), RTC.h - same as the RTC Settings
+// page's own Time/Date rows.
+void draw_disp_datetime_line() {
+  uint32_t epoch = rtc_apply_tz_offset(rtc_get_unixtime());
+  int32_t days = (int32_t)(epoch / 86400UL);
+  uint32_t rem  = epoch % 86400UL;
+  uint8_t hh = (uint8_t)(rem / 3600); rem %= 3600;
+  uint8_t mi = (uint8_t)(rem / 60);
+  uint8_t ss = (uint8_t)(rem % 60);
+  int32_t yy; uint32_t mo, dd;
+  rtc_civil_from_days(days, yy, mo, dd);
+
+  char date_str[11]; sprintf(date_str, "%04d-%02u-%02u", (int)yy, mo, dd);
+  char time_str[9];  sprintf(time_str, "%02u:%02u:%02u", hh, mi, ss);
+
+  disp_area.setFont(SMALL_FONT); disp_area.setTextWrap(false); disp_area.setTextColor(SSD1306_WHITE); disp_area.setTextSize(1);
+  disp_area.fillRect(0, 20, disp_area.width(), 17, SSD1306_BLACK);
+  disp_area.setCursor(3, 34-8); disp_area.print(date_str);
+  disp_area.setCursor(3, 34);   disp_area.print(time_str);
 }
 #endif
 
@@ -1653,31 +1699,43 @@ void draw_disp_area() {
 
         bool wifi_ip_ready = false;
         bool eth_ip_ready = false;
+        bool rtc_time_ready = false;
         #if HAS_WIFI
           wifi_ip_ready = wifi_is_connected();
         #endif
         #if HAS_ETHERNET
           eth_ip_ready = eth_is_connected;
         #endif
+        #if HAS_RTC == true
+          rtc_time_ready = rtc_time_valid();
+        #endif
 
-        // Page 1 dwells on the WiFi IP, page 3 on the Ethernet IP, each for
-        // a full page_interval, same as the original single WiFi IP page
-        bool display_ip = false;
+        // Page 1 dwells on the WiFi IP, page 3 on the Ethernet IP, page 4
+        // (HAS_RTC only) on Date/Time - each for a full page_interval, same
+        // as the original single WiFi IP page.
+        bool display_alt = false;
         bool show_wifi_ip = false;
         bool show_eth_ip = false;
+        bool show_datetime = false;
         if (wifi_ip_ready && disp_page == 1) {
-          display_ip = true;
+          display_alt = true;
           show_wifi_ip = true;
         } else if (eth_ip_ready && disp_page == 3) {
-          display_ip = true;
+          display_alt = true;
           show_eth_ip = true;
+        } else if (rtc_time_ready && disp_page == 4) {
+          display_alt = true;
+          show_datetime = true;
         }
-        if (display_ip) {
+        if (display_alt) {
           #if HAS_WIFI
             if (show_wifi_ip) { draw_disp_ip_line("WiFi IP:", wr_device_ip); }
           #endif
           #if HAS_ETHERNET
             if (show_eth_ip) { draw_disp_ip_line("Eth IP:", eth_device_ip); }
+          #endif
+          #if HAS_RTC == true
+            if (show_datetime) { draw_disp_datetime_line(); }
           #endif
         } else {
           disp_area.setFont(SMALL_FONT); disp_area.setTextWrap(false); disp_area.setTextColor(SSD1306_WHITE); disp_area.setTextSize(2);

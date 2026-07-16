@@ -23,6 +23,12 @@
 
 #define RTC_I2C_ADDR 0x68
 
+// DEBUG_UART_BEGIN()/DEBUG_LOG() - see Utilities.h (DEBUG_UART_ENABLED)
+// for what these do and how to turn them on/off, and Boards.h
+// (HAS_DEBUG_UART) for which boards have a free UART to use. Not
+// RTC-specific - defined in Utilities.h so any file can use them for
+// future debug needs, not just this one.
+
 bool rtc_present = false;
 
 uint8_t rtc_bcd2bin(uint8_t val) { return val - 6 * (val >> 4); }
@@ -55,10 +61,15 @@ void rtc_civil_from_days(int32_t z, int32_t &y, uint32_t &m, uint32_t &d) {
 }
 
 bool rtc_init() {
+  DEBUG_UART_BEGIN();
+  DEBUG_LOG("Device started\r\n");
+
   Wire.begin(pin_rtc_sda, pin_rtc_scl);
 
   Wire.beginTransmission(RTC_I2C_ADDR);
   rtc_present = (Wire.endTransmission() == 0);
+
+  DEBUG_LOG("[RTC] init: present=%d\r\n", rtc_present);
 
   return rtc_present;
 }
@@ -100,6 +111,60 @@ uint32_t rtc_get_unixtime() {
   return (uint32_t)days * 86400UL + (uint32_t)hours * 3600UL + (uint32_t)minutes * 60UL + seconds;
 }
 
+// True once the RTC holds a plausible time - a DS3231 that's never been
+// set (or lost its backup battery) reads back 2000-01-01 00:00:00, so
+// year == 2000 is what "never set" looks like in practice. Used to gate
+// the Date/Time info page (Display.h) so it doesn't show a meaningless
+// default time.
+bool rtc_time_valid() {
+  if (!rtc_present) return false;
+
+  uint32_t epoch = rtc_get_unixtime();
+  int32_t days = (int32_t)(epoch / 86400UL);
+  int32_t y; uint32_t m, d;
+  rtc_civil_from_days(days, y, m, d);
+
+  return y != 2000;
+}
+
+// Display-only UTC offset (set via tz_conf_save(), Utilities.h, from the
+// RTC menu's Timezone field) - the RTC chip, rtc_set_unixtime()/
+// rtc_get_unixtime(), CMD_TIME, and rtc_sync_ntp() all stay strictly UTC;
+// this offset is applied only when rendering time for a human to read
+// (Menu.h's RTC page, Display.h's Date/Time info page). Deliberately not a
+// full timezone - no DST rules, no IANA database, just a fixed
+// minutes-from-UTC shift, per [[project note: "simple time display
+// offset" requested over full timezone support]].
+//
+// Stored as raw+64 quarter-hours (not a plain signed value) so 0x00/0xFF
+// (unset/erased EEPROM) fall outside the valid range and unambiguously
+// mean "never configured" - same convention as vsr_conf_save()/
+// bvs_conf_save() (Utilities.h).
+#define TZ_OFFSET_QH_MIN    -48  // UTC-12:00
+#define TZ_OFFSET_QH_MAX     56  // UTC+14:00
+#define TZ_OFFSET_RAW_ZERO   64  // raw EEPROM byte encoding UTC+00:00 (qh=0)
+
+int8_t rtc_get_tz_offset_qh() {
+  #if HAS_EEPROM
+    uint8_t raw = EEPROM.read(eeprom_addr(ADDR_CONF_TZ));
+  #elif MCU_VARIANT == MCU_NRF52
+    uint8_t raw = eeprom_read(eeprom_addr(ADDR_CONF_TZ));
+  #endif
+  int16_t qh = (int16_t)raw - TZ_OFFSET_RAW_ZERO;
+  if (qh < TZ_OFFSET_QH_MIN || qh > TZ_OFFSET_QH_MAX) return 0; // unset/erased -> UTC
+  return (int8_t)qh;
+}
+
+// Shifts a UTC unix timestamp by the configured display offset - the
+// result is NOT a real unix time (it's "local wall-clock seconds", the
+// same trick this driver's epoch/civil-calendar math already works on
+// regardless) - only ever feed it to rtc_days_from_civil()/
+// rtc_civil_from_days() for display, never back into rtc_set_unixtime()
+// or over the wire.
+uint32_t rtc_apply_tz_offset(uint32_t utc_epoch) {
+  return (uint32_t)((int64_t)utc_epoch + (int64_t)rtc_get_tz_offset_qh() * 900);
+}
+
 bool rtc_set_unixtime(uint32_t epoch) {
   if (!rtc_present) return false;
 
@@ -137,7 +202,22 @@ bool rtc_set_unixtime(uint32_t epoch) {
 #if MCU_VARIANT == MCU_ESP32 && (HAS_WIFI == true || HAS_ETHERNET == true)
 
 #define NTP_SYNC_TIMEOUT_MS 5000
-#define NTP_SERVER "pool.ntp.org"
+// NTP_SERVER itself lives in Config.h (not RTC-specific, and overridable
+// via build flag - e.g. -DNTP_SERVER='"time.cloudflare.com"' - for
+// swapping servers without editing source, same pattern Boards.h's
+// HAS_ENCODER diagnostic guard already uses).
+
+// rtc_sync_ntp()'s return value - a reason code rather than a plain bool,
+// so callers (the KISS CMD_NTP_SYNC reply, the Settings menu's Sync NTP
+// result popup) can actually say *why* a sync failed instead of just
+// "failed" - RTC not present, no network, the NTP request itself timing
+// out (bad DNS/no route/server unreachable), and the RTC write failing are
+// all different problems with different fixes.
+#define NTP_SYNC_OK             0
+#define NTP_SYNC_ERR_NO_RTC     1
+#define NTP_SYNC_ERR_NO_NET     2
+#define NTP_SYNC_ERR_TIMEOUT    3
+#define NTP_SYNC_ERR_RTC_WRITE  4
 
 // One-shot, on-demand sync only - no periodic/automatic resync anywhere in
 // this firmware. Uses the ESP32 core's built-in SNTP client (configTime()/
@@ -145,8 +225,8 @@ bool rtc_set_unixtime(uint32_t epoch) {
 // path to a synced clock. Blocks the caller for up to NTP_SYNC_TIMEOUT_MS
 // if the sync doesn't complete in time (see callers - both are explicit,
 // rarely-used user actions, not something on a hot path).
-bool rtc_sync_ntp() {
-  if (!rtc_present) return false;
+uint8_t rtc_sync_ntp() {
+  if (!rtc_present) { DEBUG_LOG("[NTP] no RTC present\r\n"); return NTP_SYNC_ERR_NO_RTC; }
 
   bool net_up = false;
   #if HAS_WIFI == true
@@ -155,15 +235,30 @@ bool rtc_sync_ntp() {
   #if HAS_ETHERNET == true
     net_up = net_up || ethernet_is_connected();
   #endif
-  if (!net_up) return false;
+  if (!net_up) { DEBUG_LOG("[NTP] no network up\r\n"); return NTP_SYNC_ERR_NO_NET; }
 
+  // Manual resolve first, purely for diagnostics - configTime()/
+  // getLocalTime() below do their own resolution internally regardless,
+  // this just tells us (via DEBUG_LOG) whether a timeout is a DNS problem
+  // or the actual NTP exchange itself.
+  IPAddress resolved_ip;
+  bool dns_ok = (Network.hostByName(NTP_SERVER, resolved_ip) == 1);
+  DEBUG_LOG("[NTP] DNS %s -> %s\r\n", NTP_SERVER, dns_ok ? resolved_ip.toString().c_str() : "FAILED");
+
+  DEBUG_LOG("[NTP] starting sync, timeout=%ums\r\n", (unsigned)NTP_SYNC_TIMEOUT_MS);
   configTime(0, 0, NTP_SERVER); // UTC, no DST - matches this driver's UTC-only design
   struct tm timeinfo;
-  if (!getLocalTime(&timeinfo, NTP_SYNC_TIMEOUT_MS)) return false;
+  if (!getLocalTime(&timeinfo, NTP_SYNC_TIMEOUT_MS)) {
+    DEBUG_LOG("[NTP] getLocalTime() timed out\r\n");
+    return NTP_SYNC_ERR_TIMEOUT;
+  }
 
   time_t now;
   time(&now);
-  return rtc_set_unixtime((uint32_t)now);
+  DEBUG_LOG("[NTP] synced, epoch=%lu\r\n", (unsigned long)now);
+  if (!rtc_set_unixtime((uint32_t)now)) { DEBUG_LOG("[NTP] RTC write failed\r\n"); return NTP_SYNC_ERR_RTC_WRITE; }
+
+  return NTP_SYNC_OK;
 }
 
 #endif

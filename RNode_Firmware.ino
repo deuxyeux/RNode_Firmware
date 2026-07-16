@@ -1012,8 +1012,8 @@ void serial_callback(uint8_t sbyte) {
     } else if (command == CMD_NTP_SYNC) {
       #if MCU_VARIANT == MCU_ESP32 && HAS_RTC == true && (HAS_WIFI == true || HAS_ETHERNET == true)
         if (sbyte == 0x01) {
-          rtc_sync_ntp();
-          kiss_indicate_time(); // echoes the result either way - synced time on success, unchanged time on failure
+          uint8_t status = rtc_sync_ntp();
+          kiss_indicate_ntp_sync(status);
         }
       #endif
     } else if (command == CMD_TXPOWER) {

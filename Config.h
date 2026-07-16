@@ -83,6 +83,13 @@
 	// esp_eth/ETH.* API call.
 	#define ETH_SPEED_OFF       0x05
 
+	// NTP server used by rtc_sync_ntp() (RTC.h) - overridable via build flag
+	// (e.g. -DNTP_SERVER='"time.cloudflare.com"') without editing source, for
+	// swapping away from the community pool for testing/diagnostics.
+	#ifndef NTP_SERVER
+		#define NTP_SERVER "pool.ntp.org"
+	#endif
+
 	#define M_FRQ_S 27388122
 	#define M_FRQ_R 27388061
 	bool console_active = false;

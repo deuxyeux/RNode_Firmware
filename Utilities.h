@@ -15,6 +15,22 @@
 
 #include "Config.h"
 
+// DEBUG_UART_BEGIN()/DEBUG_LOG() - general-purpose debug logging over
+// whichever free UART a board declares via HAS_DEBUG_UART (Boards.h) -
+// usable from any file included below this point, not tied to any one
+// feature. Comment out DEBUG_UART_ENABLED to compile every call out
+// entirely (e.g. for a release build) without touching call sites - they
+// stay in the source either way, they just become no-ops.
+#define DEBUG_UART_ENABLED
+
+#if defined(DEBUG_UART_ENABLED) && HAS_DEBUG_UART == true
+  #define DEBUG_UART_BEGIN() Serial0.begin(115200)
+  #define DEBUG_LOG(...) Serial0.printf(__VA_ARGS__)
+#else
+  #define DEBUG_UART_BEGIN()
+  #define DEBUG_LOG(...)
+#endif
+
 #if HAS_EEPROM
     #include <EEPROM.h>
 #elif PLATFORM == PLATFORM_NRF52
@@ -124,6 +140,10 @@ void drot_conf_save(uint8_t val);
 #endif
 #if HAS_RTC == true
   void kiss_indicate_time();
+  void tz_conf_save(uint8_t val);
+#endif
+#if MCU_VARIANT == MCU_ESP32 && HAS_RTC == true && (HAS_WIFI == true || HAS_ETHERNET == true)
+  void kiss_indicate_ntp_sync(uint8_t status);
 #endif
 void eeprom_update(int mapped_addr, uint8_t byte);
 void buzzer_encoder_tick_melody();
@@ -1304,6 +1324,27 @@ void kiss_indicate_time() {
 }
 #endif
 
+#if MCU_VARIANT == MCU_ESP32 && HAS_RTC == true && (HAS_WIFI == true || HAS_ETHERNET == true)
+// Replies under CMD_NTP_SYNC's own command byte (not CMD_TIME) - every
+// other KISS command that echoes a result (CMD_TIME, CMD_VSENSE_DIV,
+// CMD_FREQUENCY, ...) replies under its own byte, so a host waiting on a
+// CMD_NTP_SYNC response needs one here too, not a CMD_TIME frame instead.
+// status is rtc_sync_ntp()'s reason code (NTP_SYNC_OK/NTP_SYNC_ERR_*,
+// RTC.h) - 0 means success, matching C convention; epoch is whatever the
+// RTC now reads (the freshly-synced time on success, unchanged on failure).
+void kiss_indicate_ntp_sync(uint8_t status) {
+	uint32_t epoch = rtc_get_unixtime();
+	serial_write(FEND);
+	serial_write(CMD_NTP_SYNC);
+	escaped_serial_write(status);
+	escaped_serial_write(epoch>>24);
+	escaped_serial_write(epoch>>16);
+	escaped_serial_write(epoch>>8);
+	escaped_serial_write(epoch);
+	serial_write(FEND);
+}
+#endif
+
 void kiss_indicate_st_alock() {
 	uint16_t at = (uint16_t)(st_airtime_limit*100*100);
 	serial_write(FEND);
@@ -2237,6 +2278,17 @@ void bvs_conf_save(uint8_t val) {
   #endif
 	if (val != 0x00 && val != 0xFF) { battery_v_scale = BATTERY_V_SCALE_DEFAULT * ((float)val / 100.0); }
 	else { battery_v_scale = BATTERY_V_SCALE_DEFAULT; }
+}
+#endif
+
+#if HAS_RTC == true
+// Persists the RTC display-only UTC offset (ADDR_CONF_TZ, ROM.h) - see
+// rtc_get_tz_offset_qh() (RTC.h) for the raw-byte encoding. No live-apply
+// step needed (unlike e.g. ethspd_conf_save()) - every reader re-derives
+// the offset fresh from EEPROM on each display refresh, nothing to reboot
+// or re-init.
+void tz_conf_save(uint8_t val) {
+	eeprom_update(eeprom_addr(ADDR_CONF_TZ), val);
 }
 #endif
 

@@ -328,6 +328,14 @@
       const int pin_rtc_sda = 47;
       const int pin_rtc_scl = 48;
 
+      // Free debug UART - Serial (KISS/console link) is remapped to the
+      // native USB CDC device (ARDUINO_USB_CDC_ON_BOOT=1, see Makefile),
+      // which leaves Serial0 (UART0, fixed to GPIO43 TX / GPIO44 RX on
+      // ESP32-S3) fully unused and unclaimed by any pin above - a free
+      // debug channel that can't collide with the KISS protocol on Serial.
+      // See DEBUG_UART_BEGIN()/DEBUG_LOG() below for how this gets used.
+      #define HAS_DEBUG_UART true
+
     #elif BOARD_MODEL == BOARD_MESHADVENTURER_S3
       #define IS_ESP32S3 true
       #define HAS_DISPLAY true
@@ -1525,6 +1533,16 @@
   // BOARD_MESHPOE_S3's block above for the pattern.
   #ifndef HAS_RTC
     #define HAS_RTC false
+  #endif
+
+  // Whether this board has a free UART broken out to a header/pins that
+  // isn't used for anything else (Serial/KISS included) - see
+  // BOARD_MESHPOE_S3's block above for the pattern (Serial0/GPIO43-44).
+  // The actual DEBUG_UART_BEGIN()/DEBUG_LOG() macros that use this live in
+  // Utilities.h, not here - Boards.h only ever declares capabilities, it
+  // doesn't implement behavior (same reasoning as every other HAS_* flag).
+  #ifndef HAS_DEBUG_UART
+    #define HAS_DEBUG_UART false
   #endif
 
   #ifndef BATTERY_V_SCALE_DEFAULT

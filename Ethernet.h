@@ -42,16 +42,30 @@ uint8_t eth_speed_mode = ETH_SPEED_AUTO;
 char eth_hostname[11];
 
 // Applies whatever's currently in ADDR_CONF_ETH_IP/NM to the interface - a
-// static IP/netmask if both are valid, otherwise ETH.config() with its
-// all-zero defaults, which (see NetworkInterface::config(), esp32 core)
-// stops and restarts the DHCP client rather than actually zeroing the
-// address. Safe to call any time after ETH.begin() (unlike the speed/
-// duplex setters, config() only needs the netif to already exist, which
-// begin() is what creates) - used both at boot (init_ethernet() below) and
-// live from the menu whenever IP Address/Netmask is changed (see
-// ethaddr_conf_save(), Utilities.h). addr4_read() (Utilities.h) is shared
-// with WiFi's own static IP (ADDR_CONF_IP/NM, Remote.h).
-void eth_apply_addr_config() {
+// static IP/netmask if both are valid, otherwise (only if reset_if_unset)
+// ETH.config() with its all-zero defaults, which (see NetworkInterface::
+// config(), esp32 core) stops and restarts the DHCP client. Safe to call
+// any time after ETH.begin() (unlike the speed/duplex setters, config()
+// only needs the netif to already exist, which begin() is what creates) -
+// used both at boot (init_ethernet() below) and live from the menu
+// whenever IP Address/Netmask is changed (see ethaddr_conf_save(),
+// Utilities.h). addr4_read() (Utilities.h) is shared with WiFi's own
+// static IP (ADDR_CONF_IP/NM, Remote.h).
+//
+// reset_if_unset defaults to false - the all-zero-args ETH.config() call
+// (NetworkInterface::config(), esp32 core) unconditionally zeroes this
+// netif's DNS info via esp_netif_set_dns_info(), and since the DNS
+// resolver ESP-IDF's SNTP client (and anything else calling gethostbyname)
+// uses isn't cleanly scoped per interface, that clobbers WiFi's already-
+// working DNS server too - breaking hostname resolution device-wide (e.g.
+// rtc_sync_ntp()'s NTP server lookup) even with the Ethernet cable
+// unplugged. init_ethernet() calls this unconditionally at boot regardless
+// of whether Ethernet is even cabled, so it must default to false there; a
+// freshly-begun ETH interface is already DHCP-seeking on its own, nothing
+// to reset. Only Clear Static (Menu.h) - explicitly un-applying a
+// previously-set static config - actually needs the reset, so it alone
+// passes true.
+void eth_apply_addr_config(bool reset_if_unset = false) {
     uint8_t ip[4]; uint8_t nm[4];
     if (addr4_read(ADDR_CONF_ETH_IP, ip) && addr4_read(ADDR_CONF_ETH_NM, nm)) {
         IPAddress eth_static_ip(ip[0], ip[1], ip[2], ip[3]);
@@ -67,7 +81,7 @@ void eth_apply_addr_config() {
         IPAddress eth_gw(gw[0], gw[1], gw[2], gw[3]);
         IPAddress eth_dns(dns[0], dns[1], dns[2], dns[3]);
         ETH.config(eth_static_ip, eth_gw, eth_static_nm, eth_dns);
-    } else {
+    } else if (reset_if_unset) {
         ETH.config();
     }
 }
