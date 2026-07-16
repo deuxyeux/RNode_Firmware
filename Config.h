@@ -72,6 +72,16 @@
 	#define ETH_SPEED_100_HALF  0x02
 	#define ETH_SPEED_10_FULL   0x03
 	#define ETH_SPEED_10_HALF   0x04
+	// Not a speed/duplex combo at all - disables the interface entirely.
+	// The W5500 PHY driver has no working power-down path (its PWR_DOWN
+	// opmode is dead code, and its pwrctl hook is a documented no-op for
+	// this chip - see esp_eth_phy_w5500.c), and its autonegotiation runs
+	// autonomously in hardware as soon as it's powered and out of reset,
+	// independent of whether the ESP32 ever talks to it over SPI - so this
+	// is implemented by holding pin_eth_rst low and never calling
+	// ETH.begin() at all (see init_ethernet(), Ethernet.h), not any
+	// esp_eth/ETH.* API call.
+	#define ETH_SPEED_OFF       0x05
 
 	#define M_FRQ_S 27388122
 	#define M_FRQ_R 27388061

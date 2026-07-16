@@ -632,17 +632,18 @@
       else if (mode == ETH_SPEED_100_HALF) sprintf(buf, "100/HALF");
       else if (mode == ETH_SPEED_10_FULL)  sprintf(buf, "10/FULL");
       else if (mode == ETH_SPEED_10_HALF)  sprintf(buf, "10/HALF");
+      else if (mode == ETH_SPEED_OFF)      sprintf(buf, "OFF");
       else                                  sprintf(buf, "AUTO");
     }
 
     void step_eth_speed_mode(int8_t dir, bool wrap = false) {
       int8_t v = (int8_t)staged_eth_speed_mode + (dir > 0 ? 1 : -1);
       if (wrap) {
-        if (v < ETH_SPEED_AUTO)     v = ETH_SPEED_10_HALF;
-        if (v > ETH_SPEED_10_HALF)  v = ETH_SPEED_AUTO;
+        if (v < ETH_SPEED_AUTO) v = ETH_SPEED_OFF;
+        if (v > ETH_SPEED_OFF)  v = ETH_SPEED_AUTO;
       } else {
-        if (v < ETH_SPEED_AUTO)     v = ETH_SPEED_AUTO;
-        if (v > ETH_SPEED_10_HALF)  v = ETH_SPEED_10_HALF;
+        if (v < ETH_SPEED_AUTO) v = ETH_SPEED_AUTO;
+        if (v > ETH_SPEED_OFF)  v = ETH_SPEED_OFF;
       }
       staged_eth_speed_mode = (uint8_t)v;
     }
@@ -1722,10 +1723,14 @@
         char valbufs[ETH_ITEM_COUNT][24];
 
         // eth_link_up (Ethernet.h) tracks ARDUINO_EVENT_ETH_CONNECTED/
-        // _DISCONNECTED - ETH.linkSpeed() (10 or 100, the W5500 has no
-        // gigabit mode) is otherwise stale/meaningless while link is down.
+        // _DISCONNECTED - ETH.linkSpeed()/fullDuplex() (10/100, the W5500
+        // has no gigabit mode) are otherwise stale/meaningless while link
+        // is down. "N/FULL" or "N/HALF" - same naming as the Speed field's
+        // own ETH_SPEED_* values (format_eth_speed_mode()) - is the actual
+        // negotiated result, not an echo of that setting, so it'll read
+        // differently if the far end doesn't support what Speed forces.
         labels[ETH_ITEM_LINK_STATUS] = "Link Status";
-        if (eth_link_up) sprintf(valbufs[ETH_ITEM_LINK_STATUS], "%uM UP", ETH.linkSpeed());
+        if (eth_link_up) sprintf(valbufs[ETH_ITEM_LINK_STATUS], "%u/%s", ETH.linkSpeed(), ETH.fullDuplex() ? "FULL" : "HALF");
         else             sprintf(valbufs[ETH_ITEM_LINK_STATUS], "DOWN");
 
         labels[ETH_ITEM_SPEED] = "Speed";

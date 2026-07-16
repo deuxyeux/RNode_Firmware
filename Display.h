@@ -45,6 +45,7 @@
 #endif
 
 #include "Fonts/Org_01.h"
+#include "Fonts/PicoPixel.h"
 #define DISP_W 128
 #define DISP_H 64
 
@@ -1024,6 +1025,9 @@ extern bool wifi_is_connected();
 extern bool wifi_host_is_connected();
 #if HAS_ETHERNET
 extern bool eth_link_up;
+extern uint16_t eth_link_speed;
+extern bool eth_full_duplex;
+extern bool eth_disabled;
 #endif
 void draw_cable_icon(int px, int py) {
   #if HAS_WIFI
@@ -1102,10 +1106,53 @@ void draw_eth_icon(int px, int py) {
   // top/bottom border lines sit one row further apart than the 16px icon
   // grid), so a full-height fill needs 17 here or it leaves the bottom
   // interior row showing through as an unfilled dark line
-  if (eth_link_up) {
+  if (eth_disabled) {
+    // Same shifted-up layout as the linked-with-speed case below (room for
+    // a second line), but the black/inactive coloring the plain-down case
+    // uses - "off" (never even tried to link, see ETH_SPEED_OFF/
+    // init_ethernet(), Ethernet.h) reads differently from "down" (tried,
+    // no link yet), which stays centered with no caption at all, below.
+    stat_area.fillRect(px, py, 16, 17, SSD1306_BLACK);
+    stat_area.drawBitmap(px+2, py+2, bm_eth_txt, 11, 5, SSD1306_WHITE, SSD1306_BLACK);
+
+    const char *off_buf = "OFF";
+    stat_area.setFont(&Picopixel);
+    stat_area.setTextSize(1);
+    stat_area.setTextWrap(false);
+    stat_area.setTextColor(SSD1306_WHITE);
+    int16_t ox1, oy1; uint16_t ow, oh;
+    stat_area.getTextBounds(off_buf, 0, 0, &ox1, &oy1, &ow, &oh);
+    stat_area.setCursor(px + (16 - (int16_t)ow) / 2, py + 12);
+    stat_area.print(off_buf);
+  } else if (eth_link_up) {
     stat_area.fillRect(px, py, 16, 17, SSD1306_WHITE);
-    stat_area.drawBitmap(px+2, py+6, bm_eth_txt, 11, 5, SSD1306_BLACK, SSD1306_WHITE);
+    // Shifted up from the old vertically-centered py+6 to leave room below
+    // for the negotiated speed/duplex (PicoPixel, 6px-tall font - see
+    // Fonts/PicoPixel.h) - eth_link_speed/eth_full_duplex (Ethernet.h) are
+    // a snapshot taken on link-up, not queried live here (can't call
+    // ETH.linkSpeed()/fullDuplex() directly from this file - Display.h is
+    // #include'd before Ethernet.h, same reason eth_link_up above is an
+    // extern rather than a live ETH.linkUp() call).
+    stat_area.drawBitmap(px+2, py+2, bm_eth_txt, 11, 5, SSD1306_BLACK, SSD1306_WHITE);
+
+    // "100F"/"100H"/"10F"/"10H" - at PicoPixel's per-glyph advance widths
+    // (see Fonts/PicoPixel.h) "100F"/"100H" measure 14px, "10F"/"10H" 10px,
+    // both fitting inside the 16px-wide box with room to spare - measured
+    // and centered rather than hardcoded so it stays correct if the font
+    // ever changes.
+    char speed_buf[5];
+    sprintf(speed_buf, "%u%s", eth_link_speed, eth_full_duplex ? "F" : "H");
+    stat_area.setFont(&Picopixel);
+    stat_area.setTextSize(1);
+    stat_area.setTextWrap(false);
+    stat_area.setTextColor(SSD1306_BLACK);
+    int16_t sx1, sy1; uint16_t sw, sh;
+    stat_area.getTextBounds(speed_buf, 0, 0, &sx1, &sy1, &sw, &sh);
+    stat_area.setCursor(px + (16 - (int16_t)sw) / 2, py + 12);
+    stat_area.print(speed_buf);
   } else {
+    // Back to its original vertically-centered spot - only shifts up (see
+    // above) when there's a speed/duplex line to make room for.
     stat_area.fillRect(px, py, 16, 17, SSD1306_BLACK);
     stat_area.drawBitmap(px+2, py+6, bm_eth_txt, 11, 5, SSD1306_WHITE, SSD1306_BLACK);
   }

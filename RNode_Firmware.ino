@@ -384,7 +384,7 @@ void setup() {
       #endif
       #if HAS_ETHERNET == true
         eth_speed_mode = EEPROM.read(eeprom_addr(ADDR_CONF_ETHSPD));
-        if (eth_speed_mode > ETH_SPEED_10_HALF) eth_speed_mode = ETH_SPEED_AUTO; // erased EEPROM (0xFF) => default
+        if (eth_speed_mode > ETH_SPEED_OFF) eth_speed_mode = ETH_SPEED_AUTO; // erased EEPROM (0xFF) => default
         init_ethernet();
       #endif
       kiss_indicate_reset();
@@ -1386,7 +1386,7 @@ void serial_callback(uint8_t sbyte) {
       #endif
     } else if (command == CMD_ETH_SPEED) {
       #if HAS_ETHERNET == true
-        if (sbyte <= ETH_SPEED_10_HALF) { ethspd_conf_save(sbyte); }
+        if (sbyte <= ETH_SPEED_OFF) { ethspd_conf_save(sbyte); }
       #endif
     } else if (command == CMD_BT_CTRL) {
       #if HAS_BLUETOOTH || HAS_BLE
