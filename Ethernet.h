@@ -56,7 +56,17 @@ void eth_apply_addr_config() {
     if (addr4_read(ADDR_CONF_ETH_IP, ip) && addr4_read(ADDR_CONF_ETH_NM, nm)) {
         IPAddress eth_static_ip(ip[0], ip[1], ip[2], ip[3]);
         IPAddress eth_static_nm(nm[0], nm[1], nm[2], nm[3]);
-        ETH.config(eth_static_ip, eth_static_ip, eth_static_nm);
+
+        // Gateway/DNS (ADDR_CONF_ETH_GW/DNS, ROM.h) - unset means 0.0.0.0,
+        // i.e. genuinely no gateway/DNS, not eth_static_ip itself (the
+        // previous behavior here) - that never routed anywhere, it just
+        // silently broke anything needing to leave the local subnet (e.g.
+        // rtc_sync_ntp(), RTC.h).
+        uint8_t gw[4] = {0, 0, 0, 0}; addr4_read(ADDR_CONF_ETH_GW, gw);
+        uint8_t dns[4] = {0, 0, 0, 0}; addr4_read(ADDR_CONF_ETH_DNS, dns);
+        IPAddress eth_gw(gw[0], gw[1], gw[2], gw[3]);
+        IPAddress eth_dns(dns[0], dns[1], dns[2], dns[3]);
+        ETH.config(eth_static_ip, eth_gw, eth_static_nm, eth_dns);
     } else {
         ETH.config();
     }

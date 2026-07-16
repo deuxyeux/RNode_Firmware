@@ -77,6 +77,15 @@
   // static IP and a wired Ethernet static IP configured independently.
   #define ADDR_CONF_ETH_IP 0x4A
   #define ADDR_CONF_ETH_NM 0x4E
+  // Gateway/DNS for each static config above - unset (all-zero/all-0xFF,
+  // same convention as addr4_read(), Utilities.h) means "no gateway/DNS
+  // configured," not "use DHCP" (DHCP isn't running at all once IP/NM are
+  // static) - needed for anything that has to leave the local subnet, e.g.
+  // NTP sync (rtc_sync_ntp(), RTC.h) while on a static IP.
+  #define ADDR_CONF_GW      0x52
+  #define ADDR_CONF_DNS     0x56
+  #define ADDR_CONF_ETH_GW  0x5A
+  #define ADDR_CONF_ETH_DNS 0x5E
   //////////////////////////////////
 
 #endif

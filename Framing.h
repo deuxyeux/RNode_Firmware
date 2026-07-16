@@ -85,6 +85,11 @@
   // immediately if the value actually changed - same as the on-device
   // Settings menu's Ethernet > Speed field.
   #define CMD_ETH_SPEED   0x8A
+  #define CMD_NTP_SYNC    0x8B
+  #define CMD_WIFI_GW     0x8C
+  #define CMD_WIFI_DNS    0x8D
+  #define CMD_ETH_GW      0x8E
+  #define CMD_ETH_DNS     0x8F
 
   #define CMD_BOARD       0x47
   #define CMD_PLATFORM    0x48

@@ -91,7 +91,17 @@ void wifi_remote_start_sta() {
   if (ip_ok && nm_ok) {
     IPAddress sta_ip(ip[0], ip[1], ip[2], ip[3]);
     IPAddress sta_nm(nm[0], nm[1], nm[2], nm[3]);
-    WiFi.config(sta_ip, sta_ip, sta_nm);
+
+    // Gateway/DNS (ADDR_CONF_GW/DNS, ROM.h) - unset (addr4_read() returns
+    // false) means 0.0.0.0, i.e. genuinely no gateway/DNS, not sta_ip
+    // itself (the previous behavior here) - that never routed anywhere,
+    // it just silently broke anything needing to leave the local subnet
+    // (e.g. rtc_sync_ntp(), RTC.h).
+    uint8_t gw[4] = {0, 0, 0, 0}; addr4_read(ADDR_CONF_GW, gw);
+    uint8_t dns[4] = {0, 0, 0, 0}; addr4_read(ADDR_CONF_DNS, dns);
+    IPAddress sta_gw(gw[0], gw[1], gw[2], gw[3]);
+    IPAddress sta_dns(dns[0], dns[1], dns[2], dns[3]);
+    WiFi.config(sta_ip, sta_gw, sta_nm, sta_dns);
   }
 
   delay(100);

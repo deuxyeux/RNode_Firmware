@@ -36,6 +36,8 @@
   #define MENU_STATE_ETH_EDIT       12  // editing the Ethernet Speed field
   #define MENU_STATE_ETH_ADDR_EDIT  13  // editing one octet of the IP Address or Netmask field
   #define MENU_STATE_WIFI_ADDR_EDIT 14  // editing one octet of WiFi's own IP Address or Netmask field
+  #define MENU_STATE_RTC_LIST       15  // RTC submenu list (HAS_RTC boards)
+  #define MENU_STATE_RTC_EDIT       16  // Set Time/Date: sequential Year/Month/Day/Hour/Minute/Second editor
 
   // The Hardware page exists whenever there's anything board-level worth
   // showing (battery/voltage sensing via HAS_PMU, or an ESP32-S3's CPU
@@ -101,11 +103,18 @@
     #define MENU_NEXT_IDX_A2 MENU_NEXT_IDX_A
   #endif
 
-  #if MENU_HAS_HW_PAGE == true
-    #define MENU_ITEM_HARDWARE MENU_NEXT_IDX_A2
-    #define MENU_NEXT_IDX_B (MENU_NEXT_IDX_A2 + 1)
+  #if HAS_RTC == true
+    #define MENU_ITEM_RTC   MENU_NEXT_IDX_A2
+    #define MENU_NEXT_IDX_A3 (MENU_NEXT_IDX_A2 + 1)
   #else
-    #define MENU_NEXT_IDX_B MENU_NEXT_IDX_A2
+    #define MENU_NEXT_IDX_A3 MENU_NEXT_IDX_A2
+  #endif
+
+  #if MENU_HAS_HW_PAGE == true
+    #define MENU_ITEM_HARDWARE MENU_NEXT_IDX_A3
+    #define MENU_NEXT_IDX_B (MENU_NEXT_IDX_A3 + 1)
+  #else
+    #define MENU_NEXT_IDX_B MENU_NEXT_IDX_A3
   #endif
 
   #define MENU_ITEM_SAVE_EXIT MENU_NEXT_IDX_B
@@ -123,11 +132,19 @@
     // SAVE & EXIT like every other field in this list.
     #define WIFI_ITEM_IP       3
     #define WIFI_ITEM_NETMASK  4
+    // Gateway/DNS (ADDR_CONF_GW/DNS, ROM.h) - only meaningful once IP/NM
+    // are actually static (DHCP already provides both otherwise), but kept
+    // as plain always-present fields rather than conditionally hidden -
+    // same reasoning as IP/NM themselves. Needed for anything that must
+    // leave the local subnet while on a static IP, e.g. rtc_sync_ntp()
+    // (RTC.h).
+    #define WIFI_ITEM_GATEWAY  5
+    #define WIFI_ITEM_DNS      6
     // Single-confirm action (same as MENU_ITEM_SAVE_EXIT), not a field -
-    // stages both back to 0.0.0.0, still deferred to SAVE & EXIT.
-    #define WIFI_ITEM_CLEAR    5
-    #define WIFI_ITEM_BACK     6
-    #define WIFI_ITEM_COUNT    7
+    // stages all four back to 0.0.0.0, still deferred to SAVE & EXIT.
+    #define WIFI_ITEM_CLEAR    7
+    #define WIFI_ITEM_BACK     8
+    #define WIFI_ITEM_COUNT    9
   #endif
 
   #if HAS_ETHERNET == true
@@ -139,11 +156,31 @@
     // just never touching it) is how you get DHCP here too.
     #define ETH_ITEM_IP           2
     #define ETH_ITEM_NETMASK      3
+    // Gateway/DNS (ADDR_CONF_ETH_GW/DNS, ROM.h) - same reasoning as WiFi's
+    // own WIFI_ITEM_GATEWAY/DNS above.
+    #define ETH_ITEM_GATEWAY      4
+    #define ETH_ITEM_DNS          5
     // A single-confirm action, not a field - same as MENU_ITEM_SAVE_EXIT -
-    // zeroes both ADDR_CONF_ETH_IP/NM back to "unset" (DHCP).
-    #define ETH_ITEM_CLEAR        4
-    #define ETH_ITEM_BACK         5
-    #define ETH_ITEM_COUNT        6
+    // zeroes all four ADDR_CONF_ETH_IP/NM/GW/DNS back to "unset" (DHCP).
+    #define ETH_ITEM_CLEAR        6
+    #define ETH_ITEM_BACK         7
+    #define ETH_ITEM_COUNT        8
+  #endif
+
+  #if HAS_RTC == true
+    #define RTC_ITEM_TIME  0   // read-only readout
+    #define RTC_ITEM_DATE  1   // read-only readout
+    #define RTC_ITEM_SET   2   // opens the sequential Set Time/Date editor
+    // Only present where rtc_sync_ntp() (RTC.h) actually compiles - see
+    // its own MCU_VARIANT/HAS_WIFI/HAS_ETHERNET guard.
+    #if MCU_VARIANT == MCU_ESP32 && (HAS_WIFI == true || HAS_ETHERNET == true)
+      #define RTC_ITEM_SYNC_NTP 3
+      #define RTC_NEXT_0 4
+    #else
+      #define RTC_NEXT_0 3
+    #endif
+    #define RTC_ITEM_BACK  RTC_NEXT_0
+    #define RTC_ITEM_COUNT (RTC_ITEM_BACK + 1)
   #endif
 
   #if MENU_HAS_HW_PAGE == true
@@ -268,9 +305,23 @@
     // shared by both fields, same as eth_addr_octet_idx.
     uint8_t staged_wifi_ip[4] = {0, 0, 0, 0};
     uint8_t staged_wifi_nm[4] = {0, 0, 0, 0};
+    uint8_t staged_wifi_gw[4] = {0, 0, 0, 0};
+    uint8_t staged_wifi_dns[4] = {0, 0, 0, 0};
     uint8_t live_wifi_ip[4]   = {0, 0, 0, 0};
     uint8_t live_wifi_nm[4]   = {0, 0, 0, 0};
+    uint8_t live_wifi_gw[4]   = {0, 0, 0, 0};
+    uint8_t live_wifi_dns[4]  = {0, 0, 0, 0};
     uint8_t wifi_addr_octet_idx = 0;
+
+    // Which staged_wifi_* array a WIFI_ITEM_IP/NETMASK/GATEWAY/DNS value
+    // maps to - shared by menu_encoder_rotate()/menu_confirm_select()/
+    // draw_settings_menu_disp() so the 4-way choice lives in one place.
+    uint8_t *wifi_staged_addr_field(uint8_t item) {
+      if (item == WIFI_ITEM_IP)      return staged_wifi_ip;
+      if (item == WIFI_ITEM_NETMASK) return staged_wifi_nm;
+      if (item == WIFI_ITEM_GATEWAY) return staged_wifi_gw;
+      return staged_wifi_dns; // WIFI_ITEM_DNS
+    }
 
     // Working state while actively in MENU_STATE_WIFI_TEXT_EDIT, reset fresh
     // every time SSID or PSK is opened from the WiFi list.
@@ -294,7 +345,45 @@
     // MENU_STATE_ETH_ADDR_EDIT was entered.
     uint8_t staged_eth_ip[4]      = {0, 0, 0, 0};
     uint8_t staged_eth_nm[4]      = {0, 0, 0, 0};
+    uint8_t staged_eth_gw[4]      = {0, 0, 0, 0};
+    uint8_t staged_eth_dns[4]     = {0, 0, 0, 0};
     uint8_t eth_addr_octet_idx    = 0;
+
+    // Which staged_eth_*/ADDR_CONF_ETH_* pair an ETH_ITEM_IP/NETMASK/
+    // GATEWAY/DNS value maps to - same purpose as wifi_staged_addr_field()
+    // above, plus the EEPROM address (Ethernet's fields commit immediately,
+    // so callers need both).
+    uint8_t *eth_staged_addr_field(uint8_t item) {
+      if (item == ETH_ITEM_IP)      return staged_eth_ip;
+      if (item == ETH_ITEM_NETMASK) return staged_eth_nm;
+      if (item == ETH_ITEM_GATEWAY) return staged_eth_gw;
+      return staged_eth_dns; // ETH_ITEM_DNS
+    }
+
+    int eth_addr_base(uint8_t item) {
+      if (item == ETH_ITEM_IP)      return ADDR_CONF_ETH_IP;
+      if (item == ETH_ITEM_NETMASK) return ADDR_CONF_ETH_NM;
+      if (item == ETH_ITEM_GATEWAY) return ADDR_CONF_ETH_GW;
+      return ADDR_CONF_ETH_DNS; // ETH_ITEM_DNS
+    }
+  #endif
+
+  #if HAS_RTC == true
+    uint8_t rtc_menu_cursor = 0;
+    // Working copy while inside MENU_STATE_RTC_EDIT (Set Time/Date) - synced
+    // fresh from the live RTC reading on entry (see menu_confirm_select()),
+    // not staged at whole-menu-open time, since this commits straight to the
+    // RTC chip on its own confirm rather than deferring to SAVE & EXIT, same
+    // immediate-commit pattern as Ethernet's own IP Address/Speed above.
+    int32_t staged_rtc_year   = 2000;
+    uint8_t staged_rtc_month  = 1;
+    uint8_t staged_rtc_day    = 1;
+    uint8_t staged_rtc_hour   = 0;
+    uint8_t staged_rtc_minute = 0;
+    uint8_t staged_rtc_second = 0;
+    // Which of the 6 fields above is currently being adjusted - 0=Year,
+    // 1=Month, 2=Day, 3=Hour, 4=Minute, 5=Second (see step_rtc_field()).
+    uint8_t rtc_edit_field_idx = 0;
   #endif
 
   #if MENU_HAS_HW_PAGE == true
@@ -649,6 +738,58 @@
     }
   #endif
 
+  #if HAS_RTC == true
+    uint8_t rtc_days_in_month(int32_t year, uint8_t month) {
+      static const uint8_t dim[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+      if (month < 1 || month > 12) return 31; // unreachable - month is always clamped below
+      if (month == 2 && (year % 4 == 0 && (year % 100 != 0 || year % 400 == 0))) return 29;
+      return dim[month - 1];
+    }
+
+    // Plain +-1-per-detent, no accelerated_step() ramp - same as
+    // step_addr_octet() above, which every other sequential-field editor in
+    // this menu (WiFi/Ethernet IP Address, Netmask) already uses.
+    void step_rtc_field(uint8_t field_idx, int8_t dir, bool wrap = false) {
+      if (field_idx == 0) { // Year - DS3231 only stores 2000-2099 (see RTC.h)
+        int16_t v = (int16_t)staged_rtc_year + dir;
+        if (wrap) { if (v < 2000) v = 2099; if (v > 2099) v = 2000; }
+        else      { if (v < 2000) v = 2000; if (v > 2099) v = 2099; }
+        staged_rtc_year = v;
+      } else if (field_idx == 1) { // Month
+        int8_t v = (int8_t)staged_rtc_month + dir;
+        if (wrap) { if (v < 1) v = 12; if (v > 12) v = 1; }
+        else      { if (v < 1) v = 1;  if (v > 12) v = 12; }
+        staged_rtc_month = (uint8_t)v;
+      } else if (field_idx == 2) { // Day
+        uint8_t max_day = rtc_days_in_month(staged_rtc_year, staged_rtc_month);
+        int8_t v = (int8_t)staged_rtc_day + dir;
+        if (wrap) { if (v < 1) v = (int8_t)max_day; if (v > (int8_t)max_day) v = 1; }
+        else      { if (v < 1) v = 1;               if (v > (int8_t)max_day) v = (int8_t)max_day; }
+        staged_rtc_day = (uint8_t)v;
+      } else if (field_idx == 3) { // Hour
+        int8_t v = (int8_t)staged_rtc_hour + dir;
+        if (wrap) { if (v < 0) v = 23; if (v > 23) v = 0; }
+        else      { if (v < 0) v = 0;  if (v > 23) v = 23; }
+        staged_rtc_hour = (uint8_t)v;
+      } else if (field_idx == 4) { // Minute
+        int8_t v = (int8_t)staged_rtc_minute + dir;
+        if (wrap) { if (v < 0) v = 59; if (v > 59) v = 0; }
+        else      { if (v < 0) v = 0;  if (v > 59) v = 59; }
+        staged_rtc_minute = (uint8_t)v;
+      } else { // Second
+        int8_t v = (int8_t)staged_rtc_second + dir;
+        if (wrap) { if (v < 0) v = 59; if (v > 59) v = 0; }
+        else      { if (v < 0) v = 0;  if (v > 59) v = 59; }
+        staged_rtc_second = (uint8_t)v;
+      }
+      // A Year/Month change can leave Day pointing past the new month's
+      // last day (e.g. Mar 31 -> Feb) - clamp it back in range immediately
+      // rather than letting an invalid date reach rtc_set_unixtime().
+      uint8_t max_day = rtc_days_in_month(staged_rtc_year, staged_rtc_month);
+      if (staged_rtc_day > max_day) staged_rtc_day = max_day;
+    }
+  #endif
+
   void menu_stage_from_live() {
     staged_display_timeout    = display_blanking_enabled ? (uint8_t)(display_blanking_timeout / 1000) : 0;
     staged_display_brightness = display_intensity;
@@ -702,6 +843,18 @@
       } else {
         live_wifi_nm[0] = live_wifi_nm[1] = live_wifi_nm[2] = live_wifi_nm[3] = 0;
         staged_wifi_nm[0] = staged_wifi_nm[1] = staged_wifi_nm[2] = staged_wifi_nm[3] = 0;
+      }
+      if (addr4_read(ADDR_CONF_GW, live_wifi_gw)) {
+        for (uint8_t i = 0; i < 4; i++) { staged_wifi_gw[i] = live_wifi_gw[i]; }
+      } else {
+        live_wifi_gw[0] = live_wifi_gw[1] = live_wifi_gw[2] = live_wifi_gw[3] = 0;
+        staged_wifi_gw[0] = staged_wifi_gw[1] = staged_wifi_gw[2] = staged_wifi_gw[3] = 0;
+      }
+      if (addr4_read(ADDR_CONF_DNS, live_wifi_dns)) {
+        for (uint8_t i = 0; i < 4; i++) { staged_wifi_dns[i] = live_wifi_dns[i]; }
+      } else {
+        live_wifi_dns[0] = live_wifi_dns[1] = live_wifi_dns[2] = live_wifi_dns[3] = 0;
+        staged_wifi_dns[0] = staged_wifi_dns[1] = staged_wifi_dns[2] = staged_wifi_dns[3] = 0;
       }
     #endif
   }
@@ -764,8 +917,12 @@
       {
         bool ip_changed = false;
         bool nm_changed = false;
+        bool gw_changed = false;
+        bool dns_changed = false;
         for (uint8_t i = 0; i < 4; i++) { if (staged_wifi_ip[i] != live_wifi_ip[i]) { ip_changed = true; break; } }
         for (uint8_t i = 0; i < 4; i++) { if (staged_wifi_nm[i] != live_wifi_nm[i]) { nm_changed = true; break; } }
+        for (uint8_t i = 0; i < 4; i++) { if (staged_wifi_gw[i] != live_wifi_gw[i]) { gw_changed = true; break; } }
+        for (uint8_t i = 0; i < 4; i++) { if (staged_wifi_dns[i] != live_wifi_dns[i]) { dns_changed = true; break; } }
         if (ip_changed) {
           for (uint8_t i = 0; i < 4; i++) { eeprom_update(config_addr(ADDR_CONF_IP+i), staged_wifi_ip[i]); }
           wifi_changed = true;
@@ -774,10 +931,18 @@
           for (uint8_t i = 0; i < 4; i++) { eeprom_update(config_addr(ADDR_CONF_NM+i), staged_wifi_nm[i]); }
           wifi_changed = true;
         }
+        if (gw_changed) {
+          for (uint8_t i = 0; i < 4; i++) { eeprom_update(config_addr(ADDR_CONF_GW+i), staged_wifi_gw[i]); }
+          wifi_changed = true;
+        }
+        if (dns_changed) {
+          for (uint8_t i = 0; i < 4; i++) { eeprom_update(config_addr(ADDR_CONF_DNS+i), staged_wifi_dns[i]); }
+          wifi_changed = true;
+        }
       }
-      // wifi_remote_init() re-reads static IP/netmask from EEPROM itself
-      // (see wifi_remote_start_sta(), Remote.h), same as it already does
-      // for SSID/PSK above - no separate "apply" call needed.
+      // wifi_remote_init() re-reads static IP/netmask/gateway/DNS from
+      // EEPROM itself (see wifi_remote_start_sta(), Remote.h), same as it
+      // already does for SSID/PSK above - no separate "apply" call needed.
       if (wifi_changed) { wifi_remote_init(); }
     #endif
     #if MENU_HAS_HW_PAGE == true
@@ -805,6 +970,17 @@
         }
       #endif
     #endif
+    #if HAS_RTC == true
+      // Same flush-in-progress reasoning as the Voltage/Battery cal block
+      // above - a long-press from *inside* the Set Time/Date editor jumps
+      // straight here on encoder-only boards, which would otherwise
+      // silently discard whatever fields had already been adjusted.
+      if (menu_state == MENU_STATE_RTC_EDIT) {
+        int32_t days = rtc_days_from_civil(staged_rtc_year, staged_rtc_month, staged_rtc_day);
+        uint32_t epoch = (uint32_t)days * 86400UL + (uint32_t)staged_rtc_hour * 3600UL + (uint32_t)staged_rtc_minute * 60UL + staged_rtc_second;
+        rtc_set_unixtime(epoch);
+      }
+    #endif
     // Must be last: gpio_conf_save()/ethspd_conf_save()/drot_conf_save() may
     // call hard_reset() if the value actually changed, which would otherwise
     // discard any of
@@ -825,10 +1001,10 @@
       } else if (menu_state == MENU_STATE_ETH_ADDR_EDIT) {
         // Safe to commit at any octet index, not just the last one - the
         // not-yet-visited octets still hold their synced-at-entry starting
-        // values (see menu_confirm_select()), so staged_eth_ip/nm is always
+        // values (see menu_confirm_select()), so the staged field is always
         // a complete, valid 4-byte value, never a partial one.
-        int addr_base = (eth_menu_cursor == ETH_ITEM_IP) ? ADDR_CONF_ETH_IP : ADDR_CONF_ETH_NM;
-        uint8_t *staged = (eth_menu_cursor == ETH_ITEM_IP) ? staged_eth_ip : staged_eth_nm;
+        int addr_base = eth_addr_base(eth_menu_cursor);
+        uint8_t *staged = eth_staged_addr_field(eth_menu_cursor);
         uint8_t live[4];
         addr4_read(addr_base, live);
         bool addr_changed = false;
@@ -924,8 +1100,7 @@
         text_confirm_cursor = menu_clamp_cursor(text_confirm_cursor, dir, 2, wrap);
       } else if (menu_state == MENU_STATE_WIFI_ADDR_EDIT) {
         buzzer_encoder_tick_melody();
-        uint8_t *octets = (wifi_menu_cursor == WIFI_ITEM_IP) ? staged_wifi_ip : staged_wifi_nm;
-        step_addr_octet(octets, wifi_addr_octet_idx, dir, wrap);
+        step_addr_octet(wifi_staged_addr_field(wifi_menu_cursor), wifi_addr_octet_idx, dir, wrap);
       }
     #endif
     #if HAS_ETHERNET == true
@@ -937,8 +1112,16 @@
         step_eth_speed_mode(dir, wrap);
       } else if (menu_state == MENU_STATE_ETH_ADDR_EDIT) {
         buzzer_encoder_tick_melody();
-        uint8_t *octets = (eth_menu_cursor == ETH_ITEM_IP) ? staged_eth_ip : staged_eth_nm;
-        step_addr_octet(octets, eth_addr_octet_idx, dir, wrap);
+        step_addr_octet(eth_staged_addr_field(eth_menu_cursor), eth_addr_octet_idx, dir, wrap);
+      }
+    #endif
+    #if HAS_RTC == true
+      else if (menu_state == MENU_STATE_RTC_LIST) {
+        buzzer_encoder_tick_melody();
+        rtc_menu_cursor = menu_clamp_cursor(rtc_menu_cursor, dir, RTC_ITEM_COUNT, wrap);
+      } else if (menu_state == MENU_STATE_RTC_EDIT) {
+        buzzer_encoder_tick_melody();
+        step_rtc_field(rtc_edit_field_idx, dir, wrap);
       }
     #endif
     #if MENU_HAS_HW_PAGE == true
@@ -1040,6 +1223,12 @@
           eth_menu_cursor = 0;
         }
       #endif
+      #if HAS_RTC == true
+        else if (menu_cursor == MENU_ITEM_RTC) {
+          menu_state = MENU_STATE_RTC_LIST;
+          rtc_menu_cursor = 0;
+        }
+      #endif
       #if MENU_HAS_HW_PAGE == true
         else if (menu_cursor == MENU_ITEM_HARDWARE) {
           menu_state = MENU_STATE_HW_LIST;
@@ -1067,17 +1256,25 @@
           menu_state = MENU_STATE_LIST;
         } else if (wifi_menu_cursor == WIFI_ITEM_MODE) {
           menu_state = MENU_STATE_WIFI_EDIT;
-        } else if (wifi_menu_cursor == WIFI_ITEM_IP || wifi_menu_cursor == WIFI_ITEM_NETMASK) {
+        } else if (wifi_menu_cursor == WIFI_ITEM_IP || wifi_menu_cursor == WIFI_ITEM_NETMASK ||
+                   wifi_menu_cursor == WIFI_ITEM_GATEWAY || wifi_menu_cursor == WIFI_ITEM_DNS) {
           // A starting point to adjust from is friendlier than dialing
           // every octet up from zero - but only applied here, the moment
-          // IP Address is actually opened for editing, not at whole-menu-
-          // open time (see menu_stage_from_live()) - staying unset/DHCP
-          // until someone actually opens this field is the whole point.
-          // Only IP Address gets one; Netmask has no similarly obvious
-          // default.
+          // the field is actually opened for editing, not at whole-menu-
+          // open time (see menu_stage_from_live()) - staying unset until
+          // someone actually opens the field is the whole point. Netmask
+          // has no similarly obvious default, so it alone stays at 0.0.0.0.
           if (wifi_menu_cursor == WIFI_ITEM_IP &&
               staged_wifi_ip[0] == 0 && staged_wifi_ip[1] == 0 && staged_wifi_ip[2] == 0 && staged_wifi_ip[3] == 0) {
             staged_wifi_ip[0] = 192; staged_wifi_ip[1] = 168; staged_wifi_ip[2] = 0; staged_wifi_ip[3] = 32;
+          }
+          if (wifi_menu_cursor == WIFI_ITEM_GATEWAY &&
+              staged_wifi_gw[0] == 0 && staged_wifi_gw[1] == 0 && staged_wifi_gw[2] == 0 && staged_wifi_gw[3] == 0) {
+            staged_wifi_gw[0] = 192; staged_wifi_gw[1] = 168; staged_wifi_gw[2] = 0; staged_wifi_gw[3] = 1;
+          }
+          if (wifi_menu_cursor == WIFI_ITEM_DNS &&
+              staged_wifi_dns[0] == 0 && staged_wifi_dns[1] == 0 && staged_wifi_dns[2] == 0 && staged_wifi_dns[3] == 0) {
+            staged_wifi_dns[0] = 1; staged_wifi_dns[1] = 1; staged_wifi_dns[2] = 1; staged_wifi_dns[3] = 1;
           }
           wifi_addr_octet_idx = 0;
           menu_state = MENU_STATE_WIFI_ADDR_EDIT;
@@ -1087,6 +1284,8 @@
           // everything else here.
           staged_wifi_ip[0] = staged_wifi_ip[1] = staged_wifi_ip[2] = staged_wifi_ip[3] = 0;
           staged_wifi_nm[0] = staged_wifi_nm[1] = staged_wifi_nm[2] = staged_wifi_nm[3] = 0;
+          staged_wifi_gw[0] = staged_wifi_gw[1] = staged_wifi_gw[2] = staged_wifi_gw[3] = 0;
+          staged_wifi_dns[0] = staged_wifi_dns[1] = staged_wifi_dns[2] = staged_wifi_dns[3] = 0;
         } else if (wifi_menu_cursor == WIFI_ITEM_SSID || wifi_menu_cursor == WIFI_ITEM_PSK) {
           // Fresh text-edit session, preloaded from the current staged
           // value, wheel starts at 'a'.
@@ -1148,15 +1347,20 @@
         } else if (eth_menu_cursor == ETH_ITEM_SPEED) {
           staged_eth_speed_mode = eth_speed_mode;
           menu_state = MENU_STATE_ETH_EDIT;
-        } else if (eth_menu_cursor == ETH_ITEM_IP || eth_menu_cursor == ETH_ITEM_NETMASK) {
-          int addr_base = (eth_menu_cursor == ETH_ITEM_IP) ? ADDR_CONF_ETH_IP : ADDR_CONF_ETH_NM;
-          uint8_t *staged = (eth_menu_cursor == ETH_ITEM_IP) ? staged_eth_ip : staged_eth_nm;
+        } else if (eth_menu_cursor == ETH_ITEM_IP || eth_menu_cursor == ETH_ITEM_NETMASK ||
+                   eth_menu_cursor == ETH_ITEM_GATEWAY || eth_menu_cursor == ETH_ITEM_DNS) {
+          int addr_base = eth_addr_base(eth_menu_cursor);
+          uint8_t *staged = eth_staged_addr_field(eth_menu_cursor);
           if (!addr4_read(addr_base, staged)) {
             // Never configured - a starting point to adjust from is friendlier
             // than making someone dial every octet up from zero. Netmask has
             // no similarly obvious default, so it still starts at 0.0.0.0.
             if (eth_menu_cursor == ETH_ITEM_IP) {
               staged[0] = 192; staged[1] = 168; staged[2] = 0; staged[3] = 32;
+            } else if (eth_menu_cursor == ETH_ITEM_GATEWAY) {
+              staged[0] = 192; staged[1] = 168; staged[2] = 0; staged[3] = 1;
+            } else if (eth_menu_cursor == ETH_ITEM_DNS) {
+              staged[0] = 1; staged[1] = 1; staged[2] = 1; staged[3] = 1;
             } else {
               staged[0] = staged[1] = staged[2] = staged[3] = 0;
             }
@@ -1165,14 +1369,17 @@
           menu_state = MENU_STATE_ETH_ADDR_EDIT;
         } else if (eth_menu_cursor == ETH_ITEM_CLEAR) {
           // Single-confirm action (same as SAVE & EXIT above), not a field -
-          // stays on ETH_LIST, which redraws showing "DHCP" for both rows.
-          uint8_t ip_tmp[4]; uint8_t nm_tmp[4];
-          bool ip_set = addr4_read(ADDR_CONF_ETH_IP, ip_tmp);
-          bool nm_set = addr4_read(ADDR_CONF_ETH_NM, nm_tmp);
-          if (ip_set || nm_set) {
+          // stays on ETH_LIST, which redraws showing "DHCP"/"NONE" for all
+          // four rows.
+          uint8_t tmp[4];
+          bool any_set = addr4_read(ADDR_CONF_ETH_IP, tmp) || addr4_read(ADDR_CONF_ETH_NM, tmp) ||
+                         addr4_read(ADDR_CONF_ETH_GW, tmp) || addr4_read(ADDR_CONF_ETH_DNS, tmp);
+          if (any_set) {
             uint8_t zero[4] = {0, 0, 0, 0};
             ethaddr_conf_save(ADDR_CONF_ETH_IP, zero);
             ethaddr_conf_save(ADDR_CONF_ETH_NM, zero);
+            ethaddr_conf_save(ADDR_CONF_ETH_GW, zero);
+            ethaddr_conf_save(ADDR_CONF_ETH_DNS, zero);
             eth_apply_addr_config();
           }
         }
@@ -1192,8 +1399,8 @@
         } else {
           // Last octet confirmed - commit and apply live (no reboot needed,
           // see ethaddr_conf_save()/eth_apply_addr_config()).
-          int addr_base = (eth_menu_cursor == ETH_ITEM_IP) ? ADDR_CONF_ETH_IP : ADDR_CONF_ETH_NM;
-          uint8_t *staged = (eth_menu_cursor == ETH_ITEM_IP) ? staged_eth_ip : staged_eth_nm;
+          int addr_base = eth_addr_base(eth_menu_cursor);
+          uint8_t *staged = eth_staged_addr_field(eth_menu_cursor);
           uint8_t live[4];
           addr4_read(addr_base, live);
           bool addr_changed = false;
@@ -1214,6 +1421,55 @@
             eth_apply_addr_config();
           }
           menu_state = MENU_STATE_ETH_LIST;
+        }
+      }
+    #endif
+    #if HAS_RTC == true
+      else if (menu_state == MENU_STATE_RTC_LIST) {
+        // Time/Date are read-only readouts - only BACK and Set Time/Date do
+        // anything, same as Ethernet's Link Status above.
+        if (rtc_menu_cursor == RTC_ITEM_BACK) {
+          menu_state = MENU_STATE_LIST;
+        } else if (rtc_menu_cursor == RTC_ITEM_SET) {
+          // Sync fresh from the live RTC reading, not a whole-menu-session
+          // staged copy - this field commits straight to the RTC chip on
+          // its own confirm, not deferred to SAVE & EXIT, so a live reading
+          // is the only value that can ever be stale here (same reasoning
+          // as Ethernet's own IP Address/Speed, Hardware's Voltage Divider).
+          uint32_t epoch = rtc_get_unixtime();
+          int32_t days = (int32_t)(epoch / 86400UL);
+          uint32_t rem  = epoch % 86400UL;
+          staged_rtc_hour   = (uint8_t)(rem / 3600); rem %= 3600;
+          staged_rtc_minute = (uint8_t)(rem / 60);
+          staged_rtc_second = (uint8_t)(rem % 60);
+          uint32_t m, d;
+          rtc_civil_from_days(days, staged_rtc_year, m, d);
+          staged_rtc_month = (uint8_t)m;
+          staged_rtc_day   = (uint8_t)d;
+          rtc_edit_field_idx = 0;
+          menu_state = MENU_STATE_RTC_EDIT;
+        }
+        #if MCU_VARIANT == MCU_ESP32 && (HAS_WIFI == true || HAS_ETHERNET == true)
+          else if (rtc_menu_cursor == RTC_ITEM_SYNC_NTP) {
+            // Blocks briefly (up to NTP_SYNC_TIMEOUT_MS, RTC.h, on failure)
+            // - acceptable for an explicit, rarely-used action. No separate
+            // success/fail dialog: RTC_LIST's Time/Date rows above already
+            // recompute from the live RTC on every redraw, so a successful
+            // sync is immediately visible once this returns.
+            rtc_sync_ntp();
+          }
+        #endif
+      } else if (menu_state == MENU_STATE_RTC_EDIT) {
+        if (rtc_edit_field_idx < 5) {
+          // Not the last field yet - just advance, same screen.
+          rtc_edit_field_idx++;
+        } else {
+          // Last field confirmed - commit straight to the RTC chip (no
+          // reboot needed, unlike GPIO/Ethernet Speed's pin/link changes).
+          int32_t days = rtc_days_from_civil(staged_rtc_year, staged_rtc_month, staged_rtc_day);
+          uint32_t epoch = (uint32_t)days * 86400UL + (uint32_t)staged_rtc_hour * 3600UL + (uint32_t)staged_rtc_minute * 60UL + staged_rtc_second;
+          rtc_set_unixtime(epoch);
+          menu_state = MENU_STATE_RTC_LIST;
         }
       }
     #endif
@@ -1520,6 +1776,85 @@
     }
   #endif
 
+  #if HAS_RTC == true
+    // Date row (Year/Month/Day, active_idx 0-2) and time row (Hour/Minute/
+    // Second, active_idx 3-5), each using the same per-segment highlight
+    // trick as draw_menu_addr_edit_disp() - split across two rows (rather
+    // than one screen per row) so the whole date+time and whichever field
+    // is being adjusted stay visible together. Segment boxes are shorter
+    // (12px, not draw_menu_addr_edit_disp's 18px) since there's only room
+    // for two rows in the same vertical space that screen uses for one,
+    // and digits/separators here have no descenders to leave room for.
+    void draw_menu_datetime_edit_disp(uint8_t active_idx) {
+      display.setFont(SMALL_FONT);
+      display.setTextSize(1);
+      display.setTextColor(SSD1306_WHITE);
+      display.setCursor(6, 9);
+      display.print("SET TIME/DATE");
+      display.drawFastHLine(4, 15, 120, SSD1306_WHITE);
+
+      display.setFont(TEXT_ENTRY_FONT);
+      display.setTextSize(1);
+
+      char segs[6][5];
+      sprintf(segs[0], "%04d", (int)staged_rtc_year);
+      sprintf(segs[1], "%02u", staged_rtc_month);
+      sprintf(segs[2], "%02u", staged_rtc_day);
+      sprintf(segs[3], "%02u", staged_rtc_hour);
+      sprintf(segs[4], "%02u", staged_rtc_minute);
+      sprintf(segs[5], "%02u", staged_rtc_second);
+      // Separator printed right after each segment - empty for the last
+      // segment in its row.
+      const char *seps[6] = { "-", "-", "", ":", ":", "" };
+
+      for (uint8_t row = 0; row < 2; row++) {
+        uint8_t first = (row == 0) ? 0 : 3;
+        const uint16_t y = (row == 0) ? 28 : 44;
+
+        uint16_t total_w = 0;
+        int16_t bx1, by1; uint16_t bw, bh;
+        for (uint8_t i = first; i < first + 3; i++) {
+          display.getTextBounds(segs[i], 0, 0, &bx1, &by1, &bw, &bh);
+          total_w += bw;
+          if (seps[i][0]) { display.getTextBounds(seps[i], 0, 0, &bx1, &by1, &bw, &bh); total_w += bw; }
+        }
+
+        uint16_t x = 64 - total_w / 2;
+        for (uint8_t i = first; i < first + 3; i++) {
+          display.getTextBounds(segs[i], 0, 0, &bx1, &by1, &bw, &bh);
+          if (i == active_idx) {
+            display.fillRect(x - 1, y - 9, bw + 2, 12, SSD1306_WHITE);
+            display.setTextColor(SSD1306_BLACK);
+          } else {
+            display.setTextColor(SSD1306_WHITE);
+          }
+          display.setCursor(x, y);
+          display.print(segs[i]);
+          x += bw;
+          display.setTextColor(SSD1306_WHITE);
+          if (seps[i][0]) {
+            display.setCursor(x, y);
+            display.print(seps[i]);
+            display.getTextBounds(seps[i], 0, 0, &bx1, &by1, &bw, &bh);
+            x += bw;
+          }
+        }
+      }
+
+      display.setFont(SMALL_FONT);
+      display.setTextSize(1);
+      display.setTextColor(SSD1306_WHITE);
+      display.drawFastHLine(4, 50, 120, SSD1306_WHITE);
+      display.setCursor(6, 59);
+      #if HAS_ENCODER == true
+        if (encoder_enabled) display.print("turn:adjust press:ok");
+        else                 display.print("tap:adjust hold:ok");
+      #else
+        display.print("tap:adjust hold:ok");
+      #endif
+    }
+  #endif
+
   #if HAS_WIFI == true
     // Character-count windowed (not pixel-precise) so a 32-char SSID/PSK
     // doesn't need to fit on screen at once - shows only the trailing
@@ -1624,6 +1959,11 @@
         sprintf(valbufs[MENU_ITEM_ETHERNET], ">"); // opens a submenu, not an inline value
       #endif
 
+      #if HAS_RTC == true
+        labels[MENU_ITEM_RTC] = "RTC";
+        sprintf(valbufs[MENU_ITEM_RTC], ">"); // opens a submenu, not an inline value
+      #endif
+
       #if MENU_HAS_HW_PAGE == true
         labels[MENU_ITEM_HARDWARE] = "Hardware";
         sprintf(valbufs[MENU_ITEM_HARDWARE], ">"); // opens a submenu, not an inline value
@@ -1691,7 +2031,18 @@
         if (staged_wifi_nm[0]==0 && staged_wifi_nm[1]==0 && staged_wifi_nm[2]==0 && staged_wifi_nm[3]==0) sprintf(valbufs[WIFI_ITEM_NETMASK], "DHCP");
         else format_addr_octets(staged_wifi_nm, valbufs[WIFI_ITEM_NETMASK]);
 
-        labels[WIFI_ITEM_CLEAR] = "Clear IP/NM";
+        // "NONE" rather than "DHCP" when unset - unlike IP/Netmask, there's
+        // no DHCP client running once IP/NM are static, so an unset
+        // Gateway/DNS just means "none configured," not "provided by DHCP."
+        labels[WIFI_ITEM_GATEWAY] = "Gateway";
+        if (staged_wifi_gw[0]==0 && staged_wifi_gw[1]==0 && staged_wifi_gw[2]==0 && staged_wifi_gw[3]==0) sprintf(valbufs[WIFI_ITEM_GATEWAY], "NONE");
+        else format_addr_octets(staged_wifi_gw, valbufs[WIFI_ITEM_GATEWAY]);
+
+        labels[WIFI_ITEM_DNS] = "DNS";
+        if (staged_wifi_dns[0]==0 && staged_wifi_dns[1]==0 && staged_wifi_dns[2]==0 && staged_wifi_dns[3]==0) sprintf(valbufs[WIFI_ITEM_DNS], "NONE");
+        else format_addr_octets(staged_wifi_dns, valbufs[WIFI_ITEM_DNS]);
+
+        labels[WIFI_ITEM_CLEAR] = "Clear Static";
         valbufs[WIFI_ITEM_CLEAR][0] = 0;
 
         labels[WIFI_ITEM_BACK] = "BACK";
@@ -1702,9 +2053,11 @@
         format_wifi_mode(staged_wifi_mode, valbuf);
         draw_menu_edit_disp("MODE", valbuf);
       } else if (menu_state == MENU_STATE_WIFI_ADDR_EDIT) {
-        const char *title = (wifi_menu_cursor == WIFI_ITEM_IP) ? "IP ADDRESS" : "NETMASK";
-        uint8_t *staged = (wifi_menu_cursor == WIFI_ITEM_IP) ? staged_wifi_ip : staged_wifi_nm;
-        draw_menu_addr_edit_disp(title, staged, wifi_addr_octet_idx);
+        const char *title = "DNS";
+        if      (wifi_menu_cursor == WIFI_ITEM_IP)      title = "IP ADDRESS";
+        else if (wifi_menu_cursor == WIFI_ITEM_NETMASK) title = "NETMASK";
+        else if (wifi_menu_cursor == WIFI_ITEM_GATEWAY) title = "GATEWAY";
+        draw_menu_addr_edit_disp(title, wifi_staged_addr_field(wifi_menu_cursor), wifi_addr_octet_idx);
       } else if (menu_state == MENU_STATE_WIFI_TEXT_EDIT) {
         const char *title = (text_edit_field == WIFI_ITEM_SSID) ? "SSID" : "PSK";
         draw_menu_text_edit_disp(title, text_edit_buf, wheel_index);
@@ -1753,7 +2106,24 @@
           else                                             sprintf(valbufs[ETH_ITEM_NETMASK], "DHCP");
         }
 
-        labels[ETH_ITEM_CLEAR] = "Clear IP/NM";
+        // "NONE" rather than "DHCP" when unset - unlike IP/Netmask, there's
+        // no DHCP client running once IP/NM are static, so an unset
+        // Gateway/DNS just means "none configured," not "provided by DHCP."
+        labels[ETH_ITEM_GATEWAY] = "Gateway";
+        {
+          uint8_t gw_octets[4];
+          if (addr4_read(ADDR_CONF_ETH_GW, gw_octets)) format_addr_octets(gw_octets, valbufs[ETH_ITEM_GATEWAY]);
+          else                                             sprintf(valbufs[ETH_ITEM_GATEWAY], "NONE");
+        }
+
+        labels[ETH_ITEM_DNS] = "DNS";
+        {
+          uint8_t dns_octets[4];
+          if (addr4_read(ADDR_CONF_ETH_DNS, dns_octets)) format_addr_octets(dns_octets, valbufs[ETH_ITEM_DNS]);
+          else                                              sprintf(valbufs[ETH_ITEM_DNS], "NONE");
+        }
+
+        labels[ETH_ITEM_CLEAR] = "Clear Static";
         valbufs[ETH_ITEM_CLEAR][0] = 0;
 
         labels[ETH_ITEM_BACK] = "BACK";
@@ -1764,9 +2134,49 @@
         format_eth_speed_mode(staged_eth_speed_mode, valbuf);
         draw_menu_edit_disp("SPEED", valbuf);
       } else if (menu_state == MENU_STATE_ETH_ADDR_EDIT) {
-        const char *title = (eth_menu_cursor == ETH_ITEM_IP) ? "IP ADDRESS" : "NETMASK";
-        uint8_t *staged = (eth_menu_cursor == ETH_ITEM_IP) ? staged_eth_ip : staged_eth_nm;
-        draw_menu_addr_edit_disp(title, staged, eth_addr_octet_idx);
+        const char *title = "DNS";
+        if      (eth_menu_cursor == ETH_ITEM_IP)      title = "IP ADDRESS";
+        else if (eth_menu_cursor == ETH_ITEM_NETMASK) title = "NETMASK";
+        else if (eth_menu_cursor == ETH_ITEM_GATEWAY) title = "GATEWAY";
+        draw_menu_addr_edit_disp(title, eth_staged_addr_field(eth_menu_cursor), eth_addr_octet_idx);
+      }
+    #endif
+    #if HAS_RTC == true
+      else if (menu_state == MENU_STATE_RTC_LIST) {
+        const char *labels[RTC_ITEM_COUNT];
+        char valbufs[RTC_ITEM_COUNT][24];
+
+        uint32_t epoch = rtc_get_unixtime();
+        int32_t days = (int32_t)(epoch / 86400UL);
+        uint32_t rem  = epoch % 86400UL;
+        uint8_t hh = (uint8_t)(rem / 3600); rem %= 3600;
+        uint8_t mi = (uint8_t)(rem / 60);
+        uint8_t ss = (uint8_t)(rem % 60);
+        int32_t yy; uint32_t mo, dd;
+        rtc_civil_from_days(days, yy, mo, dd);
+
+        labels[RTC_ITEM_TIME] = "Time";
+        if (rtc_present) sprintf(valbufs[RTC_ITEM_TIME], "%02u:%02u:%02u", hh, mi, ss);
+        else              sprintf(valbufs[RTC_ITEM_TIME], "N/A");
+
+        labels[RTC_ITEM_DATE] = "Date";
+        if (rtc_present) sprintf(valbufs[RTC_ITEM_DATE], "%04d-%02u-%02u", (int)yy, mo, dd);
+        else              sprintf(valbufs[RTC_ITEM_DATE], "N/A");
+
+        #if MCU_VARIANT == MCU_ESP32 && (HAS_WIFI == true || HAS_ETHERNET == true)
+          labels[RTC_ITEM_SYNC_NTP] = "Sync NTP";
+          valbufs[RTC_ITEM_SYNC_NTP][0] = 0;
+        #endif
+
+        labels[RTC_ITEM_SET] = "Set Time/Date";
+        valbufs[RTC_ITEM_SET][0] = 0;
+
+        labels[RTC_ITEM_BACK] = "BACK";
+        valbufs[RTC_ITEM_BACK][0] = 0;
+
+        draw_menu_list_disp("RTC", labels, valbufs, RTC_ITEM_COUNT, rtc_menu_cursor);
+      } else if (menu_state == MENU_STATE_RTC_EDIT) {
+        draw_menu_datetime_edit_disp(rtc_edit_field_idx);
       }
     #endif
     #if MENU_HAS_HW_PAGE == true

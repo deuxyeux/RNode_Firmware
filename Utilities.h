@@ -122,6 +122,9 @@ void drot_conf_save(uint8_t val);
   void ethspd_conf_save(uint8_t val);
   void ethaddr_conf_save(int addr_base, uint8_t *val);
 #endif
+#if HAS_RTC == true
+  void kiss_indicate_time();
+#endif
 void eeprom_update(int mapped_addr, uint8_t byte);
 void buzzer_encoder_tick_melody();
 void buzzer_encoder_click_melody();
@@ -151,6 +154,10 @@ void buzzer_encoder_click_melody();
 
 #if HAS_PMU == true || IS_ESP32S3
   #include "Power.h"
+#endif
+
+#if HAS_RTC == true
+  #include "RTC.h"
 #endif
 
 #if HAS_INPUT == true
@@ -1283,6 +1290,19 @@ void kiss_indicate_frequency() {
 	escaped_serial_write(lora_freq);
 	serial_write(FEND);
 }
+
+#if HAS_RTC == true
+void kiss_indicate_time() {
+	uint32_t epoch = rtc_get_unixtime();
+	serial_write(FEND);
+	serial_write(CMD_TIME);
+	escaped_serial_write(epoch>>24);
+	escaped_serial_write(epoch>>16);
+	escaped_serial_write(epoch>>8);
+	escaped_serial_write(epoch);
+	serial_write(FEND);
+}
+#endif
 
 void kiss_indicate_st_alock() {
 	uint16_t at = (uint16_t)(st_airtime_limit*100*100);

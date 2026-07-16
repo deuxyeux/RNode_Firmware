@@ -151,6 +151,10 @@ void setup() {
   #endif
 
   #if HAS_ENCODER == true
+    encoder_init();
+  #endif
+
+  #if HAS_ENCODER == true
     #if HAS_GPIO_MENU == true
       // Must run before encoder_init(), which reads pin_encoder_up/down/
       // press to set up the actual hardware pins.
@@ -294,6 +298,10 @@ void setup() {
     display_unblank();
     disp_ready = display_init();
     update_display();
+  #endif
+
+  #if HAS_RTC == true
+    rtc_init();
   #endif
 
   #if HAS_BUZZER == true
@@ -977,6 +985,37 @@ void serial_callback(uint8_t sbyte) {
             kiss_indicate_bandwidth();
           }
         }
+    } else if (command == CMD_TIME) {
+      #if HAS_RTC == true
+        if (sbyte == FESC) {
+              ESCAPE = true;
+          } else {
+              if (ESCAPE) {
+                  if (sbyte == TFEND) sbyte = FEND;
+                  if (sbyte == TFESC) sbyte = FESC;
+                  ESCAPE = false;
+              }
+              if (frame_len < CMD_L) cmdbuf[frame_len++] = sbyte;
+          }
+
+          if (frame_len == 4) {
+            uint32_t new_time = (uint32_t)cmdbuf[0] << 24 | (uint32_t)cmdbuf[1] << 16 | (uint32_t)cmdbuf[2] << 8 | (uint32_t)cmdbuf[3];
+
+            if (new_time == 0) {
+              kiss_indicate_time();
+            } else {
+              rtc_set_unixtime(new_time);
+              kiss_indicate_time();
+            }
+          }
+      #endif
+    } else if (command == CMD_NTP_SYNC) {
+      #if MCU_VARIANT == MCU_ESP32 && HAS_RTC == true && (HAS_WIFI == true || HAS_ETHERNET == true)
+        if (sbyte == 0x01) {
+          rtc_sync_ntp();
+          kiss_indicate_time(); // echoes the result either way - synced time on success, unchanged time on failure
+        }
+      #endif
     } else if (command == CMD_TXPOWER) {
       if (sbyte == 0xFF) {
         kiss_indicate_txpower();
@@ -1356,6 +1395,34 @@ void serial_callback(uint8_t sbyte) {
 
         if (frame_len == 4) { for (uint8_t i = 0; i<4; i++) { eeprom_update(config_addr(ADDR_CONF_NM+i), cmdbuf[i]); } }
       #endif
+    } else if (command == CMD_WIFI_GW) {
+      #if HAS_WIFI
+        if (sbyte == FESC) { ESCAPE = true; }
+        else {
+          if (ESCAPE) {
+            if (sbyte == TFEND) sbyte = FEND;
+            if (sbyte == TFESC) sbyte = FESC;
+            ESCAPE = false;
+          }
+          if (frame_len < CMD_L) cmdbuf[frame_len++] = sbyte;
+        }
+
+        if (frame_len == 4) { for (uint8_t i = 0; i<4; i++) { eeprom_update(config_addr(ADDR_CONF_GW+i), cmdbuf[i]); } }
+      #endif
+    } else if (command == CMD_WIFI_DNS) {
+      #if HAS_WIFI
+        if (sbyte == FESC) { ESCAPE = true; }
+        else {
+          if (ESCAPE) {
+            if (sbyte == TFEND) sbyte = FEND;
+            if (sbyte == TFESC) sbyte = FESC;
+            ESCAPE = false;
+          }
+          if (frame_len < CMD_L) cmdbuf[frame_len++] = sbyte;
+        }
+
+        if (frame_len == 4) { for (uint8_t i = 0; i<4; i++) { eeprom_update(config_addr(ADDR_CONF_DNS+i), cmdbuf[i]); } }
+      #endif
     } else if (command == CMD_ETH_IP) {
       #if HAS_ETHERNET == true
         if (sbyte == FESC) { ESCAPE = true; }
@@ -1383,6 +1450,34 @@ void serial_callback(uint8_t sbyte) {
         }
 
         if (frame_len == 4) { for (uint8_t i = 0; i<4; i++) { eeprom_update(config_addr(ADDR_CONF_ETH_NM+i), cmdbuf[i]); } }
+      #endif
+    } else if (command == CMD_ETH_GW) {
+      #if HAS_ETHERNET == true
+        if (sbyte == FESC) { ESCAPE = true; }
+        else {
+          if (ESCAPE) {
+            if (sbyte == TFEND) sbyte = FEND;
+            if (sbyte == TFESC) sbyte = FESC;
+            ESCAPE = false;
+          }
+          if (frame_len < CMD_L) cmdbuf[frame_len++] = sbyte;
+        }
+
+        if (frame_len == 4) { for (uint8_t i = 0; i<4; i++) { eeprom_update(config_addr(ADDR_CONF_ETH_GW+i), cmdbuf[i]); } }
+      #endif
+    } else if (command == CMD_ETH_DNS) {
+      #if HAS_ETHERNET == true
+        if (sbyte == FESC) { ESCAPE = true; }
+        else {
+          if (ESCAPE) {
+            if (sbyte == TFEND) sbyte = FEND;
+            if (sbyte == TFESC) sbyte = FESC;
+            ESCAPE = false;
+          }
+          if (frame_len < CMD_L) cmdbuf[frame_len++] = sbyte;
+        }
+
+        if (frame_len == 4) { for (uint8_t i = 0; i<4; i++) { eeprom_update(config_addr(ADDR_CONF_ETH_DNS+i), cmdbuf[i]); } }
       #endif
     } else if (command == CMD_ETH_SPEED) {
       #if HAS_ETHERNET == true
