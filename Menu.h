@@ -38,7 +38,7 @@
   #define MENU_STATE_WIFI_ADDR_EDIT 14  // editing one octet of WiFi's own IP Address or Netmask field
   #define MENU_STATE_RTC_LIST       15  // RTC submenu list (HAS_RTC boards)
   #define MENU_STATE_RTC_EDIT       16  // Set Time/Date: sequential Year/Month/Day/Hour/Minute/Second editor
-  #define MENU_STATE_RTC_NTP_RESULT 17  // Sync NTP result popup - dismiss (any confirm) returns to MENU_STATE_RTC_LIST
+  #define MENU_STATE_STATUS_POPUP   17  // Generic transient status box (Sync NTP, Clear Static, ...) - see menu_open_popup()
   #define MENU_STATE_RTC_TZ_EDIT    18  // editing the Timezone display-offset field
 
   // The Hardware page exists whenever there's anything board-level worth
@@ -274,6 +274,194 @@
   // loop(), same as menu_button_process()).
   unsigned long menu_last_activity_ms = 0;
 
+  // Generic transient status box - a plain centered rectangle, not a
+  // navigable submenu (no title/footer chrome, no selectable items).
+  // Reused by several unrelated features that just need to show a brief
+  // message on top of whatever's currently on screen: the menu-open popup
+  // below (Sync NTP's progress/result, Clear Static's confirmation - both
+  // WiFi/Ethernet-specific, see MENU_STATE_STATUS_POPUP further down) and
+  // button_hold_process()'s main-button-hold feedback (menu-closed,
+  // applies to every HAS_MENU board regardless of WiFi/Ethernet) - hence
+  // living here, ungated, rather than under either feature's own #if.
+  #if HAS_INPUT == true || HAS_WIFI == true || HAS_ETHERNET == true
+    // Remembers the last-drawn box's footprint so a later, narrower/
+    // shorter message can erase just that area instead of the whole
+    // screen - see draw_menu_status_rect().
+    uint16_t menu_popup_prev_x = 0, menu_popup_prev_y = 0;
+    uint16_t menu_popup_prev_w = 0, menu_popup_prev_h = 0;
+    bool menu_popup_prev_valid = false;
+
+    // Superimposes the box on whatever's already in the display buffer -
+    // no clearDisplay() here. Only erases its own previous footprint (if
+    // any), not the whole screen, so a shrinking message (e.g.
+    // "CONNECTING" -> "SYNCED!") doesn't leave stale pixels poking out
+    // around a narrower new box. Box height (11) and baseline offset (+7)
+    // reuse draw_menu_list_disp()'s own row_h/baseline convention - the
+    // same font at the same tightness, already proven to fit cleanly.
+    void draw_menu_status_rect(const char *text) {
+      if (menu_popup_prev_valid) {
+        display.fillRect(menu_popup_prev_x, menu_popup_prev_y, menu_popup_prev_w, menu_popup_prev_h, SSD1306_BLACK);
+      }
+
+      display.setFont(SMALL_FONT);
+      display.setTextWrap(false);
+      display.setTextSize(1);
+      display.setTextColor(SSD1306_WHITE);
+
+      int16_t x1, y1; uint16_t tw, th;
+      display.getTextBounds(text, 0, 0, &x1, &y1, &tw, &th);
+
+      const uint16_t pad_l = 3;
+      const uint16_t pad_r = 3;
+      uint16_t box_w = tw + pad_l + pad_r;
+      if (box_w > 120) box_w = 120;
+      const uint16_t box_h = 11;
+      uint16_t box_x = (128 - box_w) / 2;
+      const uint16_t box_y = (64 - box_h) / 2;
+
+      display.fillRect(box_x, box_y, box_w, box_h, SSD1306_BLACK);
+      display.drawRect(box_x, box_y, box_w, box_h, SSD1306_WHITE);
+      // Subtracting x1 (the left bearing getTextBounds() reports for this
+      // specific string) puts the actual rendered ink pad_l pixels past
+      // the box's left edge, not just the raw cursor position - some
+      // strings (e.g. "SYNCED!") have a nonzero left bearing that would
+      // otherwise throw this off by a pixel or two.
+      display.setCursor(box_x + pad_l - x1, box_y + 7);
+      display.print(text);
+
+      menu_popup_prev_x = box_x; menu_popup_prev_y = box_y;
+      menu_popup_prev_w = box_w; menu_popup_prev_h = box_h;
+      menu_popup_prev_valid = true;
+    }
+  #endif
+
+  #if HAS_INPUT == true
+    // Live feedback for the main button's hold-duration tiers
+    // (button_event(), RNode_Firmware.ino) - which action fires is
+    // otherwise only revealed at release, with no indication beforehand
+    // of what a given hold length is about to trigger. Shows the box for
+    // whichever tier the current hold has reached, updating it live if
+    // held further into the next one - lets the user actually see what
+    // they're about to do and release (or keep holding) accordingly.
+    // Menu-closed only - button_event()'s tiers themselves only apply
+    // then (see its own menu_is_open() check), and this reuses
+    // draw_menu_status_rect() directly rather than going through the
+    // menu-open popup machinery above, which doesn't apply here either.
+    #define BUTTON_HOLD_TIER_NONE       0
+    #define BUTTON_HOLD_TIER_SLEEP      1
+    #define BUTTON_HOLD_TIER_SETTINGS   2
+    #define BUTTON_HOLD_TIER_BT_PAIRING 3
+    #define BUTTON_HOLD_TIER_CONSOLE    4
+
+    // Mirrors button_event()'s own duration thresholds exactly - keep the
+    // two in sync if those ever change.
+    uint8_t button_hold_tier(unsigned long held_ms) {
+      #if HAS_CONSOLE
+        if (held_ms > 10000) return BUTTON_HOLD_TIER_CONSOLE;
+      #endif
+      #if HAS_SLEEP
+        if (held_ms > 7000) return BUTTON_HOLD_TIER_SLEEP;
+      #endif
+      #if HAS_BLUETOOTH || HAS_BLE
+        if (held_ms > 5000) return BUTTON_HOLD_TIER_BT_PAIRING;
+      #endif
+      // HAS_MENU is implicitly true here - this whole file only compiles
+      // when it is.
+      if (held_ms > 3000) return BUTTON_HOLD_TIER_SETTINGS;
+      return BUTTON_HOLD_TIER_NONE;
+    }
+
+    const char *button_hold_tier_text(uint8_t tier) {
+      if      (tier == BUTTON_HOLD_TIER_SLEEP)      return "SLEEP";
+      else if (tier == BUTTON_HOLD_TIER_SETTINGS)   return "SETTINGS";
+      else if (tier == BUTTON_HOLD_TIER_BT_PAIRING) return "BT PAIRING";
+      else if (tier == BUTTON_HOLD_TIER_CONSOLE)    return "CONSOLE";
+      return "";
+    }
+
+    // Called from update_display()'s own normal (menu-closed) redraw path
+    // (Display.h), every cycle - NOT a one-shot draw. update_display()
+    // unconditionally clears and redraws the whole screen before getting
+    // here (same reason draw_settings_menu_disp()'s own
+    // MENU_STATE_STATUS_POPUP case has to redraw its underlying content
+    // every cycle too - see that comment), so a box only drawn once when
+    // the tier first changes gets wiped by the very next ordinary refresh
+    // - it has to be redrawn every cycle for as long as the tier's active
+    // to actually stay visible. No manual display.display() push needed
+    // here (unlike menu_draw_popup()) - this runs as part of the normal
+    // per-cycle pipeline, which already pushes once at the end.
+    void draw_button_hold_overlay() {
+      if (menu_is_open() || !button_pressed()) return;
+      uint8_t tier = button_hold_tier(millis() - button_down_last);
+      if (tier != BUTTON_HOLD_TIER_NONE) {
+        draw_menu_status_rect(button_hold_tier_text(tier));
+      }
+    }
+  #endif
+
+  #if HAS_WIFI == true || HAS_ETHERNET == true
+    // Menu-open popup state (MENU_STATE_STATUS_POPUP) - dismissed by any
+    // input, returning to menu_popup_return_state. menu_button_press()/
+    // menu_encoder_button()/menu_encoder_rotate() each special-case
+    // MENU_STATE_STATUS_POPUP before their normal tap/hold/rotate
+    // dispatch - see those functions.
+    char menu_popup_text[24] = {0};
+    uint8_t menu_popup_return_state = MENU_STATE_LIST;
+
+    // Absolute millis() deadline for auto-dismissing the currently-open
+    // popup - 0 means "not armed" (the normal case: stays up until the
+    // user dismisses it). Checked by menu_popup_process(), polled from
+    // loop() same as menu_button_process()/menu_timeout_process().
+    unsigned long menu_popup_auto_dismiss_at = 0;
+
+    // Draws AND immediately pushes to hardware, bypassing the normal
+    // throttled update_display() path - needed for anything that blocks
+    // loop() while showing progress (e.g. rtc_sync_ntp(), RTC.h, which
+    // this is also passed to directly as its status_cb), since nothing
+    // else would ever redraw the screen during that block otherwise. Safe
+    // to use for a one-shot message too (e.g. Clear Static) - just draws
+    // once.
+    void menu_draw_popup(const char *text) {
+      strncpy(menu_popup_text, text, 23); menu_popup_text[23] = 0;
+      draw_menu_status_rect(menu_popup_text);
+      display.display();
+    }
+
+    // Opens the popup (or updates it if already open) showing `text`,
+    // returning to `return_state` once the user dismisses it.
+    void menu_open_popup(const char *text, uint8_t return_state) {
+      menu_popup_return_state = return_state;
+      menu_state = MENU_STATE_STATUS_POPUP;
+      // Fresh session - don't erase a footprint left over from wherever
+      // the box happened to be the last time the popup was used.
+      menu_popup_prev_valid = false;
+      menu_popup_auto_dismiss_at = 0; // no auto-dismiss unless armed separately, see menu_draw_popup_timed()
+      menu_draw_popup(text);
+    }
+
+    // Draws `text` on the already-open popup (same as menu_draw_popup())
+    // and arms it to auto-dismiss after `ms` with no input needed - used
+    // for outcomes that don't need acknowledging (e.g. a successful Sync
+    // NTP), as opposed to the default behavior (stays up until dismissed)
+    // used for anything worth making sure the user actually saw (errors).
+    void menu_draw_popup_timed(const char *text, unsigned long ms) {
+      menu_draw_popup(text);
+      menu_popup_auto_dismiss_at = millis() + ms;
+    }
+
+    // Polled from loop() - auto-dismisses the popup once its timer (see
+    // menu_draw_popup_timed()) expires, with no button/encoder input
+    // needed. Doesn't touch menu_last_activity_ms - this isn't real user
+    // activity, so it shouldn't reset the whole menu's own idle-close
+    // watchdog (SETTINGS_MENU_TIMEOUT, menu_timeout_process()).
+    void menu_popup_process() {
+      if (menu_state == MENU_STATE_STATUS_POPUP && menu_popup_auto_dismiss_at != 0 && millis() >= menu_popup_auto_dismiss_at) {
+        menu_popup_auto_dismiss_at = 0;
+        menu_state = menu_popup_return_state;
+      }
+    }
+  #endif
+
   uint8_t staged_display_timeout    = 0;   // seconds, 0-255, 0 = OFF
   uint8_t staged_display_brightness = 0;   // 0-255, raw SSD1306 contrast
   uint8_t staged_display_rotation   = 0;   // 0-3 = 0/90/180/270 degrees
@@ -387,13 +575,6 @@
     // Which of the 6 fields above is currently being adjusted - 0=Year,
     // 1=Month, 2=Day, 3=Hour, 4=Minute, 5=Second (see step_rtc_field()).
     uint8_t rtc_edit_field_idx = 0;
-
-    #if MCU_VARIANT == MCU_ESP32 && (HAS_WIFI == true || HAS_ETHERNET == true)
-      // rtc_sync_ntp()'s return value (NTP_SYNC_OK/NTP_SYNC_ERR_*, RTC.h)
-      // from the most recent Sync NTP attempt - drives the result popup
-      // (MENU_STATE_RTC_NTP_RESULT).
-      uint8_t rtc_ntp_result = NTP_SYNC_OK;
-    #endif
 
     // Working copy while inside MENU_STATE_RTC_TZ_EDIT - quarter-hours
     // from UTC, synced fresh from the live value on entry (see
@@ -826,6 +1007,21 @@
       else      { if (v < TZ_OFFSET_QH_MIN) v = TZ_OFFSET_QH_MIN; if (v > TZ_OFFSET_QH_MAX) v = TZ_OFFSET_QH_MAX; }
       staged_tz_offset_qh = (int8_t)v;
     }
+
+    #if MCU_VARIANT == MCU_ESP32 && (HAS_WIFI == true || HAS_ETHERNET == true)
+      // Only the success result auto-dismisses (menu_draw_popup_timed()) -
+      // nothing to acknowledge there, whereas an error is worth making
+      // sure was actually seen, so those still wait for real input.
+      #define NTP_SYNC_SUCCESS_POPUP_MS 5000
+
+      const char *ntp_result_text(uint8_t result) {
+        if      (result == NTP_SYNC_ERR_NO_RTC)    return "NO RTC FOUND";
+        else if (result == NTP_SYNC_ERR_NO_NET)    return "NO NETWORK";
+        else if (result == NTP_SYNC_ERR_TIMEOUT)   return "NTP TIMEOUT";
+        else if (result == NTP_SYNC_ERR_RTC_WRITE) return "RTC WRITE FAIL";
+        return "SYNCED!";
+      }
+    #endif
   #endif
 
   void menu_stage_from_live() {
@@ -1104,6 +1300,16 @@
   void menu_encoder_rotate(int8_t dir, bool wrap) {
     menu_last_activity_ms = millis();
     display_unblank();
+    #if HAS_WIFI == true || HAS_ETHERNET == true
+      if (menu_state == MENU_STATE_STATUS_POPUP) {
+        // Not a real navigable screen - any input at all dismisses it,
+        // rotation included, rather than the usual per-state handling
+        // below.
+        buzzer_encoder_tick_melody();
+        menu_state = menu_popup_return_state;
+        return;
+      }
+    #endif
     if (menu_state == MENU_STATE_LIST) {
       buzzer_encoder_tick_melody();
       menu_cursor = menu_clamp_cursor(menu_cursor, dir, MENU_ITEM_COUNT, wrap);
@@ -1221,6 +1427,18 @@
     menu_last_activity_ms = millis();
     display_unblank();
 
+    #if HAS_WIFI == true || HAS_ETHERNET == true
+      if (menu_state == MENU_STATE_STATUS_POPUP) {
+        // Not a real navigable screen - any input (short click or long
+        // press alike) dismisses it, rather than the usual short=confirm/
+        // long=commit-and-exit split below (which would otherwise close
+        // the *entire* menu on a long press here, not just this popup).
+        buzzer_encoder_click_melody();
+        menu_state = menu_popup_return_state;
+        return;
+      }
+    #endif
+
     if (duration > 700) {
       // Long-press: identical from anywhere inside the menu - commit & exit.
       // The one exception is text entry, where dialing all the way around
@@ -1324,13 +1542,15 @@
           wifi_addr_octet_idx = 0;
           menu_state = MENU_STATE_WIFI_ADDR_EDIT;
         } else if (wifi_menu_cursor == WIFI_ITEM_CLEAR) {
-          // Single-confirm action (same as SAVE & EXIT above) - stays on
-          // WIFI_LIST, deferred to the whole menu's SAVE & EXIT like
-          // everything else here.
+          // Single-confirm action (same as SAVE & EXIT above) - staged
+          // only, deferred to the whole menu's SAVE & EXIT like everything
+          // else here (the popup below returns to WIFI_LIST, not straight
+          // out of the menu, so that's still true after dismissing it).
           staged_wifi_ip[0] = staged_wifi_ip[1] = staged_wifi_ip[2] = staged_wifi_ip[3] = 0;
           staged_wifi_nm[0] = staged_wifi_nm[1] = staged_wifi_nm[2] = staged_wifi_nm[3] = 0;
           staged_wifi_gw[0] = staged_wifi_gw[1] = staged_wifi_gw[2] = staged_wifi_gw[3] = 0;
           staged_wifi_dns[0] = staged_wifi_dns[1] = staged_wifi_dns[2] = staged_wifi_dns[3] = 0;
+          menu_open_popup("CLEARED", MENU_STATE_WIFI_LIST);
         } else if (wifi_menu_cursor == WIFI_ITEM_SSID || wifi_menu_cursor == WIFI_ITEM_PSK) {
           // Fresh text-edit session, preloaded from the current staged
           // value, wheel starts at 'a'.
@@ -1429,6 +1649,7 @@
             // here, unlike init_ethernet()'s boot-time call - see
             // eth_apply_addr_config()'s own comment (Ethernet.h).
             eth_apply_addr_config(true);
+            menu_open_popup("CLEARED", MENU_STATE_ETH_LIST);
           }
         }
       } else if (menu_state == MENU_STATE_ETH_EDIT) {
@@ -1505,14 +1726,27 @@
         #if MCU_VARIANT == MCU_ESP32 && (HAS_WIFI == true || HAS_ETHERNET == true)
           else if (rtc_menu_cursor == RTC_ITEM_SYNC_NTP) {
             // Blocks briefly (up to NTP_SYNC_TIMEOUT_MS, RTC.h, on failure)
-            // - acceptable for an explicit, rarely-used action. Result
-            // (success, or which of the specific ways it can fail) shown
-            // via MENU_STATE_RTC_NTP_RESULT below - RTC_LIST's Time/Date
-            // rows also already recompute from the live RTC on every
-            // redraw, so a successful sync is visible there too once
-            // the popup's dismissed.
-            rtc_ntp_result = rtc_sync_ntp();
-            menu_state = MENU_STATE_RTC_NTP_RESULT;
+            // - acceptable for an explicit, rarely-used action. Opens the
+            // popup showing "CONNECTING" first, then rtc_sync_ntp() itself
+            // updates it live ("Resolving"/"Syncing") as it moves through
+            // each stage (menu_draw_popup matches its status_cb signature
+            // exactly) - this blocks loop() the whole time, so nothing
+            // else would ever redraw the screen otherwise. The final
+            // result then replaces it the same way. On success there's
+            // nothing to acknowledge, so it auto-dismisses back to
+            // RTC_LIST after NTP_SYNC_SUCCESS_POPUP_MS with no input
+            // needed (menu_popup_process(), polled from loop()) - whose
+            // Time/Date rows already recompute from the live RTC on every
+            // redraw, so the synced time is visible there right away. Any
+            // failure instead stays up until dismissed, same as before -
+            // worth making sure that was actually seen.
+            menu_open_popup("CONNECTING", MENU_STATE_RTC_LIST);
+            uint8_t result = rtc_sync_ntp(menu_draw_popup);
+            if (result == NTP_SYNC_OK) {
+              menu_draw_popup_timed(ntp_result_text(result), NTP_SYNC_SUCCESS_POPUP_MS);
+            } else {
+              menu_draw_popup(ntp_result_text(result));
+            }
           }
         #endif
       } else if (menu_state == MENU_STATE_RTC_EDIT) {
@@ -1536,12 +1770,10 @@
         if (new_raw != live_raw) { tz_conf_save(new_raw); }
         menu_state = MENU_STATE_RTC_LIST;
       }
-      #if MCU_VARIANT == MCU_ESP32 && (HAS_WIFI == true || HAS_ETHERNET == true)
-        else if (menu_state == MENU_STATE_RTC_NTP_RESULT) {
-          // Single "OK" item - any confirm dismisses back to RTC_LIST.
-          menu_state = MENU_STATE_RTC_LIST;
-        }
-      #endif
+      // No MENU_STATE_STATUS_POPUP branch here - it's not reached via this
+      // path at all. menu_button_press()/menu_encoder_button()/
+      // menu_encoder_rotate() each dismiss it directly, before ever
+      // calling into menu_confirm_select() (see those functions).
     #endif
     #if MENU_HAS_HW_PAGE == true
       else if (menu_state == MENU_STATE_HW_LIST) {
@@ -1643,6 +1875,21 @@
   void menu_button_press(unsigned long duration) {
     menu_last_activity_ms = millis();
     display_unblank();
+    #if HAS_WIFI == true || HAS_ETHERNET == true
+      if (menu_state == MENU_STATE_STATUS_POPUP) {
+        // Not a real navigable screen - a single short tap dismisses it
+        // immediately, no need for the usual double-tap-pending wait
+        // (there's nothing to go "back" from here) or to wait for a long
+        // press. duration < 150 is still the dead zone below this, same
+        // as everywhere else.
+        if (duration >= 150) {
+          menu_btn_pending = false;
+          buzzer_encoder_click_melody();
+          menu_state = menu_popup_return_state;
+        }
+        return;
+      }
+    #endif
     if (duration < 150) {
       unsigned long now = millis();
       if (menu_btn_pending && (now - menu_btn_last_click) <= MENU_BTN_DOUBLE_TAP_WINDOW) {
@@ -2264,21 +2511,27 @@
         format_tz_offset(staged_tz_offset_qh, valbuf);
         draw_menu_edit_disp("TIMEZONE", valbuf);
       }
-      #if MCU_VARIANT == MCU_ESP32 && (HAS_WIFI == true || HAS_ETHERNET == true)
-        else if (menu_state == MENU_STATE_RTC_NTP_RESULT) {
-          const char *labels[1] = { "OK" };
-          char valbufs[1][24];
-          valbufs[0][0] = 0;
+    #endif
+    #if HAS_WIFI == true || HAS_ETHERNET == true
+      else if (menu_state == MENU_STATE_STATUS_POPUP) {
+        // update_display() (Display.h) unconditionally clears the whole
+        // screen before calling draw_settings_menu_disp() on every normal
+        // redraw cycle - so "superimposed on the screen underneath" only
+        // holds up if that screen gets redrawn fresh every time too, not
+        // just once when the popup first opened. Temporarily swapping in
+        // menu_popup_return_state and recursing draws exactly whatever
+        // menu_confirm_select() would show at that state (RTC/WiFi/
+        // Ethernet list, ...); the box goes on top of that, not a blank
+        // screen. Safe to recurse - the substituted state can never itself
+        // be MENU_STATE_STATUS_POPUP, so this is always exactly one level
+        // deep.
+        uint8_t real_state = menu_state;
+        menu_state = menu_popup_return_state;
+        draw_settings_menu_disp();
+        menu_state = real_state;
 
-          const char *title = "SYNC OK";
-          if      (rtc_ntp_result == NTP_SYNC_ERR_NO_RTC)    title = "NO RTC FOUND";
-          else if (rtc_ntp_result == NTP_SYNC_ERR_NO_NET)    title = "NO NETWORK";
-          else if (rtc_ntp_result == NTP_SYNC_ERR_TIMEOUT)   title = "NTP TIMEOUT";
-          else if (rtc_ntp_result == NTP_SYNC_ERR_RTC_WRITE) title = "RTC WRITE FAIL";
-
-          draw_menu_list_disp(title, labels, valbufs, 1, 0);
-        }
-      #endif
+        draw_menu_status_rect(menu_popup_text);
+      }
     #endif
     #if MENU_HAS_HW_PAGE == true
       else if (menu_state == MENU_STATE_HW_LIST) {

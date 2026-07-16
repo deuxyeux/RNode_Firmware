@@ -13,11 +13,11 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-// Driver for the DS3231MZ RTC (MeshPoE-S3, and any future HAS_RTC board -
-// see Boards.h for the pin_rtc_sda/pin_rtc_scl each such board must
-// define). Exposes get/set of the RTC's time as a plain unix timestamp;
-// the KISS CMD_TIME glue that calls into this lives in Utilities.h /
-// RNode_Firmware.ino, alongside the other CMD_ handlers.
+// Driver for the DS3231MZ RTC (MeshPoE-S3, and any future HAS_RTC board).
+// Talks to it over the default Wire bus - doesn't bring the bus up itself,
+// see rtc_init() below for why. Exposes get/set of the RTC's time as a
+// plain unix timestamp; the KISS CMD_TIME glue that calls into this lives
+// in Utilities.h / RNode_Firmware.ino, alongside the other CMD_ handlers.
 
 #include <Wire.h>
 
@@ -60,12 +60,15 @@ void rtc_civil_from_days(int32_t z, int32_t &y, uint32_t &m, uint32_t &d) {
   y += (m <= 2);
 }
 
+// Doesn't call Wire.begin() itself - on both current HAS_RTC boards
+// (MeshPoE-S3, MeshAdventurer-S3), the RTC is on the same physical bus as
+// the OLED (SDA_OLED/SCL_OLED, Boards.h/Display.h), and display_init()
+// (Display.h) already brings it up before rtc_init() runs (see setup(),
+// RNode_Firmware.ino) - a second Wire.begin() here would just be a
+// redundant re-init of the same bus. A future HAS_RTC board with no
+// display of its own would need its own explicit Wire.begin() somewhere
+// before rtc_init() runs.
 bool rtc_init() {
-  DEBUG_UART_BEGIN();
-  DEBUG_LOG("Device started\r\n");
-
-  Wire.begin(pin_rtc_sda, pin_rtc_scl);
-
   Wire.beginTransmission(RTC_I2C_ADDR);
   rtc_present = (Wire.endTransmission() == 0);
 
@@ -219,15 +222,25 @@ bool rtc_set_unixtime(uint32_t epoch) {
 #define NTP_SYNC_ERR_TIMEOUT    3
 #define NTP_SYNC_ERR_RTC_WRITE  4
 
+// Optional progress hook - see rtc_sync_ntp()'s status_cb param. Plain
+// text in, no return value; RTC.h stays UI-agnostic (doesn't know or care
+// whether anything's listening), the Settings menu (Menu.h) is what
+// actually draws something when it passes one in.
+typedef void (*rtc_sync_status_cb_t)(const char *status);
+
 // One-shot, on-demand sync only - no periodic/automatic resync anywhere in
 // this firmware. Uses the ESP32 core's built-in SNTP client (configTime()/
 // getLocalTime()) instead of a hand-rolled UDP NTP client - the minimal
 // path to a synced clock. Blocks the caller for up to NTP_SYNC_TIMEOUT_MS
 // if the sync doesn't complete in time (see callers - both are explicit,
-// rarely-used user actions, not something on a hot path).
-uint8_t rtc_sync_ntp() {
+// rarely-used user actions, not something on a hot path). status_cb, if
+// given, is called with a short human-readable stage name as the sync
+// progresses - the KISS-triggered path (RNode_Firmware.ino) doesn't pass
+// one, only the Settings menu (Menu.h) does, to show live status.
+uint8_t rtc_sync_ntp(rtc_sync_status_cb_t status_cb = nullptr) {
   if (!rtc_present) { DEBUG_LOG("[NTP] no RTC present\r\n"); return NTP_SYNC_ERR_NO_RTC; }
 
+  if (status_cb) status_cb("CONNECTING");
   bool net_up = false;
   #if HAS_WIFI == true
     net_up = net_up || wifi_is_connected();
@@ -241,10 +254,12 @@ uint8_t rtc_sync_ntp() {
   // getLocalTime() below do their own resolution internally regardless,
   // this just tells us (via DEBUG_LOG) whether a timeout is a DNS problem
   // or the actual NTP exchange itself.
+  if (status_cb) status_cb("RESOLVING");
   IPAddress resolved_ip;
   bool dns_ok = (Network.hostByName(NTP_SERVER, resolved_ip) == 1);
   DEBUG_LOG("[NTP] DNS %s -> %s\r\n", NTP_SERVER, dns_ok ? resolved_ip.toString().c_str() : "FAILED");
 
+  if (status_cb) status_cb("SYNCING");
   DEBUG_LOG("[NTP] starting sync, timeout=%ums\r\n", (unsigned)NTP_SYNC_TIMEOUT_MS);
   configTime(0, 0, NTP_SERVER); // UTC, no DST - matches this driver's UTC-only design
   struct tm timeinfo;

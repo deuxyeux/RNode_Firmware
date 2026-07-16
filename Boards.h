@@ -274,7 +274,7 @@
       #define HAS_BLE true
       #define HAS_WIFI true
       #define HAS_ETHERNET true
-      #define HAS_CONSOLE false
+      #define HAS_CONSOLE true
       #define HAS_EEPROM true
       #define HAS_BUSY true
       #define HAS_INPUT true
@@ -320,13 +320,11 @@
         const int pin_led_tx = -1;
       #endif
 
-      // DS3231MZ RTC, sharing the OLED's I2C bus (see SDA_OLED/SCL_OLED,
-      // Display.h). RTC.h opens its own Wire.begin() on these pins so it
-      // works independent of HAS_DISPLAY, same as other Wire peripherals
-      // (e.g. Power.h) do on boards that double up the bus.
+      // DS3231MZ RTC, sharing the OLED's I2C bus (SDA_OLED/SCL_OLED,
+      // Display.h) - display_init() (Display.h) brings the bus up before
+      // rtc_init() (RTC.h) runs (see setup(), RNode_Firmware.ino), so
+      // RTC.h doesn't need (and doesn't declare) pins of its own here.
       #define HAS_RTC true
-      const int pin_rtc_sda = 47;
-      const int pin_rtc_scl = 48;
 
       // Free debug UART - Serial (KISS/console link) is remapped to the
       // native USB CDC device (ARDUINO_USB_CDC_ON_BOOT=1, see Makefile),
@@ -392,14 +390,13 @@
         #endif
       #endif
 
-      // DS3231SN RTC, sharing the OLED's I2C bus (see SDA_OLED/SCL_OLED,
+      // DS3231SN RTC, sharing the OLED's I2C bus (SDA_OLED/SCL_OLED,
       // Display.h) - same register map/I2C address as the DS3231MZ on
       // MeshPoE-S3 (RTC.h only touches the 0x00-0x06 time registers, which
       // are identical across every DS3231 variant), just a different
-      // package/oscillator, so no driver changes are needed.
+      // package/oscillator, so no driver changes are needed. display_init()
+      // brings the bus up before rtc_init() runs, same as MeshPoE-S3 above.
       #define HAS_RTC true
-      const int pin_rtc_sda = 41;
-      const int pin_rtc_scl = 42;
 
     #elif BOARD_MODEL == BOARD_MESHADVENTURER
       #define HAS_DISPLAY true
@@ -1528,9 +1525,12 @@
     #define HAS_BATTERY_DIVIDER false
   #endif
 
-  // Whether an external RTC chip (e.g. DS3231MZ) is present. Boards that
-  // define this true must also provide pin_rtc_sda/pin_rtc_scl - see
-  // BOARD_MESHPOE_S3's block above for the pattern.
+  // Whether an external RTC chip (e.g. DS3231MZ) is present. RTC.h doesn't
+  // bring up its own I2C bus - whatever brings up Wire for this board
+  // (typically display_init(), Display.h, on boards that share the OLED's
+  // bus) must run before rtc_init() does - see BOARD_MESHPOE_S3's block
+  // above for the pattern. A board with no display would need its own
+  // explicit Wire.begin() somewhere before rtc_init() runs.
   #ifndef HAS_RTC
     #define HAS_RTC false
   #endif

@@ -222,6 +222,13 @@ bool device_firmware_ok();
   // can't be referenced by name here - go through this bool wrapper instead.
   bool menu_is_open();
   void draw_settings_menu_disp();
+  #if HAS_INPUT == true
+    // Main-button hold-tier feedback (Menu.h) - drawn as part of the
+    // normal (menu-closed) redraw path below, every cycle, not just once
+    // when the tier changes - see draw_button_hold_overlay()'s own
+    // comment for why.
+    void draw_button_hold_overlay();
+  #endif
 #endif
 
 #if BOARD_MODEL == BOARD_HELTEC_T096
@@ -2002,6 +2009,9 @@ void update_display(bool blank = false) {
         {
           update_stat_area();
           update_disp_area();
+          #if HAS_MENU == true && HAS_INPUT == true
+            draw_button_hold_overlay();
+          #endif
         }
       }
       

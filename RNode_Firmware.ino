@@ -59,6 +59,9 @@ char sbuf[128];
 #endif
 
 void setup() {
+  DEBUG_UART_BEGIN();
+  DEBUG_LOG("RNode starting\r\n");
+
   #if MCU_VARIANT == MCU_ESP32
     boot_seq();
     EEPROM.begin(EEPROM_SIZE);
@@ -419,6 +422,13 @@ void setup() {
   validate_status();
 
   if (op_mode != MODE_TNC) LoRa->setFrequency(0);
+
+  // Not unconditional - validate_status() above has several failure
+  // branches (invalid EEPROM checksum/config, unprovisioned device,
+  // incorrect boot vector, ...) that set hw_ready = false but fall
+  // through to here rather than hard_reset()'ing, so "ready" would be
+  // actively misleading exactly when something's actually wrong.
+  if (hw_ready) { DEBUG_LOG("RNode ready\r\n"); }
 }
 
 void lora_receive() {
@@ -2029,6 +2039,9 @@ void loop() {
   #if HAS_MENU == true
     menu_button_process();
     menu_timeout_process();
+    #if HAS_WIFI == true || HAS_ETHERNET == true
+      menu_popup_process();
+    #endif
   #endif
 
   if (memory_low) {
@@ -2134,6 +2147,10 @@ void button_event(uint8_t event, unsigned long duration) {
           console_active = true;
           console_start();
         #endif
+      } else if (duration > 7000) {
+        #if HAS_SLEEP
+          sleep_now();
+        #endif
       } else if (duration > 5000) {
         #if HAS_BLUETOOTH || HAS_BLE
           if (bt_state != BT_STATE_CONNECTED) { bt_enable_pairing(); }
@@ -2141,10 +2158,6 @@ void button_event(uint8_t event, unsigned long duration) {
       } else if (duration > 3000) {
         #if HAS_MENU == true
           menu_open_from_closed();
-        #endif
-      } else if (duration > 700) {
-        #if HAS_SLEEP
-          sleep_now();
         #endif
       } else {
         #if HAS_BLUETOOTH || HAS_BLE
