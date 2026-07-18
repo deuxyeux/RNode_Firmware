@@ -393,6 +393,18 @@ void setup() {
         wifi_mode = EEPROM.read(eeprom_addr(ADDR_CONF_WIFI));
         if (wifi_mode == WR_WIFI_STA || wifi_mode == WR_WIFI_AP) { wifi_remote_init(); }
       #endif
+      #if HAS_ESPNOW == true
+        uint8_t espnow_en_raw = EEPROM.read(eeprom_addr(ADDR_CONF_ESPNOW));
+        // Explicit ON/OFF only ever get written as ESPNOW_ENABLE_BYTE/
+        // ESPNOW_DISABLE_BYTE (see the KISS handler and espnow_conf_save())
+        // - any other value (erased EEPROM reads 0xFF) means "never
+        // touched", so leave espnow_enabled at its board default (HAS_ESPNOW,
+        // Config.h) instead of forcing it either way - same convention as
+        // sound_enabled above.
+        if (espnow_en_raw == ESPNOW_ENABLE_BYTE) espnow_enabled = true;
+        else if (espnow_en_raw == ESPNOW_DISABLE_BYTE) espnow_enabled = false;
+        if (espnow_enabled) espnow_init();
+      #endif
       #if HAS_ETHERNET == true
         eth_speed_mode = EEPROM.read(eeprom_addr(ADDR_CONF_ETHSPD));
         if (eth_speed_mode > ETH_SPEED_OFF) eth_speed_mode = ETH_SPEED_AUTO; // erased EEPROM (0xFF) => default
@@ -907,6 +919,12 @@ void serial_callback(uint8_t sbyte) {
   if (IN_FRAME && sbyte == FEND && command == CMD_DATA) {
     IN_FRAME = false;
 
+    #if HAS_ESPNOW == true
+    if (selected_vport == 1) {
+      if (espnow_tx_len > 0) { espnow_send(espnow_tx_buf, espnow_tx_len); }
+      espnow_tx_len = 0;
+    } else
+    #endif
     if (!fifo16_isfull(&packet_starts) && queued_bytes < CONFIG_QUEUE_SIZE) {
         uint16_t s = current_packet_start;
         int16_t e = queue_cursor-1; if (e == -1) e = CONFIG_QUEUE_SIZE-1;
@@ -935,6 +953,22 @@ void serial_callback(uint8_t sbyte) {
         if (bt_state != BT_STATE_CONNECTED) {
           set_rns_link_state(RNS_LINK_STATE_CONNECTED);
         }
+        #if HAS_ESPNOW == true
+        if (selected_vport == 1) {
+          if (sbyte == FESC) {
+              ESCAPE = true;
+          } else {
+              if (ESCAPE) {
+                  if (sbyte == TFEND) sbyte = FEND;
+                  if (sbyte == TFESC) sbyte = FESC;
+                  ESCAPE = false;
+              }
+              if (espnow_tx_len < ESPNOW_TX_BUF_SIZE) {
+                espnow_tx_buf[espnow_tx_len++] = sbyte;
+              }
+          }
+        } else
+        #endif
         if (sbyte == FESC) {
             ESCAPE = true;
         } else {
@@ -964,6 +998,12 @@ void serial_callback(uint8_t sbyte) {
         if (frame_len == 4) {
           uint32_t freq = (uint32_t)cmdbuf[0] << 24 | (uint32_t)cmdbuf[1] << 16 | (uint32_t)cmdbuf[2] << 8 | (uint32_t)cmdbuf[3];
 
+          #if HAS_ESPNOW == true
+          if (selected_vport == 1) {
+            if (freq != 0) espnow_vport_cfg.frequency = freq;
+            kiss_indicate_v1_frequency();
+          } else
+          #endif
           if (freq == 0) {
             kiss_indicate_frequency();
           } else {
@@ -987,6 +1027,12 @@ void serial_callback(uint8_t sbyte) {
         if (frame_len == 4) {
           uint32_t bw = (uint32_t)cmdbuf[0] << 24 | (uint32_t)cmdbuf[1] << 16 | (uint32_t)cmdbuf[2] << 8 | (uint32_t)cmdbuf[3];
 
+          #if HAS_ESPNOW == true
+          if (selected_vport == 1) {
+            if (bw != 0) espnow_vport_cfg.bandwidth = bw;
+            kiss_indicate_v1_bandwidth();
+          } else
+          #endif
           if (bw == 0) {
             kiss_indicate_bandwidth();
           } else {
@@ -1027,6 +1073,12 @@ void serial_callback(uint8_t sbyte) {
         }
       #endif
     } else if (command == CMD_TXPOWER) {
+      #if HAS_ESPNOW == true
+      if (selected_vport == 1) {
+        if (sbyte != 0xFF) espnow_vport_cfg.txpower = (int8_t)sbyte;
+        kiss_indicate_v1_txpower();
+      } else
+      #endif
       if (sbyte == 0xFF) {
         kiss_indicate_txpower();
       } else {
@@ -1052,6 +1104,12 @@ void serial_callback(uint8_t sbyte) {
         kiss_indicate_txpower();
       }
     } else if (command == CMD_SF) {
+      #if HAS_ESPNOW == true
+      if (selected_vport == 1) {
+        if (sbyte != 0xFF) espnow_vport_cfg.sf = sbyte;
+        kiss_indicate_v1_sf();
+      } else
+      #endif
       if (sbyte == 0xFF) {
         kiss_indicate_spreadingfactor();
       } else {
@@ -1064,6 +1122,12 @@ void serial_callback(uint8_t sbyte) {
         kiss_indicate_spreadingfactor();
       }
     } else if (command == CMD_CR) {
+      #if HAS_ESPNOW == true
+      if (selected_vport == 1) {
+        if (sbyte != 0xFF) espnow_vport_cfg.cr = sbyte;
+        kiss_indicate_v1_cr();
+      } else
+      #endif
       if (sbyte == 0xFF) {
         kiss_indicate_codingrate();
       } else {
@@ -1092,6 +1156,12 @@ void serial_callback(uint8_t sbyte) {
         set_rns_link_state(RNS_LINK_STATE_CONNECTED);
         display_unblank();
       }
+      #if HAS_ESPNOW == true
+      if (selected_vport == 1) {
+        if (sbyte != 0xFF) espnow_vport_cfg.radio_state = sbyte;
+        kiss_indicate_v1_radiostate();
+      } else
+      #endif
       if (sbyte == 0xFF) {
         kiss_indicate_radiostate();
       } else if (sbyte == 0x00) {
@@ -1116,13 +1186,21 @@ void serial_callback(uint8_t sbyte) {
         if (frame_len == 2) {
           uint16_t at = (uint16_t)cmdbuf[0] << 8 | (uint16_t)cmdbuf[1];
 
-          if (at == 0) {
-            st_airtime_limit = 0.0;
-          } else {
-            st_airtime_limit = (float)at/(100.0*100.0);
-            if (st_airtime_limit >= 1.0) { st_airtime_limit = 0.0; }
+          #if HAS_ESPNOW == true
+          if (selected_vport == 1) {
+            espnow_vport_cfg.st_alock = at;
+            kiss_indicate_v1_st_alock();
+          } else
+          #endif
+          {
+            if (at == 0) {
+              st_airtime_limit = 0.0;
+            } else {
+              st_airtime_limit = (float)at/(100.0*100.0);
+              if (st_airtime_limit >= 1.0) { st_airtime_limit = 0.0; }
+            }
+            kiss_indicate_st_alock();
           }
-          kiss_indicate_st_alock();
         }
     } else if (command == CMD_LT_ALOCK) {
       if (sbyte == FESC) {
@@ -1139,13 +1217,21 @@ void serial_callback(uint8_t sbyte) {
         if (frame_len == 2) {
           uint16_t at = (uint16_t)cmdbuf[0] << 8 | (uint16_t)cmdbuf[1];
 
-          if (at == 0) {
-            lt_airtime_limit = 0.0;
-          } else {
-            lt_airtime_limit = (float)at/(100.0*100.0);
-            if (lt_airtime_limit >= 1.0) { lt_airtime_limit = 0.0; }
+          #if HAS_ESPNOW == true
+          if (selected_vport == 1) {
+            espnow_vport_cfg.lt_alock = at;
+            kiss_indicate_v1_lt_alock();
+          } else
+          #endif
+          {
+            if (at == 0) {
+              lt_airtime_limit = 0.0;
+            } else {
+              lt_airtime_limit = (float)at/(100.0*100.0);
+              if (lt_airtime_limit >= 1.0) { lt_airtime_limit = 0.0; }
+            }
+            kiss_indicate_lt_alock();
           }
-          kiss_indicate_lt_alock();
         }
     } else if (command == CMD_STAT_RX) {
       kiss_indicate_stat_rx();
@@ -1165,6 +1251,12 @@ void serial_callback(uint8_t sbyte) {
         if (bt_state != BT_STATE_CONNECTED) set_rns_link_state(RNS_LINK_STATE_CONNECTED);
         kiss_indicate_detect();
       }
+    #if HAS_ESPNOW == true
+    } else if (command == CMD_SEL_INT) {
+      selected_vport = (sbyte <= 1) ? sbyte : 0;
+    } else if (command == CMD_INTERFACES) {
+      kiss_indicate_interfaces();
+    #endif
     } else if (command == CMD_PROMISC) {
       if (sbyte == 0x01) {
         promisc_enable();
@@ -1328,6 +1420,12 @@ void serial_callback(uint8_t sbyte) {
       #if HAS_BUZZER == true
         if (sbyte == SND_ENABLE_BYTE || sbyte == SND_DISABLE_BYTE) {
           snd_conf_save(sbyte == SND_ENABLE_BYTE);
+        }
+      #endif
+    } else if (command == CMD_ESPNOW_ENABLE) {
+      #if HAS_ESPNOW == true
+        if (sbyte == ESPNOW_ENABLE_BYTE || sbyte == ESPNOW_DISABLE_BYTE) {
+          espnow_conf_save(sbyte);
         }
       #endif
     } else if (command == CMD_VSENSE_DIV) {
@@ -1988,7 +2086,17 @@ void loop() {
         #endif
       } else {
         if (!LED_DISPLAY_BLANKED) {
-          led_indicate_standby();
+          #if HAS_ESPNOW == true && HAS_NP == true
+            // While a host has actually grabbed vport 1 (espnow_ui_active()),
+            // show real ESP-NOW RX/TX activity instead of the idle white
+            // breathing pulse - mirrors how radio_online being true takes
+            // the entirely separate if(radio_online) branch above instead
+            // of ever reaching led_indicate_standby() at all.
+            if (espnow_ui_active()) { espnow_led_update(); }
+            else { led_indicate_standby(); }
+          #else
+            led_indicate_standby();
+          #endif
         }
       }
     } else {
@@ -2027,6 +2135,10 @@ void loop() {
 
   #if HAS_WIFI
     if (wifi_initialized) update_wifi();
+  #endif
+
+  #if HAS_ESPNOW == true
+    if (espnow_enabled) update_espnow();
   #endif
 
   #if HAS_INPUT
@@ -2139,27 +2251,48 @@ void button_event(uint8_t event, unsigned long duration) {
       }
     #endif
     } else {
-      if (duration > 10000) {
-        #if HAS_CONSOLE
+      // Each tier's #if guards the whole condition, not just its body -
+      // a board missing a given capability (e.g. HAS_CONSOLE, true on
+      // very few boards) must fall through to the next lower tier for
+      // any duration that would've matched the missing one, not silently
+      // do nothing. Guarding only the body (as this used to) left a
+      // dead if-branch for that duration range on every board without
+      // the capability - e.g. holding past 10s on a HAS_CONSOLE==false
+      // board landed in the empty duration>10000 branch and never fell
+      // through to trigger sleep, even though HAS_SLEEP was available.
+      #if HAS_CONSOLE
+        if (duration > 10000) {
           #if HAS_BLUETOOTH || HAS_BLE
             bt_stop();
           #endif
           console_active = true;
           console_start();
-        #endif
-      } else if (duration > 7000) {
-        #if HAS_SLEEP
-          sleep_now();
-        #endif
-      } else if (duration > 5000) {
-        #if HAS_BLUETOOTH || HAS_BLE
+        } else
+      #endif
+      #if HAS_SLEEP
+        // Only actually sleeps within SLEEP_HOLD_CANCEL_MS of the
+        // threshold (Config.h) - past that, this still claims the
+        // duration (no `else` fall-through to Bt Pairing/Settings below,
+        // matching button_hold_tier()'s own no-fall-through, Menu.h) but
+        // takes no action at all, intentionally: holding well past the
+        // Sleep tier and releasing is how the on-screen box's own
+        // disappearing tells the user to back out of an accidental hold,
+        // without having to time a precise release.
+        if (duration > 7000) {
+          if (duration <= 7000 + SLEEP_HOLD_CANCEL_MS) sleep_now();
+        } else
+      #endif
+      #if HAS_BLUETOOTH || HAS_BLE
+        if (duration > 5000) {
           if (bt_state != BT_STATE_CONNECTED) { bt_enable_pairing(); }
-        #endif
-      } else if (duration > 3000) {
-        #if HAS_MENU == true
+        } else
+      #endif
+      #if HAS_MENU == true
+        if (duration > 3000) {
           menu_open_from_closed();
-        #endif
-      } else {
+        } else
+      #endif
+      {
         #if HAS_BLUETOOTH || HAS_BLE
         if (bt_state != BT_STATE_CONNECTED) {
           if (bt_state == BT_STATE_OFF) {

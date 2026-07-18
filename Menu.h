@@ -21,6 +21,49 @@
   #include "Fonts/Tamsyn6x12.h"
   #define TEXT_ENTRY_FONT &Tamsyn6x12
 
+  // Every draw_*_disp() function below targets MENU_GFX instead of the
+  // global `display` object directly. On every board except T096 this is
+  // display itself (zero change from before). T096's ST7735 panel has no
+  // framebuffer, so its menu renders into an off-screen canvas instead
+  // (menu_canvas, Display.h) and gets composited through drawBitmap()
+  // rather than drawn straight to the glass - see push_menu_canvas().
+  // The handful of layout macros below follow the same pattern: today's
+  // literal, hand-tuned 128x64 SSD1306 values everywhere, T096-specific
+  // starting points where T096 actually renders a screen today (list and
+  // edit - see Boards.h's HAS_WIFI/HAS_ETHERNET/HAS_RTC being absent for
+  // why the address/datetime/text-wheel editors don't need this yet).
+  // Values are starting points, not final - like every other pixel-level
+  // convention in this file, tuning happens live on hardware, not here.
+  #if BOARD_MODEL == BOARD_HELTEC_T096
+    #define MENU_GFX menu_canvas
+    #define MENU_CONTENT_W (MENU_CANVAS_W - 8) // 4px margin each side
+    #define MENU_LIST_ROW_H 11
+    #define MENU_LIST_VISIBLE_ROWS 4
+    #define MENU_LIST_TOP_Y 15
+    #define MENU_LIST_FOOTER_HLINE_Y (MENU_CANVAS_H - 21)
+    #define MENU_LIST_FOOTER_TEXT_Y (MENU_CANVAS_H - 17)
+    #define MENU_EDIT_VALUE_CX (MENU_CANVAS_W / 2)
+    #define MENU_EDIT_VALUE_Y 36
+    #define MENU_EDIT_ARROW_Y 34
+    #define MENU_EDIT_ARROW_R_EDGE (MENU_CANVAS_W - 5)
+    #define MENU_EDIT_FOOTER_HLINE_Y (MENU_CANVAS_H - 21)
+    #define MENU_EDIT_FOOTER_TEXT_Y (MENU_CANVAS_H - 17)
+  #else
+    #define MENU_GFX display
+    #define MENU_CONTENT_W 120
+    #define MENU_LIST_ROW_H 11
+    #define MENU_LIST_VISIBLE_ROWS 4
+    #define MENU_LIST_TOP_Y 15
+    #define MENU_LIST_FOOTER_HLINE_Y 59
+    #define MENU_LIST_FOOTER_TEXT_Y 63
+    #define MENU_EDIT_VALUE_CX 64
+    #define MENU_EDIT_VALUE_Y 36
+    #define MENU_EDIT_ARROW_Y 34
+    #define MENU_EDIT_ARROW_R_EDGE 123
+    #define MENU_EDIT_FOOTER_HLINE_Y 50
+    #define MENU_EDIT_FOOTER_TEXT_Y 59
+  #endif
+
   #define MENU_STATE_CLOSED         0
   #define MENU_STATE_LIST           1   // top-level list
   #define MENU_STATE_EDIT           2   // editing a top-level field
@@ -76,6 +119,17 @@
     #define MENU_NEXT_IDX_S 3
   #endif
 
+  #if HAS_ESPNOW == true
+    // ESP-NOW virtual interface (vport 1, ESPNOW.h) on/off -
+    // espnow_enabled/espnow_conf_save() (Utilities.h). Like Ethernet's
+    // Speed field, changing this reboots the device immediately - ESP-NOW
+    // has no runtime start/stop path, only a boot-time espnow_init() call.
+    #define MENU_ITEM_ESPNOW MENU_NEXT_IDX_S
+    #define MENU_NEXT_IDX_SN (MENU_NEXT_IDX_S + 1)
+  #else
+    #define MENU_NEXT_IDX_SN MENU_NEXT_IDX_S
+  #endif
+
   #if HAS_ENCODER == true
     // Whether a physical encoder is actually populated - some boards have
     // it PCB-provisioned but optionally installed (MeshAdventurer-S3), or
@@ -84,10 +138,10 @@
     // HAS_ENCODER capability flag. Only changes the on-screen footer hint
     // (turn/press vs tap/hold) - the encoder itself is always serviced
     // regardless, same as before this existed.
-    #define MENU_ITEM_ENCODER MENU_NEXT_IDX_S
-    #define MENU_NEXT_IDX_0   (MENU_NEXT_IDX_S + 1)
+    #define MENU_ITEM_ENCODER MENU_NEXT_IDX_SN
+    #define MENU_NEXT_IDX_0   (MENU_NEXT_IDX_SN + 1)
   #else
-    #define MENU_NEXT_IDX_0 MENU_NEXT_IDX_S
+    #define MENU_NEXT_IDX_0 MENU_NEXT_IDX_SN
   #endif
 
   #if HAS_WIFI == true
@@ -284,12 +338,48 @@
   // applies to every HAS_MENU board regardless of WiFi/Ethernet) - hence
   // living here, ungated, rather than under either feature's own #if.
   #if HAS_INPUT == true || HAS_WIFI == true || HAS_ETHERNET == true
-    // Remembers the last-drawn box's footprint so a later, narrower/
-    // shorter message can erase just that area instead of the whole
-    // screen - see draw_menu_status_rect().
-    uint16_t menu_popup_prev_x = 0, menu_popup_prev_y = 0;
-    uint16_t menu_popup_prev_w = 0, menu_popup_prev_h = 0;
-    bool menu_popup_prev_valid = false;
+    #if BOARD_MODEL == BOARD_HELTEC_T096
+      // Same footprint-tracking idea as the generic branch below, but in
+      // panel (not canvas-local) coordinates, since the box is pushed
+      // through menu_popup_canvas (Display.h) at whatever panel offset
+      // centers it - see push_menu_popup_canvas().
+      uint16_t menu_popup_prev_panel_x = 0, menu_popup_prev_panel_y = 0;
+      uint16_t menu_popup_prev_panel_w = 0, menu_popup_prev_panel_h = 0;
+      bool menu_popup_prev_panel_valid = false;
+
+      // Erases the last-pushed box, if any, by forcing a real repaint of
+      // whatever's actually supposed to be under its footprint - not by
+      // painting it black, which would just swap one wrong thing (a
+      // stale box) for another (a hole) instead of restoring the real
+      // operational-screen content that belongs there. Needed because,
+      // unlike the generic branch below, nothing here relies on a
+      // periodic full-screen clear to make a box disappear on its own -
+      // T096 only ever repaints the panel regions it explicitly pushes
+      // to. Called by draw_button_hold_overlay() whenever a hold ends
+      // without a new box replacing this one - including well after the
+      // box was last drawn, e.g. right after exiting a menu session a
+      // hold escalated into opening (menu_popup_prev_panel_* is never
+      // touched again once menu_is_open() goes true, so it's still
+      // sitting on coordinates from before the menu ever opened).
+      void menu_status_rect_clear() {
+        if (menu_popup_prev_panel_valid) {
+          for (uint8_t i = 0; i < REGION_CACHE_SLOTS; i++) region_cache[i].x = -1;
+          #if USE_COLOR_DISPLAY == true
+            cdirty_count = 0;
+          #endif
+          update_stat_area();
+          update_disp_area();
+          menu_popup_prev_panel_valid = false;
+        }
+      }
+    #else
+      // Remembers the last-drawn box's footprint so a later, narrower/
+      // shorter message can erase just that area instead of the whole
+      // screen - see draw_menu_status_rect().
+      uint16_t menu_popup_prev_x = 0, menu_popup_prev_y = 0;
+      uint16_t menu_popup_prev_w = 0, menu_popup_prev_h = 0;
+      bool menu_popup_prev_valid = false;
+    #endif
 
     // Superimposes the box on whatever's already in the display buffer -
     // no clearDisplay() here. Only erases its own previous footprint (if
@@ -299,39 +389,102 @@
     // reuse draw_menu_list_disp()'s own row_h/baseline convention - the
     // same font at the same tightness, already proven to fit cleanly.
     void draw_menu_status_rect(const char *text) {
-      if (menu_popup_prev_valid) {
-        display.fillRect(menu_popup_prev_x, menu_popup_prev_y, menu_popup_prev_w, menu_popup_prev_h, SSD1306_BLACK);
-      }
+      #if BOARD_MODEL == BOARD_HELTEC_T096
+        // Only ever reached today via draw_button_hold_overlay() (menu
+        // closed, landscape) - the menu-open popup path (Sync NTP,
+        // Clear Static) needs HAS_WIFI/HAS_ETHERNET, which this board
+        // doesn't have. Draws into its own small canvas
+        // (menu_popup_canvas, Display.h, kept <=80px wide to stay within
+        // drawBitmap()'s region-cache cutoff) rather than menu_canvas -
+        // that canvas is sized and positioned for the portrait
+        // list-screen case only, not this landscape overlay.
+        menu_popup_canvas.setFont(SMALL_FONT);
+        menu_popup_canvas.setTextWrap(false);
+        menu_popup_canvas.setTextSize(1);
+        menu_popup_canvas.setTextColor(SSD1306_WHITE);
 
-      display.setFont(SMALL_FONT);
-      display.setTextWrap(false);
-      display.setTextSize(1);
-      display.setTextColor(SSD1306_WHITE);
+        int16_t x1, y1; uint16_t tw, th;
+        menu_popup_canvas.getTextBounds(text, 0, 0, &x1, &y1, &tw, &th);
 
-      int16_t x1, y1; uint16_t tw, th;
-      display.getTextBounds(text, 0, 0, &x1, &y1, &tw, &th);
+        const uint16_t pad_l = 3;
+        const uint16_t pad_r = 3;
+        uint16_t box_w = tw + pad_l + pad_r;
+        if (box_w > MENU_POPUP_CANVAS_W) box_w = MENU_POPUP_CANVAS_W;
+        const uint16_t box_h = 11;
+        // Centered over the full panel (not this narrower canvas) at
+        // whatever orientation is currently active - unlike the menu
+        // itself (always landscape, menu_canvas), this overlay only
+        // ever runs while the menu is closed (draw_button_hold_overlay()),
+        // so the panel is showing the normal operational screen at
+        // whatever rotation the user's Orientation setting picked -
+        // portrait (80x160) just as often as landscape (160x80).
+        // display.width()/height() already reflect the live rotation,
+        // so this adapts automatically instead of assuming landscape.
+        uint16_t panel_x = (display.width() - box_w) / 2;
+        uint16_t panel_y = (display.height() - box_h) / 2;
 
-      const uint16_t pad_l = 3;
-      const uint16_t pad_r = 3;
-      uint16_t box_w = tw + pad_l + pad_r;
-      if (box_w > 120) box_w = 120;
-      const uint16_t box_h = 11;
-      uint16_t box_x = (128 - box_w) / 2;
-      const uint16_t box_y = (64 - box_h) / 2;
+        if (menu_popup_prev_panel_valid &&
+            (menu_popup_prev_panel_x != panel_x || menu_popup_prev_panel_y != panel_y ||
+             menu_popup_prev_panel_w != box_w || menu_popup_prev_panel_h != box_h)) {
+          // Force a real repaint of whatever's actually supposed to be
+          // under the old, wider footprint - not just paint it black
+          // (same reasoning as menu_status_rect_clear()). Painting black
+          // here would leave a solid black margin around a narrower
+          // replacement box instead of restoring the real operational-
+          // screen content there, e.g. shrinking from "BT PAIRING" to
+          // the narrower "SLEEP" mid-hold.
+          for (uint8_t i = 0; i < REGION_CACHE_SLOTS; i++) region_cache[i].x = -1;
+          #if USE_COLOR_DISPLAY == true
+            cdirty_count = 0;
+          #endif
+          update_stat_area();
+          update_disp_area();
+        }
 
-      display.fillRect(box_x, box_y, box_w, box_h, SSD1306_BLACK);
-      display.drawRect(box_x, box_y, box_w, box_h, SSD1306_WHITE);
-      // Subtracting x1 (the left bearing getTextBounds() reports for this
-      // specific string) puts the actual rendered ink pad_l pixels past
-      // the box's left edge, not just the raw cursor position - some
-      // strings (e.g. "SYNCED!") have a nonzero left bearing that would
-      // otherwise throw this off by a pixel or two.
-      display.setCursor(box_x + pad_l - x1, box_y + 7);
-      display.print(text);
+        menu_popup_canvas.fillScreen(SSD1306_BLACK);
+        menu_popup_canvas.drawRect(0, 0, box_w, box_h, SSD1306_WHITE);
+        menu_popup_canvas.setCursor(pad_l - x1, 7);
+        menu_popup_canvas.print(text);
+        push_menu_popup_canvas(panel_x, panel_y, box_w, box_h);
 
-      menu_popup_prev_x = box_x; menu_popup_prev_y = box_y;
-      menu_popup_prev_w = box_w; menu_popup_prev_h = box_h;
-      menu_popup_prev_valid = true;
+        menu_popup_prev_panel_x = panel_x; menu_popup_prev_panel_y = panel_y;
+        menu_popup_prev_panel_w = box_w; menu_popup_prev_panel_h = box_h;
+        menu_popup_prev_panel_valid = true;
+      #else
+        if (menu_popup_prev_valid) {
+          display.fillRect(menu_popup_prev_x, menu_popup_prev_y, menu_popup_prev_w, menu_popup_prev_h, SSD1306_BLACK);
+        }
+
+        display.setFont(SMALL_FONT);
+        display.setTextWrap(false);
+        display.setTextSize(1);
+        display.setTextColor(SSD1306_WHITE);
+
+        int16_t x1, y1; uint16_t tw, th;
+        display.getTextBounds(text, 0, 0, &x1, &y1, &tw, &th);
+
+        const uint16_t pad_l = 3;
+        const uint16_t pad_r = 3;
+        uint16_t box_w = tw + pad_l + pad_r;
+        if (box_w > 120) box_w = 120;
+        const uint16_t box_h = 11;
+        uint16_t box_x = (128 - box_w) / 2;
+        const uint16_t box_y = (64 - box_h) / 2;
+
+        display.fillRect(box_x, box_y, box_w, box_h, SSD1306_BLACK);
+        display.drawRect(box_x, box_y, box_w, box_h, SSD1306_WHITE);
+        // Subtracting x1 (the left bearing getTextBounds() reports for this
+        // specific string) puts the actual rendered ink pad_l pixels past
+        // the box's left edge, not just the raw cursor position - some
+        // strings (e.g. "SYNCED!") have a nonzero left bearing that would
+        // otherwise throw this off by a pixel or two.
+        display.setCursor(box_x + pad_l - x1, box_y + 7);
+        display.print(text);
+
+        menu_popup_prev_x = box_x; menu_popup_prev_y = box_y;
+        menu_popup_prev_w = box_w; menu_popup_prev_h = box_h;
+        menu_popup_prev_valid = true;
+      #endif
     }
   #endif
 
@@ -360,7 +513,15 @@
         if (held_ms > 10000) return BUTTON_HOLD_TIER_CONSOLE;
       #endif
       #if HAS_SLEEP
-        if (held_ms > 7000) return BUTTON_HOLD_TIER_SLEEP;
+        // Past SLEEP_HOLD_CANCEL_MS the box disappears (NONE, not a
+        // fall-through to the lower Bt Pairing/Settings tiers below -
+        // this duration already committed to the Sleep tier, it doesn't
+        // un-commit into a different one) - matches button_event()'s own
+        // cutoff for actually triggering sleep on release, see
+        // SLEEP_HOLD_CANCEL_MS's own comment (Config.h) for why.
+        if (held_ms > 7000) {
+          return (held_ms <= 7000 + SLEEP_HOLD_CANCEL_MS) ? BUTTON_HOLD_TIER_SLEEP : BUTTON_HOLD_TIER_NONE;
+        }
       #endif
       #if HAS_BLUETOOTH || HAS_BLE
         if (held_ms > 5000) return BUTTON_HOLD_TIER_BT_PAIRING;
@@ -391,10 +552,23 @@
     // here (unlike menu_draw_popup()) - this runs as part of the normal
     // per-cycle pipeline, which already pushes once at the end.
     void draw_button_hold_overlay() {
-      if (menu_is_open() || !button_pressed()) return;
+      if (menu_is_open() || !button_pressed()) {
+        #if BOARD_MODEL == BOARD_HELTEC_T096
+          // T096 has no periodic full-screen clear to make a leftover
+          // box disappear on its own (see menu_status_rect_clear()'s own
+          // comment) - explicitly erase it once the hold that drew it
+          // ends, whether that's a release or the menu having opened.
+          menu_status_rect_clear();
+        #endif
+        return;
+      }
       uint8_t tier = button_hold_tier(millis() - button_down_last);
       if (tier != BUTTON_HOLD_TIER_NONE) {
         draw_menu_status_rect(button_hold_tier_text(tier));
+      } else {
+        #if BOARD_MODEL == BOARD_HELTEC_T096
+          menu_status_rect_clear();
+        #endif
       }
     }
   #endif
@@ -473,6 +647,9 @@
   uint8_t live_display_brightness   = 0;
   #if HAS_BUZZER == true
     bool staged_sound_enabled = true;
+  #endif
+  #if HAS_ESPNOW == true
+    bool staged_espnow_enabled = true;
   #endif
   #if HAS_ENCODER == true
     bool staged_encoder_enabled = false;
@@ -1031,6 +1208,9 @@
     #if HAS_BUZZER == true
       staged_sound_enabled = sound_enabled;
     #endif
+    #if HAS_ESPNOW == true
+      staged_espnow_enabled = espnow_enabled;
+    #endif
     #if HAS_ENCODER == true
       staged_encoder_enabled = encoder_enabled;
     #endif
@@ -1115,6 +1295,13 @@
     #if HAS_BUZZER == true
       if (staged_sound_enabled != sound_enabled) {
         snd_conf_save(staged_sound_enabled);
+      }
+    #endif
+    #if HAS_ESPNOW == true
+      if (staged_espnow_enabled != espnow_enabled) {
+        // Reboots immediately if changed (espnow_conf_save(), Utilities.h) -
+        // same as ethspd_conf_save()'s Ethernet > Speed field.
+        espnow_conf_save(staged_espnow_enabled ? ESPNOW_ENABLE_BYTE : ESPNOW_DISABLE_BYTE);
       }
     #endif
     #if HAS_ENCODER == true
@@ -1325,6 +1512,11 @@
       #if HAS_BUZZER == true
         else if (menu_edit_field == MENU_ITEM_SOUND) {
           staged_sound_enabled = !staged_sound_enabled;
+        }
+      #endif
+      #if HAS_ESPNOW == true
+        else if (menu_edit_field == MENU_ITEM_ESPNOW) {
+          staged_espnow_enabled = !staged_espnow_enabled;
         }
       #endif
       #if HAS_ENCODER == true
@@ -1927,15 +2119,15 @@
   // edge. Shows up to 4 rows at a time, scrolling to keep the cursor
   // visible - lists have grown past 4 items and will likely keep growing.
   void draw_menu_list_disp(const char *title, const char **labels, char valbufs[][24], uint8_t count, uint8_t cursor) {
-    display.setFont(SMALL_FONT);
-    display.setTextSize(1);
-    display.setTextColor(SSD1306_WHITE);
-    display.setCursor(6, 8);
-    display.print(title);
-    display.drawFastHLine(4, 12, 120, SSD1306_WHITE);
+    MENU_GFX.setFont(SMALL_FONT);
+    MENU_GFX.setTextSize(1);
+    MENU_GFX.setTextColor(SSD1306_WHITE);
+    MENU_GFX.setCursor(6, 8);
+    MENU_GFX.print(title);
+    MENU_GFX.drawFastHLine(4, 12, MENU_CONTENT_W, SSD1306_WHITE);
 
-    const uint8_t row_h = 11;
-    const uint8_t visible_rows = 4;
+    const uint8_t row_h = MENU_LIST_ROW_H;
+    const uint8_t visible_rows = MENU_LIST_VISIBLE_ROWS;
     uint8_t first = 0;
     if (count > visible_rows) {
       if (cursor >= visible_rows) first = cursor - visible_rows + 1;
@@ -1944,76 +2136,77 @@
 
     for (uint8_t vi = 0; vi < visible_rows && (first + vi) < count; vi++) {
       uint8_t i = first + vi;
-      uint8_t row_top = 15 + vi * row_h;
+      uint8_t row_top = MENU_LIST_TOP_Y + vi * row_h;
       uint8_t y = row_top + 7; // text baseline
       if (i == cursor) {
-        display.fillRect(4, row_top, 120, 10, SSD1306_WHITE);
-        display.setTextColor(SSD1306_BLACK);
+        MENU_GFX.fillRect(4, row_top, MENU_CONTENT_W, row_h - 1, SSD1306_WHITE);
+        MENU_GFX.setTextColor(SSD1306_BLACK);
       } else {
-        display.setTextColor(SSD1306_WHITE);
+        MENU_GFX.setTextColor(SSD1306_WHITE);
       }
-      display.setCursor(8, y);
-      display.print(labels[i]);
+      MENU_GFX.setCursor(8, y);
+      MENU_GFX.print(labels[i]);
 
       if (valbufs[i][0] != 0) {
         int16_t x1, y1; uint16_t w, h;
-        display.getTextBounds(valbufs[i], 0, 0, &x1, &y1, &w, &h);
-        display.setCursor(122 - w, y);
-        display.print(valbufs[i]);
+        MENU_GFX.getTextBounds(valbufs[i], 0, 0, &x1, &y1, &w, &h);
+        MENU_GFX.setCursor(4 + MENU_CONTENT_W - 2 - w, y);
+        MENU_GFX.print(valbufs[i]);
       }
     }
 
-    display.setTextColor(SSD1306_WHITE);
-    display.drawFastHLine(4, 59, 120, SSD1306_WHITE);
-    display.setCursor(6, 63);
+    MENU_GFX.setTextColor(SSD1306_WHITE);
+    MENU_GFX.drawFastHLine(4, MENU_LIST_FOOTER_HLINE_Y, MENU_CONTENT_W, SSD1306_WHITE);
+    MENU_GFX.setCursor(6, MENU_LIST_FOOTER_TEXT_Y);
     // Whether an encoder is actually populated is a runtime choice
     // (encoder_enabled) on boards where it's optional, not the compile-time
     // HAS_ENCODER capability flag - see MENU_ITEM_ENCODER.
     #if HAS_ENCODER == true
-      if (encoder_enabled) display.print("turn:move press:open");
-      else                 display.print("tap:next hold:open");
+      if (encoder_enabled) MENU_GFX.print("turn:move press:open");
+      else                 MENU_GFX.print("tap:next hold:open");
     #else
-      display.print("tap:next hold:open");
+      MENU_GFX.print("tap:next hold:open");
     #endif
   }
 
   void draw_menu_edit_disp(const char *title, const char *valbuf) {
-    display.setFont(SMALL_FONT);
-    display.setTextSize(1);
-    display.setTextColor(SSD1306_WHITE);
-    display.setCursor(6, 9);
-    display.print(title);
-    display.drawFastHLine(4, 15, 120, SSD1306_WHITE);
+    MENU_GFX.setFont(SMALL_FONT);
+    MENU_GFX.setTextSize(1);
+    MENU_GFX.setTextColor(SSD1306_WHITE);
+    MENU_GFX.setCursor(6, 9);
+    MENU_GFX.print(title);
+    MENU_GFX.drawFastHLine(4, 15, MENU_CONTENT_W, SSD1306_WHITE);
 
-    display.setTextSize(2);
+    MENU_GFX.setTextSize(2);
     int16_t x1, y1; uint16_t w, h;
-    display.getTextBounds(valbuf, 0, 0, &x1, &y1, &w, &h);
-    // y=36, not the arrows' own 34 - Org_01 glyphs render above the
-    // setCursor() baseline, not straddling it (see [[feedback_org01_font_baseline]]),
-    // and that headroom roughly doubles at size 2 vs the arrows' size 1, so
-    // matching baselines would leave the value looking a few px too high.
-    // This offset centers the two visually instead of literally.
-    display.setCursor(64 - w/2, 36);
-    display.print(valbuf);
-    display.setTextSize(1);
-    // Pinned near the box edges (4..124) rather than the old fixed 18/106 -
-    // frees up the center for wider size-2 values like "100/HALF" (Speed,
+    MENU_GFX.getTextBounds(valbuf, 0, 0, &x1, &y1, &w, &h);
+    // MENU_EDIT_VALUE_Y, not the arrows' own MENU_EDIT_ARROW_Y - Org_01
+    // glyphs render above the setCursor() baseline, not straddling it
+    // (see [[feedback_org01_font_baseline]]), and that headroom roughly
+    // doubles at size 2 vs the arrows' size 1, so matching baselines
+    // would leave the value looking a few px too high. This offset
+    // centers the two visually instead of literally.
+    MENU_GFX.setCursor(MENU_EDIT_VALUE_CX - w/2, MENU_EDIT_VALUE_Y);
+    MENU_GFX.print(valbuf);
+    MENU_GFX.setTextSize(1);
+    // Pinned near the box edges rather than a fixed inset - frees up the
+    // center for wider size-2 values like "100/HALF" (Speed,
     // ETH_ITEM_SPEED) without colliding with the arrows. ">" is measured
-    // rather than hardcoded so it can't run past the 124 edge.
-    display.setCursor(5, 34);
-    display.print("<");
+    // rather than hardcoded so it can't run past the right edge.
+    MENU_GFX.setCursor(5, MENU_EDIT_ARROW_Y);
+    MENU_GFX.print("<");
     int16_t ax1, ay1; uint16_t aw, ah;
-    display.getTextBounds(">", 0, 0, &ax1, &ay1, &aw, &ah);
-    display.setCursor(123 - aw, 34);
-    display.print(">");
+    MENU_GFX.getTextBounds(">", 0, 0, &ax1, &ay1, &aw, &ah);
+    MENU_GFX.setCursor(MENU_EDIT_ARROW_R_EDGE - aw, MENU_EDIT_ARROW_Y);
+    MENU_GFX.print(">");
 
-    display.drawFastHLine(4, 50, 120, SSD1306_WHITE);
-    display.setCursor(6, 59);
+    MENU_GFX.drawFastHLine(4, MENU_EDIT_FOOTER_HLINE_Y, MENU_CONTENT_W, SSD1306_WHITE);
+    MENU_GFX.setCursor(6, MENU_EDIT_FOOTER_TEXT_Y);
     #if HAS_ENCODER == true
-      if (encoder_enabled) display.print("turn:adjust press:ok");
-      else                 display.print("tap:adjust hold:ok");
+      if (encoder_enabled) MENU_GFX.print("turn:adjust press:ok");
+      else                 MENU_GFX.print("tap:adjust hold:ok");
     #else
-      display.print("tap:adjust hold:ok");
+      MENU_GFX.print("tap:adjust hold:ok");
     #endif
   }
 
@@ -2030,25 +2223,25 @@
     // highlight visibly moves rightward - and everything left of it
     // accumulates legible - as each octet is confirmed.
     void draw_menu_addr_edit_disp(const char *title, uint8_t *octets, uint8_t active_idx) {
-      display.setFont(SMALL_FONT);
-      display.setTextSize(1);
-      display.setTextColor(SSD1306_WHITE);
-      display.setCursor(6, 9);
-      display.print(title);
-      display.drawFastHLine(4, 15, 120, SSD1306_WHITE);
+      MENU_GFX.setFont(SMALL_FONT);
+      MENU_GFX.setTextSize(1);
+      MENU_GFX.setTextColor(SSD1306_WHITE);
+      MENU_GFX.setCursor(6, 9);
+      MENU_GFX.print(title);
+      MENU_GFX.drawFastHLine(4, 15, 120, SSD1306_WHITE);
 
       // Same font as the SSID/PSK screen's typed content (TEXT_ENTRY_FONT,
       // Tamsyn6x12 - see draw_menu_text_edit_disp()) - title/divider/footer
       // stay on SMALL_FONT/Org_01, same split that screen uses. Narrower
       // per-glyph than Org_01 at the size Org_01 would otherwise need to be
       // legible here, so the full "255.255.255.255" fits comfortably.
-      display.setFont(TEXT_ENTRY_FONT);
-      display.setTextSize(1);
+      MENU_GFX.setFont(TEXT_ENTRY_FONT);
+      MENU_GFX.setTextSize(1);
 
       char full[16];
       format_addr_octets(octets, full);
       int16_t fx1, fy1; uint16_t fw, fh;
-      display.getTextBounds(full, 0, 0, &fx1, &fy1, &fw, &fh);
+      MENU_GFX.getTextBounds(full, 0, 0, &fx1, &fy1, &fw, &fh);
       uint16_t x = 64 - fw/2;
       const uint16_t y = 32;
 
@@ -2056,39 +2249,39 @@
       int16_t sx1, sy1; uint16_t sw, sh;
       for (uint8_t i = 0; i < 4; i++) {
         sprintf(seg, "%u", octets[i]);
-        display.getTextBounds(seg, 0, 0, &sx1, &sy1, &sw, &sh);
+        MENU_GFX.getTextBounds(seg, 0, 0, &sx1, &sy1, &sw, &sh);
         if (i == active_idx) {
           // Same box geometry as draw_menu_text_edit_disp()'s wheel
           // candidate - Tamsyn6x12 glyphs span roughly baseline-9 to
           // baseline+4, a taller box than Org_01 would need.
-          display.fillRect(x - 1, 21, sw + 2, 18, SSD1306_WHITE);
-          display.setTextColor(SSD1306_BLACK);
+          MENU_GFX.fillRect(x - 1, 21, sw + 2, 18, SSD1306_WHITE);
+          MENU_GFX.setTextColor(SSD1306_BLACK);
         } else {
-          display.setTextColor(SSD1306_WHITE);
+          MENU_GFX.setTextColor(SSD1306_WHITE);
         }
-        display.setCursor(x, y);
-        display.print(seg);
+        MENU_GFX.setCursor(x, y);
+        MENU_GFX.print(seg);
         x += sw;
-        display.setTextColor(SSD1306_WHITE);
+        MENU_GFX.setTextColor(SSD1306_WHITE);
         if (i < 3) {
-          display.setCursor(x, y);
-          display.print(".");
+          MENU_GFX.setCursor(x, y);
+          MENU_GFX.print(".");
           int16_t dx1, dy1; uint16_t dw, dh;
-          display.getTextBounds(".", 0, 0, &dx1, &dy1, &dw, &dh);
+          MENU_GFX.getTextBounds(".", 0, 0, &dx1, &dy1, &dw, &dh);
           x += dw;
         }
       }
 
-      display.setFont(SMALL_FONT);
-      display.setTextSize(1);
-      display.setTextColor(SSD1306_WHITE);
-      display.drawFastHLine(4, 50, 120, SSD1306_WHITE);
-      display.setCursor(6, 59);
+      MENU_GFX.setFont(SMALL_FONT);
+      MENU_GFX.setTextSize(1);
+      MENU_GFX.setTextColor(SSD1306_WHITE);
+      MENU_GFX.drawFastHLine(4, 50, 120, SSD1306_WHITE);
+      MENU_GFX.setCursor(6, 59);
       #if HAS_ENCODER == true
-        if (encoder_enabled) display.print("turn:adjust press:ok");
-        else                 display.print("tap:adjust hold:ok");
+        if (encoder_enabled) MENU_GFX.print("turn:adjust press:ok");
+        else                 MENU_GFX.print("tap:adjust hold:ok");
       #else
-        display.print("tap:adjust hold:ok");
+        MENU_GFX.print("tap:adjust hold:ok");
       #endif
     }
   #endif
@@ -2103,20 +2296,20 @@
     // for two rows in the same vertical space that screen uses for one,
     // and digits/separators here have no descenders to leave room for.
     void draw_menu_datetime_edit_disp(uint8_t active_idx) {
-      display.setFont(SMALL_FONT);
-      display.setTextSize(1);
-      display.setTextColor(SSD1306_WHITE);
-      display.setCursor(6, 9);
+      MENU_GFX.setFont(SMALL_FONT);
+      MENU_GFX.setTextSize(1);
+      MENU_GFX.setTextColor(SSD1306_WHITE);
+      MENU_GFX.setCursor(6, 9);
       // "UTC" suffix - the RTC list's own Time/Date rows show local
       // (Timezone-shifted) time, but this editor always reads/writes the
       // RTC in UTC, same as CMD_TIME/rtc_sync_ntp() - worth being explicit
       // about here since it'd otherwise be the one screen on this page
       // that doesn't match what's shown everywhere else.
-      display.print("SET TIME/DATE UTC");
-      display.drawFastHLine(4, 15, 120, SSD1306_WHITE);
+      MENU_GFX.print("SET TIME/DATE UTC");
+      MENU_GFX.drawFastHLine(4, 15, 120, SSD1306_WHITE);
 
-      display.setFont(TEXT_ENTRY_FONT);
-      display.setTextSize(1);
+      MENU_GFX.setFont(TEXT_ENTRY_FONT);
+      MENU_GFX.setTextSize(1);
 
       char segs[6][5];
       sprintf(segs[0], "%04d", (int)staged_rtc_year);
@@ -2136,43 +2329,43 @@
         uint16_t total_w = 0;
         int16_t bx1, by1; uint16_t bw, bh;
         for (uint8_t i = first; i < first + 3; i++) {
-          display.getTextBounds(segs[i], 0, 0, &bx1, &by1, &bw, &bh);
+          MENU_GFX.getTextBounds(segs[i], 0, 0, &bx1, &by1, &bw, &bh);
           total_w += bw;
-          if (seps[i][0]) { display.getTextBounds(seps[i], 0, 0, &bx1, &by1, &bw, &bh); total_w += bw; }
+          if (seps[i][0]) { MENU_GFX.getTextBounds(seps[i], 0, 0, &bx1, &by1, &bw, &bh); total_w += bw; }
         }
 
         uint16_t x = 64 - total_w / 2;
         for (uint8_t i = first; i < first + 3; i++) {
-          display.getTextBounds(segs[i], 0, 0, &bx1, &by1, &bw, &bh);
+          MENU_GFX.getTextBounds(segs[i], 0, 0, &bx1, &by1, &bw, &bh);
           if (i == active_idx) {
-            display.fillRect(x - 1, y - 9, bw + 2, 12, SSD1306_WHITE);
-            display.setTextColor(SSD1306_BLACK);
+            MENU_GFX.fillRect(x - 1, y - 9, bw + 2, 12, SSD1306_WHITE);
+            MENU_GFX.setTextColor(SSD1306_BLACK);
           } else {
-            display.setTextColor(SSD1306_WHITE);
+            MENU_GFX.setTextColor(SSD1306_WHITE);
           }
-          display.setCursor(x, y);
-          display.print(segs[i]);
+          MENU_GFX.setCursor(x, y);
+          MENU_GFX.print(segs[i]);
           x += bw;
-          display.setTextColor(SSD1306_WHITE);
+          MENU_GFX.setTextColor(SSD1306_WHITE);
           if (seps[i][0]) {
-            display.setCursor(x, y);
-            display.print(seps[i]);
-            display.getTextBounds(seps[i], 0, 0, &bx1, &by1, &bw, &bh);
+            MENU_GFX.setCursor(x, y);
+            MENU_GFX.print(seps[i]);
+            MENU_GFX.getTextBounds(seps[i], 0, 0, &bx1, &by1, &bw, &bh);
             x += bw;
           }
         }
       }
 
-      display.setFont(SMALL_FONT);
-      display.setTextSize(1);
-      display.setTextColor(SSD1306_WHITE);
-      display.drawFastHLine(4, 50, 120, SSD1306_WHITE);
-      display.setCursor(6, 59);
+      MENU_GFX.setFont(SMALL_FONT);
+      MENU_GFX.setTextSize(1);
+      MENU_GFX.setTextColor(SSD1306_WHITE);
+      MENU_GFX.drawFastHLine(4, 50, 120, SSD1306_WHITE);
+      MENU_GFX.setCursor(6, 59);
       #if HAS_ENCODER == true
-        if (encoder_enabled) display.print("turn:adjust press:ok");
-        else                 display.print("tap:adjust hold:ok");
+        if (encoder_enabled) MENU_GFX.print("turn:adjust press:ok");
+        else                 MENU_GFX.print("tap:adjust hold:ok");
       #else
-        display.print("tap:adjust hold:ok");
+        MENU_GFX.print("tap:adjust hold:ok");
       #endif
     }
   #endif
@@ -2183,12 +2376,12 @@
     // portion of the string plus the pending wheel selection, which is
     // always what's being actively edited (append-only, see plan notes).
     void draw_menu_text_edit_disp(const char *title, const char *text_buf, uint8_t wheel_idx) {
-      display.setFont(SMALL_FONT);
-      display.setTextSize(1);
-      display.setTextColor(SSD1306_WHITE);
-      display.setCursor(6, 9);
-      display.print(title);
-      display.drawFastHLine(4, 15, 120, SSD1306_WHITE);
+      MENU_GFX.setFont(SMALL_FONT);
+      MENU_GFX.setTextSize(1);
+      MENU_GFX.setTextColor(SSD1306_WHITE);
+      MENU_GFX.setCursor(6, 9);
+      MENU_GFX.print(title);
+      MENU_GFX.drawFastHLine(4, 15, 120, SSD1306_WHITE);
 
       char candidate[6];
       if (wheel_idx == WHEEL_DEL_IDX) sprintf(candidate, "DEL");
@@ -2198,54 +2391,65 @@
       // size (it's already a proper 9pt font, unlike Org_01 which needs
       // setTextSize(2) to be legible) - title/divider/footer stay on
       // SMALL_FONT/Org_01, same as every other menu screen.
-      display.setFont(TEXT_ENTRY_FONT);
-      display.setTextSize(1);
+      MENU_GFX.setFont(TEXT_ENTRY_FONT);
+      MENU_GFX.setTextSize(1);
 
       // FreeMono9pt7b is monospace, but the window-growing logic still
       // measures real pixel widths rather than assuming a fixed advance,
       // so it stays correct if the font is ever swapped again.
       const uint16_t max_width = 120;
       int16_t cx1, cy1; uint16_t cw, ch;
-      display.getTextBounds(candidate, 0, 0, &cx1, &cy1, &cw, &ch);
+      MENU_GFX.getTextBounds(candidate, 0, 0, &cx1, &cy1, &cw, &ch);
       uint16_t remaining_width = (max_width > cw + 3) ? (max_width - cw - 3) : 0;
 
       uint8_t text_len = strlen(text_buf);
       uint8_t prefix_len = 0;
       for (uint8_t try_len = 1; try_len <= text_len; try_len++) {
         int16_t px1, py1; uint16_t pw, ph;
-        display.getTextBounds(text_buf + (text_len - try_len), 0, 0, &px1, &py1, &pw, &ph);
+        MENU_GFX.getTextBounds(text_buf + (text_len - try_len), 0, 0, &px1, &py1, &pw, &ph);
         if (pw > remaining_width) break;
         prefix_len = try_len;
       }
       const char *prefix_start = text_buf + (text_len - prefix_len);
 
       int16_t x1, y1; uint16_t pw, ph;
-      display.getTextBounds(prefix_start, 0, 0, &x1, &y1, &pw, &ph);
+      MENU_GFX.getTextBounds(prefix_start, 0, 0, &x1, &y1, &pw, &ph);
       uint16_t cand_x = 4 + pw;
 
-      display.setTextColor(SSD1306_WHITE);
-      display.setCursor(4, 32);
-      display.print(prefix_start);
+      MENU_GFX.setTextColor(SSD1306_WHITE);
+      MENU_GFX.setCursor(4, 32);
+      MENU_GFX.print(prefix_start);
 
       // FreeMono9pt7b glyphs span roughly baseline-9 (ascenders) to
       // baseline+4 (descenders like g/p/y) at this size - a taller box
       // than Org_01 needed.
-      display.fillRect(cand_x, 21, cw + 3, 18, SSD1306_WHITE);
-      display.setTextColor(SSD1306_BLACK);
-      display.setCursor(cand_x + 1, 32);
-      display.print(candidate);
+      MENU_GFX.fillRect(cand_x, 21, cw + 3, 18, SSD1306_WHITE);
+      MENU_GFX.setTextColor(SSD1306_BLACK);
+      MENU_GFX.setCursor(cand_x + 1, 32);
+      MENU_GFX.print(candidate);
 
-      display.setFont(SMALL_FONT);
-      display.setTextSize(1);
-      display.setTextColor(SSD1306_WHITE);
-      display.drawFastHLine(4, 50, 120, SSD1306_WHITE);
-      display.setCursor(6, 59);
-      display.print("turn:char hold:save");
+      MENU_GFX.setFont(SMALL_FONT);
+      MENU_GFX.setTextSize(1);
+      MENU_GFX.setTextColor(SSD1306_WHITE);
+      MENU_GFX.drawFastHLine(4, 50, 120, SSD1306_WHITE);
+      MENU_GFX.setCursor(6, 59);
+      MENU_GFX.print("turn:char hold:save");
     }
   #endif
 
   void draw_settings_menu_disp() {
-    display.setTextWrap(false);
+    #if BOARD_MODEL == BOARD_HELTEC_T096
+      // Unlike the other boards (whose display.clearDisplay() call in
+      // update_display() wipes the whole panel buffer before getting
+      // here every cycle), nothing clears menu_canvas on its own - it's
+      // just an off-screen buffer that draw calls accumulate into.
+      // Without this, switching screens (e.g. list -> edit) or the
+      // cursor moving leaves stale pixels from the previous draw behind,
+      // since fillRect/print only ever touch the specific pixels the
+      // new content needs, never the ones it doesn't.
+      menu_canvas.fillScreen(SSD1306_BLACK);
+    #endif
+    MENU_GFX.setTextWrap(false);
 
     if (menu_state == MENU_STATE_LIST) {
       const char *labels[MENU_ITEM_COUNT];
@@ -2264,6 +2468,11 @@
       #if HAS_BUZZER == true
         labels[MENU_ITEM_SOUND] = "Sound";
         sprintf(valbufs[MENU_ITEM_SOUND], staged_sound_enabled ? "ON" : "OFF");
+      #endif
+
+      #if HAS_ESPNOW == true
+        labels[MENU_ITEM_ESPNOW] = "ESP-NOW";
+        sprintf(valbufs[MENU_ITEM_ESPNOW], staged_espnow_enabled ? "ON" : "OFF");
       #endif
 
       #if HAS_ENCODER == true
@@ -2314,6 +2523,12 @@
         else if (menu_edit_field == MENU_ITEM_SOUND) {
           title = "SOUND";
           sprintf(valbuf, staged_sound_enabled ? "ON" : "OFF");
+        }
+      #endif
+      #if HAS_ESPNOW == true
+        else if (menu_edit_field == MENU_ITEM_ESPNOW) {
+          title = "ESP-NOW";
+          sprintf(valbuf, staged_espnow_enabled ? "ON" : "OFF");
         }
       #endif
       #if HAS_ENCODER == true

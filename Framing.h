@@ -38,6 +38,8 @@
   #define CMD_PROMISC     0x0E
   #define CMD_READY       0x0F
 
+  #define CMD_SEL_INT     0x1F
+
   #define CMD_STAT_RX     0x21
   #define CMD_STAT_TX     0x22
   #define CMD_STAT_RSSI   0x23
@@ -63,12 +65,19 @@
   #define CMD_NP_INT      0x65
   #define CMD_BT_CTRL     0x46
   #define CMD_BT_UNPAIR   0x70
+  #define CMD_INTERFACES  0x71
   #define CMD_BT_PIN      0x62
   #define CMD_DIS_IA      0x69
   #define CMD_WIFI_MODE   0x6A
   #define CMD_WIFI_SSID   0x6B
   #define CMD_WIFI_PSK    0x6C
   #define CMD_WIFI_CHN    0x6E
+  // Enable/disable the ESP-NOW virtual interface (vport 1, ESPNOW.h).
+  // Payload is ESPNOW_ENABLE_BYTE/ESPNOW_DISABLE_BYTE (ROM.h), handled like
+  // CMD_SND - see espnow_conf_save() (Utilities.h). Placed here (not in the
+  // 0x80-0x8F block with the other feature toggles) since that range is
+  // fully packed already, up through CMD_ETH_DNS (0x8F) and CMD_ERROR (0x90).
+  #define CMD_ESPNOW_ENABLE 0x74
   #define CMD_WIFI_IP     0x84
   #define CMD_WIFI_NM     0x85
   #define CMD_SND         0x86
@@ -117,6 +126,18 @@
 
   #define DETECT_REQ      0x73
   #define DETECT_RESP     0x46
+
+  // Wire-protocol radio type bytes for CMD_INTERFACES, per Reticulum's
+  // RNodeMultiInterface.py KISS class - distinct from this firmware's own
+  // Modem.h driver-selection SX1262/SX1276/... macros, which use different
+  // numbering entirely.
+  #define KISS_SX127X     0x00
+  #define KISS_SX1276     0x01
+  #define KISS_SX1278     0x02
+  #define KISS_SX126X     0x10
+  #define KISS_SX1262     0x11
+  #define KISS_SX128X     0x20
+  #define KISS_SX1280     0x21
 
   #define RADIO_STATE_OFF 0x00
   #define RADIO_STATE_ON  0x01

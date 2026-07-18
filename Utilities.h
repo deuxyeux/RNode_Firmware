@@ -138,6 +138,9 @@ void drot_conf_save(uint8_t val);
   void ethspd_conf_save(uint8_t val);
   void ethaddr_conf_save(int addr_base, uint8_t *val);
 #endif
+#if HAS_ESPNOW == true
+  void espnow_conf_save(uint8_t val);
+#endif
 #if HAS_RTC == true
   void kiss_indicate_time();
   void tz_conf_save(uint8_t val);
@@ -166,6 +169,10 @@ void buzzer_encoder_click_melody();
 
 #if HAS_WIFI == true
   #include "Remote.h"
+#endif
+
+#if HAS_ESPNOW == true
+  #include "ESPNOW.h"
 #endif
 
 #if HAS_ETHERNET == true
@@ -1205,7 +1212,24 @@ void kiss_indicate_error(uint8_t error_code) {
 	serial_write(FEND);
 }
 
+#if HAS_ESPNOW == true
+// Bracket for the RNode Multi-Interface protocol: the host's notion of
+// which vport an incoming frame belongs to is driven entirely by the last
+// CMD_SEL_INT byte it received from the device, so this must be emitted
+// immediately before every radio-specific frame this device sends, for
+// both vports.
+void kiss_select_interface(uint8_t vport) {
+	serial_write(FEND);
+	serial_write(CMD_SEL_INT);
+	serial_write(vport);
+	serial_write(FEND);
+}
+#endif
+
 void kiss_indicate_radiostate() {
+	#if HAS_ESPNOW == true
+	  kiss_select_interface(0);
+	#endif
 	serial_write(FEND);
 	serial_write(CMD_RADIO_STATE);
 	serial_write(radio_online);
@@ -1213,6 +1237,9 @@ void kiss_indicate_radiostate() {
 }
 
 void kiss_indicate_stat_rx() {
+	#if HAS_ESPNOW == true
+	  kiss_select_interface(0);
+	#endif
 	serial_write(FEND);
 	serial_write(CMD_STAT_RX);
 	escaped_serial_write(stat_rx>>24);
@@ -1223,6 +1250,9 @@ void kiss_indicate_stat_rx() {
 }
 
 void kiss_indicate_stat_tx() {
+	#if HAS_ESPNOW == true
+	  kiss_select_interface(0);
+	#endif
 	serial_write(FEND);
 	serial_write(CMD_STAT_TX);
 	escaped_serial_write(stat_tx>>24);
@@ -1234,6 +1264,9 @@ void kiss_indicate_stat_tx() {
 
 void kiss_indicate_stat_rssi() {
   uint8_t packet_rssi_val = (uint8_t)(last_rssi+rssi_offset);
+	#if HAS_ESPNOW == true
+	  kiss_select_interface(0);
+	#endif
 	serial_write(FEND);
 	serial_write(CMD_STAT_RSSI);
 	escaped_serial_write(packet_rssi_val);
@@ -1241,6 +1274,9 @@ void kiss_indicate_stat_rssi() {
 }
 
 void kiss_indicate_stat_snr() {
+	#if HAS_ESPNOW == true
+	  kiss_select_interface(0);
+	#endif
 	serial_write(FEND);
 	serial_write(CMD_STAT_SNR);
 	escaped_serial_write(last_snr_raw);
@@ -1248,6 +1284,9 @@ void kiss_indicate_stat_snr() {
 }
 
 void kiss_indicate_radio_lock() {
+	#if HAS_ESPNOW == true
+	  kiss_select_interface(0);
+	#endif
 	serial_write(FEND);
 	serial_write(CMD_RADIO_LOCK);
 	serial_write(radio_locked);
@@ -1255,6 +1294,9 @@ void kiss_indicate_radio_lock() {
 }
 
 void kiss_indicate_spreadingfactor() {
+	#if HAS_ESPNOW == true
+	  kiss_select_interface(0);
+	#endif
 	serial_write(FEND);
 	serial_write(CMD_SF);
 	serial_write((uint8_t)lora_sf);
@@ -1262,6 +1304,9 @@ void kiss_indicate_spreadingfactor() {
 }
 
 void kiss_indicate_codingrate() {
+	#if HAS_ESPNOW == true
+	  kiss_select_interface(0);
+	#endif
 	serial_write(FEND);
 	serial_write(CMD_CR);
 	serial_write((uint8_t)lora_cr);
@@ -1276,6 +1321,9 @@ void kiss_indicate_implicit_length() {
 }
 
 void kiss_indicate_txpower() {
+	#if HAS_ESPNOW == true
+	  kiss_select_interface(0);
+	#endif
 	serial_write(FEND);
 	serial_write(CMD_TXPOWER);
 	serial_write((uint8_t)lora_txp);
@@ -1292,6 +1340,9 @@ void kiss_indicate_vsense_div() {
 #endif
 
 void kiss_indicate_bandwidth() {
+	#if HAS_ESPNOW == true
+	  kiss_select_interface(0);
+	#endif
 	serial_write(FEND);
 	serial_write(CMD_BANDWIDTH);
 	escaped_serial_write(lora_bw>>24);
@@ -1302,6 +1353,9 @@ void kiss_indicate_bandwidth() {
 }
 
 void kiss_indicate_frequency() {
+	#if HAS_ESPNOW == true
+	  kiss_select_interface(0);
+	#endif
 	serial_write(FEND);
 	serial_write(CMD_FREQUENCY);
 	escaped_serial_write(lora_freq>>24);
@@ -1347,6 +1401,9 @@ void kiss_indicate_ntp_sync(uint8_t status) {
 
 void kiss_indicate_st_alock() {
 	uint16_t at = (uint16_t)(st_airtime_limit*100*100);
+	#if HAS_ESPNOW == true
+	  kiss_select_interface(0);
+	#endif
 	serial_write(FEND);
 	serial_write(CMD_ST_ALOCK);
 	escaped_serial_write(at>>8);
@@ -1356,6 +1413,9 @@ void kiss_indicate_st_alock() {
 
 void kiss_indicate_lt_alock() {
 	uint16_t at = (uint16_t)(lt_airtime_limit*100*100);
+	#if HAS_ESPNOW == true
+	  kiss_select_interface(0);
+	#endif
 	serial_write(FEND);
 	serial_write(CMD_LT_ALOCK);
 	escaped_serial_write(at>>8);
@@ -1555,7 +1615,7 @@ void kiss_indicate_disp() {
 		// distinguishable by length alone (the disp_area/stat_area split's
 		// default geometry and a raw DISP_W x DISP_H buffer both happen to
 		// total the same byte count on boards that have a Settings menu).
-		#if HAS_MENU == true
+		#if HAS_MENU == true && BOARD_MODEL != BOARD_HELTEC_T096
 			// The menu draws straight to display's own buffer instead of
 			// disp_area/stat_area (which it never touches), so reading those
 			// while the menu is open would return stale main-screen content
@@ -1567,6 +1627,11 @@ void kiss_indicate_disp() {
 			size_t fb_len = ((DISP_W+7)/8)*DISP_H;
 			for (size_t i = 0; i < fb_len; i++) { escaped_serial_write(fb[i]); }
 		#else
+			// T096's ST7735 has no framebuffer of its own to point at (see
+			// the branch above) and its menu renders into a separate canvas
+			// (menu_canvas, Menu.h/Display.h) rather than disp_area/stat_area
+			// - this channel just doesn't reflect the menu's content on this
+			// board, only whatever the normal operational screen last drew.
 			escaped_serial_write(0x00);
 			uint8_t *da = disp_area.getBuffer();
 			uint8_t *sa = stat_area.getBuffer();
@@ -2309,6 +2374,28 @@ void gpio_conf_save(uint8_t addr, uint8_t val) {
     uint8_t stored = eeprom_read(eeprom_addr(addr));
   #endif
 	eeprom_update(eeprom_addr(addr), val);
+  #if !HAS_EEPROM && MCU_VARIANT == MCU_NRF52
+    eeprom_flush();
+  #endif
+	if (stored != val) { hard_reset(); }
+}
+#endif
+
+#if HAS_ESPNOW == true
+// Persists whether the ESP-NOW virtual interface (vport 1, ESPNOW.h) is
+// allowed to run (ADDR_CONF_ESPNOW, ROM.h). Only takes effect at boot -
+// espnow_init() (ESPNOW.h) has no double-init guard or teardown/deinit
+// counterpart, since it was never designed to run more than once per boot -
+// so, like gpio_conf_save()/ethspd_conf_save(), this reboots immediately
+// when the value actually changed rather than trying to start/stop ESP-NOW
+// live.
+void espnow_conf_save(uint8_t val) {
+  #if HAS_EEPROM
+    uint8_t stored = EEPROM.read(eeprom_addr(ADDR_CONF_ESPNOW));
+  #elif MCU_VARIANT == MCU_NRF52
+    uint8_t stored = eeprom_read(eeprom_addr(ADDR_CONF_ESPNOW));
+  #endif
+	eeprom_update(eeprom_addr(ADDR_CONF_ESPNOW), val);
   #if !HAS_EEPROM && MCU_VARIANT == MCU_NRF52
     eeprom_flush();
   #endif

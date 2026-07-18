@@ -173,6 +173,7 @@
   #define HAS_BLUETOOTH false
   #define HAS_BLE false
   #define HAS_WIFI false
+  #define HAS_ESPNOW false
   #define HAS_ETHERNET false
   #define HAS_TCXO false
   #define HAS_PMU false
@@ -273,6 +274,7 @@
       #define HAS_BLUETOOTH false
       #define HAS_BLE true
       #define HAS_WIFI true
+      #define HAS_ESPNOW true
       #define HAS_ETHERNET true
       #define HAS_CONSOLE true
       #define HAS_EEPROM true
@@ -341,6 +343,7 @@
       #define HAS_BLUETOOTH false
       #define HAS_BLE true
       #define HAS_WIFI true
+      #define HAS_ESPNOW true
       #define HAS_CONSOLE true
       #define HAS_EEPROM true
       #define HAS_BUSY true
@@ -397,6 +400,12 @@
       // package/oscillator, so no driver changes are needed. display_init()
       // brings the bus up before rtc_init() runs, same as MeshPoE-S3 above.
       #define HAS_RTC true
+
+      // Free debug UART - same reasoning as BOARD_MESHPOE_S3 above: this
+      // board also builds with CDCOnBoot=cdc (native USB CDC for the KISS
+      // Serial link), and none of this board's pins above claim GPIO43/44,
+      // so Serial0 (UART0) is a free debug channel here too.
+      #define HAS_DEBUG_UART true
 
     #elif BOARD_MODEL == BOARD_MESHADVENTURER
       #define HAS_DISPLAY true
@@ -1261,6 +1270,16 @@
       #define HAS_BUSY true
       #define HAS_INPUT true
       #define HAS_SLEEP true
+
+      // RNode Settings menu (Menu.h), button-only navigation (tap = next,
+      // double-tap = back, hold = select/open - see menu_button_press()).
+      // No encoder on this board, same pattern as BOARD_MESHPOE_S3. The
+      // panel is a 160x80/80x160 color ST7735 TFT rather than a 128x64
+      // SSD1306 OLED, so the menu renders into its own off-screen canvas
+      // (Display.h, BOARD_HELTEC_T096-only block) instead of drawing
+      // straight to the unbuffered display - see MENU_GFX in Menu.h.
+      #define HAS_MENU true
+
       #define DIO2_AS_RF_SWITCH true
       #define CONFIG_UART_BUFFER_SIZE 6144
       #define CONFIG_QUEUE_SIZE 6144

@@ -61,6 +61,17 @@
 	// physical encoder.
 	#define SETTINGS_MENU_TIMEOUT 127
 
+	// How much longer, past the moment a hold first crosses into the
+	// Sleep tier, the main button's hold still actually triggers sleep on
+	// release (button_event(), RNode_Firmware.ino) - and how long the
+	// on-screen "SLEEP" hold-feedback box (button_hold_tier(), Menu.h)
+	// stays up before disappearing again. Holding well past this window
+	// and then releasing intentionally does nothing - lets the user back
+	// out of an accidental long hold by just continuing to hold, watching
+	// for the box to disappear, rather than having to time a precise
+	// release.
+	#define SLEEP_HOLD_CANCEL_MS 2000
+
 	// Forced link speed/duplex for the W5500 (MeshPoE-S3 only, HAS_ETHERNET -
 	// see Ethernet.h). AUTO leaves autonegotiation on (the esp32 core's
 	// default) - the others force a specific combo via
@@ -102,6 +113,13 @@
 	#define CMD_L      64
 
     bool mw_radio_online = false;
+
+    // Whether the ESP-NOW virtual interface (vport 1, ESPNOW.h) is allowed
+    // to run at all. Defaults to on for any board that ships the hardware
+    // capability (HAS_ESPNOW, Boards.h) - matching the previously
+    // unconditional behavior - until explicitly turned off via the RNode
+    // Settings menu or CMD_ESPNOW_ENABLE (espnow_conf_save(), Utilities.h).
+    bool espnow_enabled = HAS_ESPNOW;
 
 	#define eeprom_addr(a) (a+EEPROM_OFFSET)
 	#define config_addr(a) (a+CONFIG_OFFSET)

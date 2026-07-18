@@ -150,6 +150,39 @@ void wifi_remote_init() {
   wifi_init_ran = true;
 }
 
+#if HAS_ESPNOW == true
+// Lighter STA reconnect retry, used by wifi_update_status()'s retry path
+// below in place of the full wifi_remote_init(). wifi_remote_init()/
+// wifi_remote_stop() both do WiFi.mode(WIFI_MODE_NULL) as part of their
+// teardown, which fully deinitializes the shared esp_wifi driver state
+// ESP-NOW rides on top of - deregistering its peer/callbacks along with it.
+// Since espnow_init() (ESPNOW.h) only ever runs once, at boot, ESP-NOW
+// never recovers after that: confirmed on hardware, this reproduced every
+// WR_RECONNECT_INTERVAL_MS (10s) that STA couldn't connect, silently
+// breaking ESP-NOW for the rest of the session. A plain WiFi.begin() retry
+// accomplishes the same reconnect attempt without ever calling
+// WiFi.mode(), so ESP-NOW's driver state (and its broadcast peer) survives.
+//
+// Residual limitation this doesn't solve: AP mode already shares wr_channel
+// with ESP-NOW by construction, so it's unaffected by any of this. STA
+// mode here joins an *external* AP whose channel isn't under our control -
+// if that AP's channel differs from wr_channel, ESP-NOW's broadcast peer
+// (locked to wr_channel at espnow_init() time) will silently stop reaching
+// other ESP-NOW nodes fixed on that channel, even once this fix lands and
+// nothing crashes. Fully tracking that would mean re-registering the
+// ESP-NOW peer on every WiFi.channel() change - real additional scope, and
+// not needed to fix the actual reported bug (the crash/deregistration
+// above), so left undone here.
+void wifi_remote_reconnect() {
+  if (wr_ssid[0] != 0x00) {
+    if (wr_psk[0] != 0x00) { WiFi.begin(wr_ssid, wr_psk); }
+    else                   { WiFi.begin(wr_ssid); }
+  }
+  wr_wifi_status = WiFi.status();
+  wr_last_connect_try = millis();
+}
+#endif
+
 void wifi_remote_close_all() {
   // wifi_dbg("Close all"); // TODO: Remove debug
   if (connection) { connection.stop(); }
@@ -210,7 +243,13 @@ void wifi_update_status() {
   if (wr_wifi_status == WL_CONNECTED) { wr_device_ip = WiFi.localIP(); }
   if (wifi_mode == WR_WIFI_AP && wifi_initialized) { wr_device_ip = WiFi.softAPIP(); wr_wifi_status = WL_CONNECTED; }
   if (wifi_init_ran && wifi_mode == WR_WIFI_STA && wr_wifi_status != WL_CONNECTED) {
-    if (millis()-wr_last_connect_try >= WR_RECONNECT_INTERVAL_MS) { wifi_remote_init(); }
+    if (millis()-wr_last_connect_try >= WR_RECONNECT_INTERVAL_MS) {
+      #if HAS_ESPNOW == true
+        wifi_remote_reconnect();
+      #else
+        wifi_remote_init();
+      #endif
+    }
   }
 }
 

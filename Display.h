@@ -864,10 +864,50 @@ void fillRect(int16_t x, int16_t y, int16_t width, int16_t height, uint16_t colo
       colour_mark_dirty(p_as_x+sx, p_as_y+sy, w, h);
     }
   }
+
+  // Settings menu (Menu.h) renders into this off-screen canvas, at the
+  // panel's full landscape size (matches the operational screen's own
+  // orientation - the menu never rotates the panel, see the menu-open/
+  // close handling in update_display() below), rather than drawing raw
+  // primitives straight to the unbuffered ST7735 - see MENU_GFX in
+  // Menu.h. Composited through the same drawBitmap() pipeline as
+  // stat_area/disp_area above, pushed as two 80-wide column halves (see
+  // push_menu_canvas()) since drawBitmap()'s region cache and shared
+  // pushbuf are both sized for bitmaps <=80px wide.
+  #define MENU_CANVAS_W 160
+  #define MENU_CANVAS_H 80
+  GFXcanvas1 menu_canvas(MENU_CANVAS_W, MENU_CANVAS_H);
+  // Last-pushed copy of menu_canvas's buffer. At 160x80 the canvas is
+  // bigger than REGION_CACHE_BYTES (and wider than the cache's 80px
+  // cutoff) so drawBitmap()'s own cache never dedupes it - without this
+  // shadow, an unchanged menu screen (the common case between button
+  // presses) would re-push the full frame on every update_display()
+  // cycle (~7fps) for as long as the menu sits open.
+  uint8_t menu_canvas_shadow[((MENU_CANVAS_W+7)/8) * MENU_CANVAS_H];
+  bool menu_canvas_shadow_valid = false;
+
+  // Set around menu_canvas/menu_popup_canvas pushes so the colourizer in
+  // drawBitmap can tell menu content apart from a disp_area push - both
+  // land on overlapping panel coordinates (the menu occupies the same
+  // full-screen footprint the operational screen does), but menu content
+  // must never pick up disp_area's banner tint (see drawBitmap's
+  // colourizer) the way real disp_area pixels legitimately do.
+  bool push_is_menu = false;
+
+  // Small popup box canvas for draw_menu_status_rect()/
+  // draw_button_hold_overlay(), kept within drawBitmap()'s
+  // bitmapWidth<=80 cache cutoff so it's deduped on its own, no separate
+  // shadow buffer needed. Landscape (menu-closed) geometry only - the
+  // menu-open status popup (Sync NTP/Clear Static) needs HAS_WIFI/
+  // HAS_ETHERNET, which this board doesn't have, so it's unreachable
+  // today.
+  #define MENU_POPUP_CANVAS_W 80
+  #define MENU_POPUP_CANVAS_H 16
+  GFXcanvas1 menu_popup_canvas(MENU_POPUP_CANVAS_W, MENU_POPUP_CANVAS_H);
 #endif
 
 // Draws a bitmap to the display and auto scales it based on the boards configured DISPLAY_SCALE
-void drawBitmap(int16_t startX, int16_t startY, const uint8_t* bitmap, int16_t bitmapWidth, int16_t bitmapHeight, uint16_t foregroundColour, uint16_t backgroundColour) {
+void drawBitmap(int16_t startX, int16_t startY, const uint8_t* bitmap, int16_t bitmapWidth, int16_t bitmapHeight, uint16_t foregroundColour, uint16_t backgroundColour, int16_t srcRowBytes = 0) {
   #if BOARD_MODEL == BOARD_HELTEC_T096
     {
       // The whole changed rect is assembled here and sent as a single DMA
@@ -876,8 +916,18 @@ void drawBitmap(int16_t startX, int16_t startY, const uint8_t* bitmap, int16_t b
       // panel visibly dips in brightness for the duration of a burst.
       static uint16_t pushbuf[STAT_AREA_W*STAT_AREA_H];
       int16_t byteWidth = (bitmapWidth + 7) / 8;
+      // srcRowBytes lets a caller push a narrower slice out of a wider
+      // source buffer (e.g. one 80px-wide column out of menu_canvas's
+      // 160px-wide row) without a real copy - only menu_canvas's push
+      // uses this (see push_menu_canvas()). Every other call site omits
+      // it, so rowStride == byteWidth and this is a no-op there.
+      int16_t rowStride = (srcRowBytes > 0) ? srcRowBytes : byteWidth;
       int32_t bitmapBytes = (int32_t)byteWidth * bitmapHeight;
-      bool cacheable = bitmapBytes <= REGION_CACHE_BYTES && bitmapWidth <= 80;
+      // A non-default stride means the source isn't tightly packed, so
+      // the region cache's flat memcpy (which assumes byteWidth-spaced
+      // rows) can't snapshot it correctly - always do a full, uncached
+      // push in that case rather than teach the cache about stride too.
+      bool cacheable = srcRowBytes == 0 && bitmapBytes <= REGION_CACHE_BYTES && bitmapWidth <= 80;
 
       RegionCache *reg = NULL;
       if (cacheable) {
@@ -912,7 +962,7 @@ void drawBitmap(int16_t startX, int16_t startY, const uint8_t* bitmap, int16_t b
         minX = bitmapWidth; minY = bitmapHeight; maxX = -1; maxY = -1;
         for (int16_t row = 0; row < bitmapHeight; row++) {
           for (int16_t bc = 0; bc < byteWidth; bc++) {
-            int32_t idx = (int32_t)row * byteWidth + bc;
+            int32_t idx = (int32_t)row * rowStride + bc;
             if (bitmap[idx] != reg->back[idx]) {
               uint8_t diff = bitmap[idx] ^ reg->back[idx];
               if (row < minY) minY = row;
@@ -984,16 +1034,21 @@ void drawBitmap(int16_t startX, int16_t startY, const uint8_t* bitmap, int16_t b
                   if      (wf_m == WF_M_RX_PKT) { fg = COLOR_LAMP_RX; }
                   else if (wf_m == WF_M_TX)     { fg = COLOR_LAMP_TX; }
                 }
-              } else if (disp_banner_fg != 0) {
-                // status banner fill (checks passed / hw ok / fw corrupt)
+              } else if (!push_is_menu && disp_banner_fg != 0) {
+                // status banner fill (checks passed / hw ok / fw corrupt).
+                // push_is_menu excludes this - the menu occupies the same
+                // panel footprint disp_area does, but menu content is
+                // never banner-tinted.
                 int16_t bx = (startX+col) - p_ad_x;
                 int16_t by = (startY+row) - p_ad_y;
                 if (bx >= 0 && bx < DISP_AREA_W && by >= 37 && by <= 63) { fg = disp_banner_fg; }
               }
             }
           #endif
-          // stored big-endian, ready for the panel
-          uint16_t pxc = (bitmap[row * byteWidth + col / 8] & (0x80 >> (col % 8))) ? fg : backgroundColour;
+          // stored big-endian, ready for the panel. rowStride (not
+          // byteWidth) here since this is the one path that also runs
+          // for a strided source - see rowStride's own comment.
+          uint16_t pxc = (bitmap[row * rowStride + col / 8] & (0x80 >> (col % 8))) ? fg : backgroundColour;
           pushbuf[pb++] = __builtin_bswap16(pxc);
         }
       }
@@ -1026,6 +1081,61 @@ void drawBitmap(int16_t startX, int16_t startY, const uint8_t* bitmap, int16_t b
     }
   #endif
 }
+
+#if BOARD_MODEL == BOARD_HELTEC_T096
+// Pushes menu_canvas (landscape, 160x80) to the panel as two 80-wide
+// column halves (left 0-79, right 80-159) rather than one 160-wide
+// push - drawBitmap()'s shared pushbuf and region cache are both sized/
+// capped for <=80px-wide bitmaps, and splitting this way avoids growing
+// that shared buffer. Each half is a genuine 80px-wide slice taken
+// straight out of the wider 160px-wide canvas via drawBitmap()'s
+// srcRowBytes param (the canvas's own row stride, 20 bytes) rather than
+// a real copy. Skips the push entirely when the canvas content hasn't
+// changed since the last call - see menu_canvas_shadow's own comment
+// for why that's required, not just an optimization.
+void push_menu_canvas() {
+  uint8_t *buf = menu_canvas.getBuffer();
+  size_t buf_bytes = ((MENU_CANVAS_W+7)/8) * MENU_CANVAS_H;
+  if (menu_canvas_shadow_valid && memcmp(buf, menu_canvas_shadow, buf_bytes) == 0) {
+    return;
+  }
+  memcpy(menu_canvas_shadow, buf, buf_bytes);
+  menu_canvas_shadow_valid = true;
+
+  int16_t canvas_row_bytes = (MENU_CANVAS_W+7)/8; // 20 - the real row stride
+  push_is_menu = true;
+  drawBitmap(0,  0, buf,     80, MENU_CANVAS_H, SSD1306_WHITE, SSD1306_BLACK, canvas_row_bytes);
+  drawBitmap(80, 0, buf + 10, 80, MENU_CANVAS_H, SSD1306_WHITE, SSD1306_BLACK, canvas_row_bytes);
+  push_is_menu = false;
+}
+
+// Forces the next push_menu_canvas() call to push unconditionally -
+// needed once per menu-open/menu-close transition, since content drawn
+// before the transition may look byte-identical to content drawn after
+// it despite the panel itself having changed underneath (e.g. the
+// operational screen having been redrawn while the menu was open).
+void invalidate_menu_canvas_shadow() {
+  menu_canvas_shadow_valid = false;
+}
+
+// Pushes menu_popup_canvas at the given on-panel offset. Narrow enough
+// (width <= 80) to stay within drawBitmap()'s own region-cache cutoff,
+// so unchanged content is already deduped there - no separate shadow
+// buffer needed here, unlike push_menu_canvas() above.
+void push_menu_popup_canvas(int16_t panel_x, int16_t panel_y, int16_t w, int16_t h) {
+  push_is_menu = true;
+  // w (the box's actual, text-fitted width) is usually narrower than
+  // the canvas's own declared width (MENU_POPUP_CANVAS_W, 80) - the
+  // canvas's real row stride stays fixed at that full width regardless,
+  // so it has to be passed explicitly here too (same reason
+  // push_menu_canvas() needs it) or drawBitmap() reads each row at the
+  // wrong offset, since it would otherwise derive a stride from w
+  // instead of the buffer's actual layout.
+  int16_t canvas_row_bytes = (MENU_POPUP_CANVAS_W+7)/8;
+  drawBitmap(panel_x, panel_y, menu_popup_canvas.getBuffer(), w, h, SSD1306_WHITE, SSD1306_BLACK, canvas_row_bytes);
+  push_is_menu = false;
+}
+#endif
 
 extern uint8_t wifi_mode;
 extern bool wifi_is_connected();
@@ -1106,6 +1216,56 @@ void draw_mw_icon(int px, int py) {
     stat_area.drawBitmap(px, py, bm_rf+2*32, 16, 16, SSD1306_WHITE, SSD1306_BLACK);
   }
 }
+
+#if HAS_ESPNOW == true
+// espnow_ui_active()/espnow_display_rx/espnow_display_tx (ESPNOW.h) aren't
+// declared yet at this point - Display.h is #include'd (Utilities.h) before
+// ESPNOW.h - same reasoning as the wifi_mode/eth_link_up externs above.
+// Needed regardless of HAS_ETHERNET (draw_waterfall() below uses these on
+// every HAS_ESPNOW board, including MeshPoE-S3) - only draw_espnow_icon()
+// itself is Ethernet-slot-conditional.
+extern bool espnow_ui_active();
+extern bool espnow_display_rx;
+extern bool espnow_display_tx;
+#define ESPNOW_UI_ACTIVE() espnow_ui_active()
+#else
+// Boards without ESP-NOW at all (e.g. Heltec T096) never compile the extern
+// above, so waterfall/LED call sites that OR against it need a stand-in
+// that's always false rather than #if-ing out the whole condition twice.
+#define ESPNOW_UI_ACTIVE() false
+#endif
+
+#if HAS_ESPNOW == true && HAS_ETHERNET == false
+// Replaces draw_mw_icon()'s call site (this box position) on boards that
+// have ESP-NOW but no wired Ethernet - mw_radio_online is declared but
+// never actually set anywhere in the codebase, so that icon always
+// rendered its permanently-off frame. Boards with HAS_ETHERNET keep using
+// draw_eth_icon() in this same slot instead (untouched by this).
+void draw_espnow_icon(int px, int py) {
+  bool active = espnow_ui_active();
+  // The box interior is actually 17px tall border-to-border (bm_frame's
+  // top/bottom border lines sit one row further apart than the 16px icon
+  // grid - see draw_eth_icon() above), so a 16px-tall fill leaves the
+  // bottom interior row showing through as an unfilled dark line.
+  stat_area.fillRect(px, py, 16, 17, active ? SSD1306_WHITE : SSD1306_BLACK);
+  stat_area.setFont(&Picopixel);
+  stat_area.setTextSize(1);
+  stat_area.setTextWrap(false);
+  stat_area.setTextColor(active ? SSD1306_BLACK : SSD1306_WHITE);
+
+  const char *top_buf = "ESP";
+  int16_t tx1, ty1; uint16_t tw, th;
+  stat_area.getTextBounds(top_buf, 0, 0, &tx1, &ty1, &tw, &th);
+  stat_area.setCursor(px + (16 - (int16_t)tw) / 2, py + 7);
+  stat_area.print(top_buf);
+
+  const char *bot_buf = "NOW";
+  int16_t bx1, by1; uint16_t bw, bh;
+  stat_area.getTextBounds(bot_buf, 0, 0, &bx1, &by1, &bw, &bh);
+  stat_area.setCursor(px + (16 - (int16_t)bw) / 2, py + 14);
+  stat_area.print(bot_buf);
+}
+#endif
 
 #if HAS_ETHERNET
 void draw_eth_icon(int px, int py) {
@@ -1315,23 +1475,58 @@ void draw_signal_bars(int px, int py) {
 }
 
 void draw_waterfall(int px, int py) {
-  int rssi_val = current_rssi;
-  if (rssi_val < WF_RSSI_MIN) rssi_val = WF_RSSI_MIN;
-  if (rssi_val > WF_RSSI_MAX) rssi_val = WF_RSSI_MAX;
-  int rssi_normalised = ((rssi_val - WF_RSSI_MIN)*(1.0/WF_RSSI_SPAN))*WF_PIXEL_WIDTH;
-  if (display_tx) {
-    for (uint8_t i = 0; i < WF_TX_SIZE; i++) {
-      waterfall_meta[waterfall_head] = WF_M_TX;
-      waterfall[waterfall_head++] = -1;
+  bool pushed = false;
+  #if HAS_ESPNOW == true
+    // ESP-NOW has no equivalent of LoRa's continuous ambient current_rssi
+    // sampling, so rather than a per-refresh RSSI trace, push a 2-row mark
+    // per RX/TX event (espnow_display_rx/tx, ESPNOW.h) and a blank row
+    // otherwise. Only takes over the push once ESP-NOW is actually the
+    // active "radio" (espnow_ui_active(), not just enabled/ready) and LoRa
+    // isn't - both call sites already gate the call itself on
+    // (radio_online || espnow_ui_active()), so this only has to tell the
+    // two cases apart.
+    if (!radio_online && espnow_ui_active()) {
+      pushed = true;
+      if (espnow_display_tx) {
+        for (uint8_t i = 0; i < 2; i++) {
+          waterfall_meta[waterfall_head] = WF_M_TX;
+          waterfall[waterfall_head++] = -1;
+          if (waterfall_head >= WATERFALL_SIZE) waterfall_head = 0;
+        }
+        espnow_display_tx = false;
+      } else if (espnow_display_rx) {
+        for (uint8_t i = 0; i < 2; i++) {
+          waterfall_meta[waterfall_head] = WF_M_RX_PKT;
+          waterfall[waterfall_head++] = WF_PIXEL_WIDTH;
+          if (waterfall_head >= WATERFALL_SIZE) waterfall_head = 0;
+        }
+        espnow_display_rx = false;
+      } else {
+        waterfall_meta[waterfall_head] = WF_M_RX;
+        waterfall[waterfall_head++] = 0;
+        if (waterfall_head >= WATERFALL_SIZE) waterfall_head = 0;
+      }
+    }
+  #endif
+  if (!pushed) {
+    int rssi_val = current_rssi;
+    if (rssi_val < WF_RSSI_MIN) rssi_val = WF_RSSI_MIN;
+    if (rssi_val > WF_RSSI_MAX) rssi_val = WF_RSSI_MAX;
+    int rssi_normalised = ((rssi_val - WF_RSSI_MIN)*(1.0/WF_RSSI_SPAN))*WF_PIXEL_WIDTH;
+    if (display_tx) {
+      for (uint8_t i = 0; i < WF_TX_SIZE; i++) {
+        waterfall_meta[waterfall_head] = WF_M_TX;
+        waterfall[waterfall_head++] = -1;
+        if (waterfall_head >= WATERFALL_SIZE) waterfall_head = 0;
+      }
+      display_tx = false;
+    } else {
+      if      (interference_detected) { waterfall_meta[waterfall_head] = WF_M_NTFR; }
+      else if (dcd_led)               { waterfall_meta[waterfall_head] = WF_M_RX_PKT; }
+      else                            { waterfall_meta[waterfall_head] = WF_M_RX; }
+      waterfall[waterfall_head++] = rssi_normalised;
       if (waterfall_head >= WATERFALL_SIZE) waterfall_head = 0;
     }
-    display_tx = false;
-  } else {
-    if      (interference_detected) { waterfall_meta[waterfall_head] = WF_M_NTFR; }
-    else if (dcd_led)               { waterfall_meta[waterfall_head] = WF_M_RX_PKT; }
-    else                            { waterfall_meta[waterfall_head] = WF_M_RX; }
-    waterfall[waterfall_head++] = rssi_normalised;
-    if (waterfall_head >= WATERFALL_SIZE) waterfall_head = 0;
   }
 
   stat_area.fillRect(px,py,WF_PIXEL_WIDTH, WATERFALL_SIZE, SSD1306_BLACK);
@@ -1444,7 +1639,7 @@ void draw_stat_area() {
       draw_battery_voltage(20, 93);
       draw_quality_bars(44, 88);
       draw_signal_bars(60, 88);
-      if (radio_online) {
+      if (radio_online || ESPNOW_UI_ACTIVE()) {
         draw_waterfall(WF_POS_X, wf_y);
       }
     #else
@@ -1458,6 +1653,8 @@ void draw_stat_area() {
       draw_lora_icon(45, 8);
       #if BOARD_MODEL == BOARD_MESHPOE_S3
         draw_eth_icon(45, 30);
+      #elif HAS_ESPNOW == true
+        draw_espnow_icon(45, 30);
       #else
         draw_mw_icon(45, 30);
       #endif
@@ -1468,7 +1665,7 @@ void draw_stat_area() {
       #endif
       draw_quality_bars(28, 56);
       draw_signal_bars(44, 56);
-      if (radio_online) {
+      if (radio_online || ESPNOW_UI_ACTIVE()) {
         draw_waterfall(27, 4);
       }
     #endif
@@ -1796,6 +1993,45 @@ void draw_disp_area() {
           if (!display_diagnostics) {
             draw_disp_art(37, bm_online, 27);
           }
+        } else if (ESPNOW_UI_ACTIVE()) {
+          // No pre-rendered art for this state (unlike bm_online above) -
+          // a matching bitmap asset isn't practical to generate here, so
+          // this overlays live text instead, same idiom as draw_eth_icon()'s
+          // "OFF" label. Two lines rather than one "ESP-NOW ACTIVE" string:
+          // this board family's disp_area art column is only 64px wide
+          // (DISP_BM_W), too narrow for that at SMALL_FONT size 1.
+          //
+          // Deliberately no "if (!display_diagnostics)" guard here, unlike
+          // the radio_online branch above - that guard is a no-op there
+          // (the outer "if (radio_online && display_diagnostics)",
+          // Display.h:1831, already diverts to the airtime/channel-load
+          // panel and skips this whole block whenever both are true, so by
+          // the time this is reached with radio_online true,
+          // display_diagnostics is always already false). ESPNOW_UI_ACTIVE()
+          // has no such outer diversion, and display_diagnostics defaults
+          // true and is never toggled anywhere - copying that guard here
+          // silently skipped this draw every time, leaving whatever idle-
+          // carousel bitmap was last on screen frozen in place.
+          disp_area.fillRect(0, 37, disp_area.width(), 27, SSD1306_BLACK);
+          // Top/bottom 1px rule lines framing the banner as a box, since
+          // there's no bitmap border art to fall back on here (unlike
+          // bm_online above).
+          disp_area.drawFastHLine(0, 37, disp_area.width(), SSD1306_WHITE);
+          disp_area.drawFastHLine(0, 63, disp_area.width(), SSD1306_WHITE);
+          disp_area.setFont(SMALL_FONT); disp_area.setTextWrap(false);
+          disp_area.setTextColor(SSD1306_WHITE); disp_area.setTextSize(1);
+
+          const char *top_buf = "ESP-NOW";
+          int16_t tx1, ty1; uint16_t tw, th;
+          disp_area.getTextBounds(top_buf, 0, 0, &tx1, &ty1, &tw, &th);
+          disp_area.setCursor(DISP_BM_X + (DISP_BM_W - (int16_t)tw) / 2, 47);
+          disp_area.print(top_buf);
+
+          const char *bot_buf = "ACTIVE";
+          int16_t bx1, by1; uint16_t bw, bh;
+          disp_area.getTextBounds(bot_buf, 0, 0, &bx1, &by1, &bw, &bh);
+          disp_area.setCursor(DISP_BM_X + (DISP_BM_W - (int16_t)bw) / 2, 57);
+          disp_area.print(bot_buf);
         } else {
           if (disp_page == 0) {
             if (true || device_signatures_ok()) {
@@ -1985,25 +2221,65 @@ void update_display(bool blank = false) {
         #endif
 
         #if HAS_MENU == true
-          // The settings menu is always laid out for the panel's native
-          // 128x64 landscape shape, regardless of what rotation the main
-          // content is using - the panel itself doesn't physically change
-          // shape, so forcing rotation 0/2 (both landscape, GFX-wise) here
-          // just undoes whatever swap the main content's rotation setting
-          // applied. 90 and 270 are the same physical mounting 180 degrees
-          // apart, so they need opposite landscape variants (0 vs 2) to
-          // still read right-side-up - same for the 0/180 pair.
           static bool menu_was_open = false;
           bool menu_open_now = menu_is_open();
-          if (menu_open_now && !menu_was_open) {
-            display.setRotation(active_display_rotation & 0x02);
-          } else if (!menu_open_now && menu_was_open) {
-            display.setRotation(active_display_rotation);
-          }
+          #if BOARD_MODEL == BOARD_HELTEC_T096
+            // The menu always shows in landscape, regardless of the
+            // Orientation the user has picked for the main screen (the
+            // menu_canvas above is landscape-shaped, 160x80, and would
+            // never fit sensibly in portrait) - force rotation 1 (this
+            // panel's standard landscape, see display_init()) on open,
+            // and restore whatever the main screen actually uses on
+            // close.
+            if (menu_open_now && !menu_was_open) {
+              display.setRotation(1);
+            } else if (!menu_open_now && menu_was_open) {
+              display.setRotation(active_display_rotation);
+            }
+            if (menu_open_now != menu_was_open) {
+              // The menu occupies the same full-panel footprint the
+              // operational screen's disp_area/stat_area do (landscape,
+              // same as always) - cached regions there store the panel
+              // content as of their last push, but the menu just wrote
+              // over that same panel space through a different push
+              // path (push_menu_canvas(), not disp_area/stat_area's own
+              // pushes), so a stale cache entry from before this
+              // transition can wrongly compare equal to content pushed
+              // after it and get skipped - leaving real leftover pixels
+              // on screen. Force every region to repaint in full across
+              // the transition, both ways. (This also covers the rarer
+              // case of an actual rotation change, if the main screen's
+              // Orientation isn't already landscape-1 - a rotation
+              // change never retroactively repaints anything already
+              // latched into the panel's GRAM either.)
+              for (uint8_t i = 0; i < REGION_CACHE_SLOTS; i++) region_cache[i].x = -1;
+              #if USE_COLOR_DISPLAY == true
+                cdirty_count = 0;
+              #endif
+              invalidate_menu_canvas_shadow();
+            }
+          #else
+            // The settings menu is always laid out for the panel's native
+            // 128x64 landscape shape, regardless of what rotation the main
+            // content is using - the panel itself doesn't physically change
+            // shape, so forcing rotation 0/2 (both landscape, GFX-wise) here
+            // just undoes whatever swap the main content's rotation setting
+            // applied. 90 and 270 are the same physical mounting 180 degrees
+            // apart, so they need opposite landscape variants (0 vs 2) to
+            // still read right-side-up - same for the 0/180 pair.
+            if (menu_open_now && !menu_was_open) {
+              display.setRotation(active_display_rotation & 0x02);
+            } else if (!menu_open_now && menu_was_open) {
+              display.setRotation(active_display_rotation);
+            }
+          #endif
           menu_was_open = menu_open_now;
 
           if (menu_open_now) {
             draw_settings_menu_disp();
+            #if BOARD_MODEL == BOARD_HELTEC_T096
+              push_menu_canvas();
+            #endif
           } else
         #endif
         {
@@ -2037,7 +2313,17 @@ void display_unblank() {
   #if BOARD_MODEL == BOARD_HELTEC_T114
     digitalWrite(PIN_T114_TFT_BLGT, LOW);
   #elif BOARD_MODEL == BOARD_HELTEC_T096
-    analogWrite(PIN_T096_TFT_BLGT, 0);
+    // Only force the backlight to full when actually waking from a
+    // blanked/dimmed state. This is called unconditionally on every
+    // button/encoder event to keep the away-timer alive (see
+    // menu_encoder_rotate(), Menu.h, called on every menu tap) - forcing
+    // max brightness every time, rather than just on a real wake, would
+    // override whatever level the user has configured (Menu.h's
+    // Brightness field, display_intensity) back to maximum on every
+    // single menu tap.
+    if (display_blanked) {
+      analogWrite(PIN_T096_TFT_BLGT, 0);
+    }
   #endif
 }
 
