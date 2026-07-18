@@ -2027,7 +2027,14 @@ void draw_disp_area() {
           disp_area.setCursor(DISP_BM_X + (DISP_BM_W - (int16_t)tw) / 2, 47);
           disp_area.print(top_buf);
 
-          const char *bot_buf = "ACTIVE";
+          // The channel ESP-NOW is actually locked to (wr_channel, Config.h -
+          // set by espnow_init()'s esp_wifi_set_channel()/peer.channel,
+          // ESPNOW.h) is more useful here than a static "ACTIVE" label,
+          // especially given the known STA-mode channel-drift caveat
+          // (wifi_remote_reconnect(), Remote.h) - this makes the currently-
+          // locked channel visible at a glance instead of hidden state.
+          char bot_buf[11];
+          sprintf(bot_buf, "CHANNEL %u", wr_channel);
           int16_t bx1, by1; uint16_t bw, bh;
           disp_area.getTextBounds(bot_buf, 0, 0, &bx1, &by1, &bw, &bh);
           disp_area.setCursor(DISP_BM_X + (DISP_BM_W - (int16_t)bw) / 2, 57);
