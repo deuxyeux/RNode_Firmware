@@ -466,10 +466,15 @@
         const uint16_t pad_l = 3;
         const uint16_t pad_r = 3;
         uint16_t box_w = tw + pad_l + pad_r;
-        if (box_w > 120) box_w = 120;
+        // Clamp against the live panel width, not a hardcoded 128px
+        // landscape assumption - display.width()/height() already
+        // reflect the current rotation (see the T096 branch above),
+        // so this stays correct in portrait orientations too, where
+        // the panel can be much narrower than 128px.
+        if (box_w > display.width() - 8) box_w = display.width() - 8;
         const uint16_t box_h = 11;
-        uint16_t box_x = (128 - box_w) / 2;
-        const uint16_t box_y = (64 - box_h) / 2;
+        uint16_t box_x = (display.width() - box_w) / 2;
+        const uint16_t box_y = (display.height() - box_h) / 2;
 
         display.fillRect(box_x, box_y, box_w, box_h, SSD1306_BLACK);
         display.drawRect(box_x, box_y, box_w, box_h, SSD1306_WHITE);

@@ -238,6 +238,17 @@ uint8_t wifi_remote_read() {
 
 void wifi_remote_write(uint8_t byte) { if (connection) { connection.write(byte); } }
 
+// Bulk variant - callers with a whole frame ready (e.g. ESPNOW.h's
+// kiss_write_espnow_packet()) should use this instead of looping
+// wifi_remote_write() one byte at a time. WiFiClient::write(buf, size) is a
+// single TCP send() under the hood, so this avoids both the per-byte call
+// overhead and, unlike serial_write()'s byte-at-a-time path, can't stall
+// mid-frame waiting on the host to drain a one-byte-at-a-time stream.
+size_t wifi_remote_write_buf(const uint8_t *buf, size_t len) {
+  if (connection) { return connection.write(buf, len); }
+  return 0;
+}
+
 void wifi_update_status() {
   wr_wifi_status = WiFi.status();
   if (wr_wifi_status == WL_CONNECTED) { wr_device_ip = WiFi.localIP(); }

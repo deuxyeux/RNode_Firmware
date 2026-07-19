@@ -398,7 +398,7 @@ void setup() {
         // Explicit ON/OFF only ever get written as ESPNOW_ENABLE_BYTE/
         // ESPNOW_DISABLE_BYTE (see the KISS handler and espnow_conf_save())
         // - any other value (erased EEPROM reads 0xFF) means "never
-        // touched", so leave espnow_enabled at its board default (HAS_ESPNOW,
+        // touched", so leave espnow_enabled at its board default (off,
         // Config.h) instead of forcing it either way - same convention as
         // sound_enabled above.
         if (espnow_en_raw == ESPNOW_ENABLE_BYTE) espnow_enabled = true;

@@ -258,7 +258,33 @@ uint16_t espnow_tx_len = 0;
 // interface_type_to_str() only knows real LoRa radio codes - vport 1 has
 // to claim one too (matching this board's real MODEM, KISS_SX1262) since
 // there's no non-LoRa vport concept on the host.
+//
+// The whole response is withheld - not just vport 1's frame - unless
+// espnow_ready is true (esp_now_init()/esp_now_add_peer() actually
+// succeeded, not just that the config option is turned on). Without this
+// gate, the config echo functions elsewhere in this file (kiss_indicate_v1_*)
+// happily accept and echo back whatever the host sends for vport 1
+// regardless of whether ESP-NOW ever actually initialized, so a host
+// connecting to a board with ESP-NOW disabled (or that failed to init)
+// would previously see vport 1 report as successfully "configured and
+// powered up" with no real hardware behind it.
+//
+// Withholding only vport 1's frame isn't enough either: RNodeMultiInterface.py
+// builds all of a connection's subinterfaces in one pass and aborts the
+// whole pass on the first missing vport, but vport 0 (the real LoRa radio)
+// would already have been spawned and registered with Transport by the time
+// that abort happens, since it's processed first - leaving it half-up, then
+// torn down, then endlessly reconnect-looped as part of a "failed" connect
+// rather than failing cleanly once. Sending no CMD_INTERFACES frames at all
+// means self.subinterface_types stays completely empty, so the host's
+// existing vport-count check fails immediately on vport 0 - before anything
+// is spawned - with a clear "Virtual port ... does not exist on RNode"
+// error. A host that wants just the real LoRa radio when ESP-NOW isn't
+// available should use RNodeInterface (single-radio) instead of
+// RNodeMultiInterface against this board.
 void kiss_indicate_interfaces() {
+  if (!espnow_ready) return;
+
   serial_write(FEND);
   serial_write(CMD_INTERFACES);
   serial_write(0x00);
@@ -378,14 +404,26 @@ void kiss_indicate_v1_stat_snr(int snr_raw) {
 // LoRa RX path (RNode_Firmware.ino) - reusing them here would risk
 // clobbering an in-flight LoRa RX in a single-threaded loop().
 //
-// Built into a local buffer and sent with one bulk Serial.write() rather
-// than serial_write()'s usual byte-at-a-time calls. Confirmed on hardware:
+// Built into a local buffer and sent as one bulk write rather than
+// serial_write()'s usual byte-at-a-time calls. Confirmed on hardware:
 // byte-at-a-time writes over native USB CDC can each block briefly waiting
 // for the host to drain its buffer: fine on a fast host, but on a loaded
 // Raspberry Pi (rnsd+lxmd+nomadnet competing for CPU) this accumulated
 // enough delay mid-frame to blow past the host's 100ms per-frame KISS read
 // timeout ("serial read timeout in command 0" in RNodeMultiInterface.py),
 // silently discarding the whole packet.
+//
+// Which bulk-write call that is has to depend on which transport the host
+// is actually connected over. This used to unconditionally call
+// Serial.write(), which is only correct for a USB-serial-connected host -
+// on a WiFi/TCP-connected one (wifi_host_is_connected()), nothing reads
+// that USB endpoint, so its send buffer fills and writes silently start
+// failing partway through: the radio receives the packet fine (confirmed
+// by the preceding "[ESP-NOW] RX from ..." debug line), but the data never
+// reaches the host at all. Route through wifi_remote_write_buf() (Remote.h)
+// instead when the host is WiFi-connected, matching the dispatch
+// serial_write() already does elsewhere in this firmware, just with a bulk
+// call on both sides instead of a byte-at-a-time loop.
 void kiss_write_espnow_packet(uint8_t *data, size_t len) {
   kiss_select_interface(1);
 
@@ -401,7 +439,14 @@ void kiss_write_espnow_packet(uint8_t *data, size_t len) {
   }
   frame_buf[n++] = FEND;
 
-  size_t written = Serial.write(frame_buf, n);
+  size_t written;
+  #if HAS_WIFI
+    if (wifi_host_is_connected()) { written = wifi_remote_write_buf(frame_buf, n); }
+    else                          { written = Serial.write(frame_buf, n); }
+  #else
+    written = Serial.write(frame_buf, n);
+  #endif
+
   if (written != n) {
     DEBUG_LOG("[ESP-NOW] kiss_write_espnow_packet: short write, wrote %d of %d bytes\n", (int)written, (int)n);
   }
@@ -417,6 +462,19 @@ void espnow_init() {
     WiFi.mode(WIFI_STA);
     DEBUG_LOG("[ESP-NOW] init: WiFi.mode() returned\n");
   }
+
+  // Default WiFi modem-sleep cycles the radio to sleep between the AP's
+  // beacon/DTIM windows once STA associates - fine for regular AP-buffered
+  // traffic, but ESP-NOW frames from a peer aren't scheduled around that at
+  // all, so they can be missed entirely while the radio is asleep. This is
+  // Espressif's own documented guidance for ESP-NOW+STA coexistence. Applied
+  // unconditionally here (not just when STA is connected) since it needs
+  // esp_wifi_start() to have run - which WiFi.mode() above guarantees - and
+  // is a no-op on an unassociated STA (e.g. this board has no WiFi remote
+  // mode configured at all), where there's no beacon schedule to sleep
+  // against in the first place.
+  esp_err_t pserr = esp_wifi_set_ps(WIFI_PS_NONE);
+  DEBUG_LOG("[ESP-NOW] init: esp_wifi_set_ps(WIFI_PS_NONE) returned %d\n", pserr);
 
   if (WiFi.status() != WL_CONNECTED) {
     DEBUG_LOG("[ESP-NOW] init: calling esp_wifi_set_channel(%d)\n", wr_channel);

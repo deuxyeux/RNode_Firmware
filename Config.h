@@ -115,11 +115,11 @@
     bool mw_radio_online = false;
 
     // Whether the ESP-NOW virtual interface (vport 1, ESPNOW.h) is allowed
-    // to run at all. Defaults to on for any board that ships the hardware
-    // capability (HAS_ESPNOW, Boards.h) - matching the previously
-    // unconditional behavior - until explicitly turned off via the RNode
-    // Settings menu or CMD_ESPNOW_ENABLE (espnow_conf_save(), Utilities.h).
-    bool espnow_enabled = HAS_ESPNOW;
+    // to run at all. Defaults to off on every board, even ones that ship
+    // the hardware capability (HAS_ESPNOW, Boards.h), until explicitly
+    // turned on via the RNode Settings menu or CMD_ESPNOW_ENABLE
+    // (espnow_conf_save(), Utilities.h).
+    bool espnow_enabled = false;
 
 	#define eeprom_addr(a) (a+EEPROM_OFFSET)
 	#define config_addr(a) (a+CONFIG_OFFSET)
