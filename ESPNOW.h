@@ -80,7 +80,7 @@ bool espnow_display_tx = false;
 
 #if HAS_NP == true
   void npset(uint8_t r, uint8_t g, uint8_t b);
-  #define ESPNOW_FLASH_MS 120
+  #define ESPNOW_FLASH_MS 300
   uint32_t espnow_flash_until = 0;
   // Distinct from LoRa's RX (blue)/TX (orange) NeoPixel colors used by
   // led_rx_on()/led_tx_on() (Utilities.h) - ESP-NOW gets its own yellow/
