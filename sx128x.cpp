@@ -72,6 +72,9 @@
 #define REG_PACKET_SIZE             0x901
 #define REG_FIRM_VER_MSB            0x154
 #define REG_FIRM_VER_LSB            0x153
+#define REG_LORA_SYNC_WORD_MSB_8X   0x0944
+#define REG_LORA_SYNC_WORD_LSB_8X   0x0945
+#define SYNC_WORD_8X                0x12
 
 #define XTAL_FREQ_8X (double)52000000
 #define FREQ_DIV_8X (double)pow(2.0, 18.0)
@@ -327,6 +330,7 @@ int sx128x::begin(unsigned long frequency) {
 
   standby();
   loraMode();
+  setSyncWord(SYNC_WORD_8X);
   rxAntEnable();
   setFrequency(frequency);
 
@@ -870,7 +874,16 @@ void sx128x::handleLowDataRate() {
 void sx128x::optimizeModemSensitivity() { } // TODO: Check if there's anything the sx1280 can do here
 uint8_t sx128x::getCodingRate4() { return _cr + 4; }
 void sx128x::setPreambleLength(long preamble_symbols) { setPacketParams(preamble_symbols, _implicitHeaderMode, _payloadLength, _crcMode); }
-void sx128x::setSyncWord(int sw) { } // TODO: Implement
+void sx128x::setSyncWord(uint8_t sw) {
+  // Same nibble-interleaved encoding as the SX126x's LoRa sync word
+  // register, at a different register pair. Control nibbles are fixed
+  // at 0x44 (reserved).
+  const uint8_t controlBits = 0x44;
+  uint8_t msb = (sw & 0xF0) | ((controlBits & 0xF0) >> 4);
+  uint8_t lsb = ((sw & 0x0F) << 4) | (controlBits & 0x0F);
+  writeRegister(REG_LORA_SYNC_WORD_MSB_8X, msb);
+  writeRegister(REG_LORA_SYNC_WORD_LSB_8X, lsb);
+}
 void sx128x::enableTCXO() { } // TODO: Need to check how to implement on sx1280
 void sx128x::disableTCXO() { } // TODO: Need to check how to implement on sx1280
 void sx128x::sleep() { uint8_t byte = 0x00; executeOpcode(OP_SLEEP_8X, &byte, 1); }

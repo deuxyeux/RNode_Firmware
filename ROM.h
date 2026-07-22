@@ -64,6 +64,11 @@
   // initialize at all - only 0xC6/0xC7 remained free in this region before
   // this, so there's no headroom left after claiming this byte.
   #define ADDR_CONF_ESPNOW 0xC6
+  // Whether the WebSocket KISS listener (WebSocketRemote.h) is allowed to
+  // initialize at all - this is the last free byte in this checksummed info
+  // region (EEPROM_RESERVED starts at 0xC8 below); no further single-byte
+  // flags fit here after this one.
+  #define ADDR_CONF_WS 0xC7
 
   #define INFO_LOCK_BYTE 0x73
   #define CONF_OK_BYTE   0x73
@@ -74,6 +79,8 @@
   #define ENC_DISABLE_BYTE 0x00
   #define ESPNOW_ENABLE_BYTE  0x01
   #define ESPNOW_DISABLE_BYTE 0x00
+  #define WS_ENABLE_BYTE  0x01
+  #define WS_DISABLE_BYTE 0x00
 
   #define EEPROM_RESERVED 200
   

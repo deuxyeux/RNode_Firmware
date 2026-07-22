@@ -35,6 +35,7 @@
   #define CMD_LEAVE       0x0A
   #define CMD_ST_ALOCK    0x0B
   #define CMD_LT_ALOCK    0x0C
+  #define CMD_SYNC_WORD   0x0D
   #define CMD_PROMISC     0x0E
   #define CMD_READY       0x0F
 
@@ -78,6 +79,10 @@
   // 0x80-0x8F block with the other feature toggles) since that range is
   // fully packed already, up through CMD_ETH_DNS (0x8F) and CMD_ERROR (0x90).
   #define CMD_ESPNOW_ENABLE 0x74
+  // Enable/disable the WebSocket KISS listener (WebSocketRemote.h, port
+  // 7634). Payload is WS_ENABLE_BYTE/WS_DISABLE_BYTE (ROM.h), handled like
+  // CMD_ESPNOW_ENABLE - see ws_conf_save() (WebSocketRemote.h).
+  #define CMD_WS_ENABLE   0x75
   #define CMD_WIFI_IP     0x84
   #define CMD_WIFI_NM     0x85
   #define CMD_SND         0x86

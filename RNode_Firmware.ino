@@ -54,10 +54,6 @@ volatile bool serial_buffering = false;
 
 char sbuf[128];
 
-#if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
-  bool packet_ready = false;
-#endif
-
 void setup() {
   DEBUG_UART_BEGIN();
   DEBUG_LOG("RNode starting\r\n");
@@ -392,6 +388,15 @@ void setup() {
       #if HAS_WIFI
         wifi_mode = EEPROM.read(eeprom_addr(ADDR_CONF_WIFI));
         if (wifi_mode == WR_WIFI_STA || wifi_mode == WR_WIFI_AP) { wifi_remote_init(); }
+
+        uint8_t ws_en_raw = EEPROM.read(eeprom_addr(ADDR_CONF_WS));
+        // Same convention as espnow_en_raw below: only ever written as
+        // WS_ENABLE_BYTE/WS_DISABLE_BYTE (see the KISS handler and
+        // ws_conf_save()) - any other value (erased EEPROM reads 0xFF)
+        // means "never touched", so leave ws_enabled at its default (off).
+        if (ws_en_raw == WS_ENABLE_BYTE) ws_enabled = true;
+        else if (ws_en_raw == WS_DISABLE_BYTE) ws_enabled = false;
+        ws_remote_init();
       #endif
       #if HAS_ESPNOW == true
         uint8_t espnow_en_raw = EEPROM.read(eeprom_addr(ADDR_CONF_ESPNOW));
@@ -472,10 +477,6 @@ inline void kiss_write_packet() {
   serial_write(FEND);
   host_write_len = 0;
 
-  #if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
-    packet_ready = false;
-  #endif
-
   #if MCU_VARIANT == MCU_ESP32
     #if HAS_BLE
       bt_flush();
@@ -502,6 +503,12 @@ void ISR_VECT receive_callback(int packet_size) {
     BaseType_t int_mask;
   #endif
 
+  // Shared between both branches below (see markqvist/RNode_Firmware#108) -
+  // promiscuous mode previously set a separate, never-read packet_ready
+  // global instead of this flag, so its captured packets on ESP32/NRF52
+  // were never actually enqueued to the host via modem_packet_queue.
+  bool ready = false;
+
   if (!promisc) {
     // The standard operating mode allows large
     // packets with a payload up to 500 bytes,
@@ -510,7 +517,6 @@ void ISR_VECT receive_callback(int packet_size) {
     // packet sequence number and split flags
     uint8_t header   = LoRa->read(); packet_size--;
     uint8_t sequence = packetSequence(header);
-    bool    ready    = false;
 
     if (isSplitPacket(header) && seq == SEQ_UNSET) {
       // This is the first part of a split
@@ -588,39 +594,6 @@ void ISR_VECT receive_callback(int packet_size) {
       ready = true;
     }
 
-    if (ready) {
-      #if MCU_VARIANT != MCU_ESP32 && MCU_VARIANT != MCU_NRF52
-        // We first signal the RSSI of the
-        // recieved packet to the host.
-        kiss_indicate_stat_rssi();
-        kiss_indicate_stat_snr();
-
-        // And then write the entire packet
-        host_write_len = read_len;
-        kiss_write_packet(); read_len = 0;
-      
-      #else
-        // Allocate packet struct, but abort if there
-        // is not enough memory available.
-        modem_packet_t *modem_packet = (modem_packet_t*)malloc(sizeof(modem_packet_t) + read_len);
-        if(!modem_packet) { memory_low = true; return; }
-
-        // Get packet RSSI and SNR
-        #if MCU_VARIANT == MCU_ESP32
-          modem_packet->snr_raw = LoRa->packetSnrRaw();
-          modem_packet->rssi = LoRa->packetRssi(modem_packet->snr_raw);
-        #endif
-
-        // Send packet to event queue, but free the
-        // allocated memory again if the queue is
-        // unable to receive the packet.
-        modem_packet->len = read_len;
-        memcpy(modem_packet->data, pbuf, read_len); read_len = 0;
-        if (!modem_packet_queue || xQueueSendFromISR(modem_packet_queue, &modem_packet, NULL) != pdPASS) {
-            free(modem_packet);
-        }
-      #endif
-    }  
   } else {
     // In promiscuous mode, raw packets are
     // output directly to the host
@@ -641,7 +614,41 @@ void ISR_VECT receive_callback(int packet_size) {
 
     #else
       getPacketData(packet_size);
-      packet_ready = true;
+      ready = true;
+    #endif
+  }
+
+  if (ready) {
+    #if MCU_VARIANT != MCU_ESP32 && MCU_VARIANT != MCU_NRF52
+      // We first signal the RSSI of the
+      // recieved packet to the host.
+      kiss_indicate_stat_rssi();
+      kiss_indicate_stat_snr();
+
+      // And then write the entire packet
+      host_write_len = read_len;
+      kiss_write_packet(); read_len = 0;
+
+    #else
+      // Allocate packet struct, but abort if there
+      // is not enough memory available.
+      modem_packet_t *modem_packet = (modem_packet_t*)malloc(sizeof(modem_packet_t) + read_len);
+      if(!modem_packet) { memory_low = true; return; }
+
+      // Get packet RSSI and SNR
+      #if MCU_VARIANT == MCU_ESP32
+        modem_packet->snr_raw = LoRa->packetSnrRaw();
+        modem_packet->rssi = LoRa->packetRssi(modem_packet->snr_raw);
+      #endif
+
+      // Send packet to event queue, but free the
+      // allocated memory again if the queue is
+      // unable to receive the packet.
+      modem_packet->len = read_len;
+      memcpy(modem_packet->data, pbuf, read_len); read_len = 0;
+      if (!modem_packet_queue || xQueueSendFromISR(modem_packet_queue, &modem_packet, NULL) != pdPASS) {
+          free(modem_packet);
+      }
     #endif
   }
 }
@@ -650,6 +657,15 @@ bool startRadio() {
   update_radio_lock();
   if (!radio_online && !console_active) {
     if (!radio_locked && hw_ready) {
+      // Sync word is session-only (never loaded from EEPROM). Reset the
+      // cached value here, before begin(), so it can't go stale relative
+      // to the hardware: begin() below always re-applies each driver's
+      // own compiled-in default sync word internally (sx127x.cpp/sx126x.cpp/
+      // sx128x.cpp), so no explicit setSyncWord() call is needed after
+      // begin() the way setTXPower()/setBandwidth()/etc. are re-applied
+      // below - this line just keeps kiss_indicate_syncword()'s report in
+      // sync with what begin() actually just wrote to the radio.
+      lora_sw = 0x12;
       if (!LoRa->begin(lora_freq)) {
         // The radio could not be started.
         // Indicate this failure over both the
@@ -1139,6 +1155,14 @@ void serial_callback(uint8_t sbyte) {
         if (op_mode == MODE_HOST) setCodingRate();
         kiss_indicate_codingrate();
       }
+    } else if (command == CMD_SYNC_WORD) {
+      if (sbyte == 0xFF) {
+        kiss_indicate_syncword();
+      } else {
+        lora_sw = sbyte;
+        if (op_mode == MODE_HOST) setSyncWord();
+        kiss_indicate_syncword();
+      }
     } else if (command == CMD_IMPLICIT) {
       set_implicit_length(sbyte);
       kiss_indicate_implicit_length();
@@ -1426,6 +1450,12 @@ void serial_callback(uint8_t sbyte) {
       #if HAS_ESPNOW == true
         if (sbyte == ESPNOW_ENABLE_BYTE || sbyte == ESPNOW_DISABLE_BYTE) {
           espnow_conf_save(sbyte);
+        }
+      #endif
+    } else if (command == CMD_WS_ENABLE) {
+      #if HAS_WIFI
+        if (sbyte == WS_ENABLE_BYTE || sbyte == WS_DISABLE_BYTE) {
+          ws_conf_save(sbyte);
         }
       #endif
     } else if (command == CMD_VSENSE_DIV) {
@@ -2135,6 +2165,7 @@ void loop() {
 
   #if HAS_WIFI
     if (wifi_initialized) update_wifi();
+    if (ws_enabled) update_ws();
   #endif
 
   #if HAS_ESPNOW == true
@@ -2346,9 +2377,9 @@ void buffer_serial() {
     while (
       c < MAX_CYCLES &&
       #if HAS_ETHERNET == true
-      ( (bt_state != BT_STATE_CONNECTED && Serial.available()) || (bt_state == BT_STATE_CONNECTED && SerialBT.available()) || ((eth_is_connected || wr_state >= WR_STATE_ON) && wifi_remote_available()) )
+      ( (bt_state != BT_STATE_CONNECTED && Serial.available()) || (bt_state == BT_STATE_CONNECTED && SerialBT.available()) || ((eth_is_connected || wr_state >= WR_STATE_ON) && wifi_remote_available()) || (ws_state >= WS_STATE_ON && ws_remote_available()) )
       #elif HAS_WIFI
-      ( (bt_state != BT_STATE_CONNECTED && Serial.available()) || (bt_state == BT_STATE_CONNECTED && SerialBT.available()) || (wr_state >= WR_STATE_ON && wifi_remote_available()) )
+      ( (bt_state != BT_STATE_CONNECTED && Serial.available()) || (bt_state == BT_STATE_CONNECTED && SerialBT.available()) || (wr_state >= WR_STATE_ON && wifi_remote_available()) || (ws_state >= WS_STATE_ON && ws_remote_available()) )
       #else
       ( (bt_state != BT_STATE_CONNECTED && Serial.available()) || (bt_state == BT_STATE_CONNECTED && SerialBT.available()) )
       #endif
@@ -2369,6 +2400,7 @@ void buffer_serial() {
         #endif
         #if HAS_WIFI
         else if (wifi_host_is_connected())       { if (!fifo_isfull(&serialFIFO)) { fifo_push(&serialFIFO, wifi_remote_read()); } }
+        else if (ws_host_is_connected())         { if (!fifo_isfull(&serialFIFO)) { fifo_push(&serialFIFO, ws_remote_read()); } }
         #endif
         else                                     { if (!fifo_isfull(&serialFIFO)) { fifo_push(&serialFIFO, Serial.read()); } }
         #else

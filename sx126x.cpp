@@ -7,9 +7,6 @@
 #include "sx126x.h"
 
 #if MCU_VARIANT == MCU_ESP32
-  #if MCU_VARIANT == MCU_ESP32 and !defined(CONFIG_IDF_TARGET_ESP32S3)
-    #include "soc/rtc_wdt.h"
-  #endif
   #define ISR_VECT IRAM_ATTR
 #else
   #define ISR_VECT
@@ -888,11 +885,31 @@ void sx126x::setPreambleLength(long preamble_symbols) {
 }
 
 void sx126x::setSyncWord(uint16_t sw) {
-  // TODO: Why was this hardcoded instead of using the config value?
-  // writeRegister(REG_SYNC_WORD_MSB_6X, (sw & 0xFF00) >> 8);
-  // writeRegister(REG_SYNC_WORD_LSB_6X, sw & 0x00FF);
-  writeRegister(REG_SYNC_WORD_MSB_6X, 0x14);
-  writeRegister(REG_SYNC_WORD_LSB_6X, 0x24);
+  // LoRa sync word is nibble-interleaved with a fixed, reserved control
+  // nibble pair (0x44) into the two-byte register - not a plain 16-bit
+  // value. sw=0x12 (Reticulum/RNode default) yields 0x1424, matching the
+  // previously-hardcoded bytes below.
+  //
+  // Accepts either form here: a raw single-byte sync word (0x00-0xFF,
+  // e.g. 0x12/0x34) to be encoded below, or an already-encoded 16-bit
+  // register value (e.g. 0x1424/0x3444) passed straight through - callers
+  // still using the old pre-encoded SYNC_WORD_6X-style constants don't
+  // need to change. The two forms are unambiguous: every encoded register
+  // value has its reserved control nibble (0x4) fixed in the low nibble
+  // of both bytes, i.e. (sw & 0x0F0F) == 0x0404, a pattern no raw
+  // single-byte sync word (which fits in 0x00-0xFF) can produce.
+  uint8_t msb, lsb;
+  if (sw > 0xFF && (sw & 0x0F0F) == 0x0404) {
+    msb = (sw >> 8) & 0xFF;
+    lsb = sw & 0xFF;
+  } else {
+    const uint8_t controlBits = 0x44;
+    uint8_t raw = sw & 0xFF;
+    msb = (raw & 0xF0) | ((controlBits & 0xF0) >> 4);
+    lsb = ((raw & 0x0F) << 4) | (controlBits & 0x0F);
+  }
+  writeRegister(REG_SYNC_WORD_MSB_6X, msb);
+  writeRegister(REG_SYNC_WORD_LSB_6X, lsb);
 }
 
 void sx126x::setPins(int ss, int reset, int dio0, int busy, int rxen, int txen) {

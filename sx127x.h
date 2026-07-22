@@ -81,6 +81,12 @@ public:
   void setPins(int ss = LORA_DEFAULT_SS_PIN, int reset = LORA_DEFAULT_RESET_PIN, int dio0 = LORA_DEFAULT_DIO0_PIN, int busy = LORA_DEFAULT_BUSY_PIN);
   void setSPIFrequency(uint32_t frequency);
 
+  // Matches sx126x::reset()/sx128x::reset() - RNode_Firmware.ino's
+  // validate_status() calls LoRa->reset() on any modem class when no radio
+  // module is found, so all three need the same public method; sx127x was
+  // missing it entirely (only had the private _reset pin number).
+  void reset(void);
+
 private:
   void explicitHeaderMode();
   void implicitHeaderMode();

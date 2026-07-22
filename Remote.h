@@ -217,6 +217,15 @@ bool wifi_remote_available() {
     WiFiClient client = remote_listener.available();
     if (!client) { return false; }
     else {
+      #if HAS_WIFI
+      // Cross-transport exclusivity: at most one active network host (TCP-
+      // Remote or WS) at a time - see the symmetric guard in
+      // WebSocketRemote.h's webSocketEvent(). buffer_serial()/
+      // serial_callback() share one global KISS parser state, so a second
+      // live host feeding it at once would interleave bytes mid-frame and
+      // corrupt both streams.
+      if (ws_host_is_connected()) { client.stop(); return false; }
+      #endif
       // wifi_dbg("Client connected"); // TODO: Remove debug
       connection = client;
       wr_state = WR_STATE_CONNECTED;

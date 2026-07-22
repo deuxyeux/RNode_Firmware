@@ -168,7 +168,12 @@ void buzzer_encoder_click_melody();
 #endif
 
 #if HAS_WIFI == true
+  // Forward-declared so Remote.h's wifi_remote_available() (included next)
+  // can enforce cross-transport exclusivity against the WS listener, which
+  // is only fully defined afterwards, in WebSocketRemote.h.
+  bool ws_host_is_connected();
   #include "Remote.h"
+  #include "WebSocketRemote.h"
 #endif
 
 #if HAS_ESPNOW == true
@@ -1170,11 +1175,13 @@ void serial_write(uint8_t byte) {
 				if (eth_is_connected && wifi_host_is_connected()) { connection.write(byte); }
 				#if HAS_WIFI
 				else if (wifi_host_is_connected()) { wifi_remote_write(byte); }
+				else if (ws_host_is_connected())   { ws_remote_write(byte); }
 				#endif
 				else                               { Serial.write(byte); }
 			#elif HAS_WIFI
-				if (wifi_host_is_connected()) { wifi_remote_write(byte); }
-				else                          { Serial.write(byte); }
+				if (wifi_host_is_connected())      { wifi_remote_write(byte); }
+				else if (ws_host_is_connected())   { ws_remote_write(byte); }
+				else                               { Serial.write(byte); }
 			#else
 				Serial.write(byte);
 			#endif
@@ -1300,6 +1307,16 @@ void kiss_indicate_spreadingfactor() {
 	serial_write(FEND);
 	serial_write(CMD_SF);
 	serial_write((uint8_t)lora_sf);
+	serial_write(FEND);
+}
+
+void kiss_indicate_syncword() {
+	#if HAS_ESPNOW == true
+	  kiss_select_interface(0);
+	#endif
+	serial_write(FEND);
+	serial_write(CMD_SYNC_WORD);
+	serial_write((uint8_t)lora_sw);
 	serial_write(FEND);
 }
 
@@ -1493,11 +1510,10 @@ void kiss_indicate_battery() {
 void kiss_indicate_temperature() {
 	#if HAS_PMU || IS_ESP32S3
 		#if MCU_VARIANT == MCU_ESP32
-			float pmu_temp = pmu_temperature+PMU_TEMP_OFFSET;
-			uint8_t temp = (uint8_t)pmu_temp;
+			uint8_t temp = (uint8_t)roundf(pmu_temperature+PMU_TEMP_OFFSET);
 			serial_write(FEND);
 			serial_write(CMD_STAT_TEMP);
-			escaped_serial_write(pmu_temp);
+			escaped_serial_write(temp);
 			serial_write(FEND);
 		#endif
 	#endif
@@ -1762,6 +1778,10 @@ void setSpreadingFactor() {
 void setCodingRate() {
 	if (radio_online) LoRa->setCodingRate4(lora_cr);
 	updateBitrate();
+}
+
+void setSyncWord() {
+	if (radio_online) LoRa->setSyncWord(lora_sw);
 }
 
 void set_implicit_length(uint8_t len) {

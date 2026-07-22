@@ -1566,7 +1566,7 @@ void draw_waterfall(int px, int py) {
 
 #if BOARD_MODEL == BOARD_HELTEC_T096
 // Battery voltage readout in the 19px gap between the battery bars and
-// the quality graph; "d.dd" in Org_01 is exactly 19px wide. Refreshed at
+// the quality graph; "d.dV" in Org_01 is exactly 19px wide. Refreshed at
 // most every 5s so the jittering last decimal doesn't expand the display
 // update region on every frame.
 #define BAT_V_REFRESH_INTERVAL 5000
@@ -1587,7 +1587,7 @@ void draw_battery_voltage(int px, int py) {
     stat_area.setFont(SMALL_FONT); stat_area.setTextWrap(false);
     stat_area.setTextColor(SSD1306_WHITE); stat_area.setTextSize(1);
     stat_area.setCursor(px, py);
-    stat_area.printf("%.2f", battery_voltage);
+    stat_area.printf("%.1fV", battery_voltage);
     last_drawn = millis();
   }
 }
@@ -1827,7 +1827,18 @@ void draw_disp_area() {
     if (!device_init_done) draw_disp_art(p_by, bm_boot, 27);
     if (firmware_update_mode) draw_disp_art(p_by, bm_fw_update, 27);
   } else {
-    if (!disp_ext_fb or bt_ssp_pin != 0) {
+    // bt_ssp_pin != 0 used to gate this (a proxy for "showing the pairing PIN
+    // screen"), but it's a residual value set once by bt_confirm_pairing() and
+    // only cleared by bt_disable_pairing()/bt_pairing_complete() - any path
+    // that leaves pairing without going through those (e.g. bt_stop() called
+    // mid-confirmation) left it stuck non-zero forever, permanently hiding the
+    // external framebuffer with no way to tell it apart from "pairing is
+    // actually in progress". bt_state == BT_STATE_PAIRING is the real,
+    // continuously-maintained "are we pairing right now" signal (the PIN
+    // screen itself below is already gated on this exact condition), so the
+    // framebuffer feature no longer depends on Bluetooth's internal pairing
+    // bookkeeping being flawless.
+    if (!disp_ext_fb or bt_state == BT_STATE_PAIRING) {
       if (radio_online && display_diagnostics) {
         disp_area.fillRect(0,8,disp_area.width(),37, SSD1306_BLACK); disp_area.fillRect(0,37,disp_area.width(),27, SSD1306_WHITE);
         disp_area.setFont(SMALL_FONT); disp_area.setTextWrap(false); disp_area.setTextColor(SSD1306_WHITE); disp_area.setTextSize(1);

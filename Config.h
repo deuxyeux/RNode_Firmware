@@ -121,6 +121,12 @@
     // (espnow_conf_save(), Utilities.h).
     bool espnow_enabled = false;
 
+    // Whether the WebSocket KISS listener (WebSocketRemote.h, port 7634) is
+    // allowed to run at all. Defaults to off, same convention as
+    // espnow_enabled above - only turned on via CMD_WS_ENABLE
+    // (ws_conf_save(), WebSocketRemote.h).
+    bool ws_enabled = false;
+
 	#define eeprom_addr(a) (a+EEPROM_OFFSET)
 	#define config_addr(a) (a+CONFIG_OFFSET)
 
@@ -199,6 +205,11 @@
 	uint32_t lora_bw                =  0;
 	uint32_t lora_freq              =  0;
 	uint32_t lora_bitrate           =  0;
+	// Session-only (never persisted to EEPROM) - always reverts to the
+	// driver's compiled-in default on every radio restart, so a monitoring
+	// session on a foreign network (e.g. Meshtastic) can never leave a
+	// board silently stuck off Reticulum's default sync word.
+	uint8_t  lora_sw                =  0x12;
 
 	// Operational variables
 	bool radio_locked  = true;

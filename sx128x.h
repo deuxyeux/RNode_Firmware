@@ -68,7 +68,7 @@ public:
   void setCodingRate4(int denominator);
   uint8_t getCodingRate4();
   void setPreambleLength(long preamble_symbols);
-  void setSyncWord(int sw);
+  void setSyncWord(uint8_t sw);
   bool dcd();
   void clearIRQStatus();
   void enableCrc();

@@ -70,6 +70,12 @@ char bt_da[BT_DEV_ADDR_LEN];
       if (bt_state != BT_STATE_OFF) {
         SerialBT.end();
         bt_allow_pairing = false;
+        // Otherwise a pairing interrupted after the confirmation PIN is set
+        // (bt_confirm_pairing()) but before bt_disable_pairing()/
+        // bt_pairing_complete() runs leaves bt_ssp_pin stuck non-zero forever -
+        // which permanently forces the normal UI in draw_disp_area() regardless
+        // of disp_ext_fb, since it doesn't check bt_state at all.
+        bt_ssp_pin = 0;
         bt_state = BT_STATE_OFF;
       }
     }
@@ -184,6 +190,8 @@ char bt_da[BT_DEV_ADDR_LEN];
       display_unblank();
       if (bt_state != BT_STATE_OFF) {
         bt_allow_pairing = false;
+        // See the HAS_BLUETOOTH bt_stop() above for why this is needed.
+        bt_ssp_pin = 0;
         bt_state = BT_STATE_OFF;
         SerialBT.end();
       }
@@ -404,6 +412,8 @@ char bt_da[BT_DEV_ADDR_LEN];
     // Serial.println("BT Stop");
     if (bt_state != BT_STATE_OFF) {
       bt_allow_pairing = false;
+      // See the ESP32 HAS_BLUETOOTH bt_stop() for why this is needed.
+      bt_ssp_pin = 0;
       bt_state = BT_STATE_OFF;
     }
   }
