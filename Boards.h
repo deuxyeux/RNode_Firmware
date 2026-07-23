@@ -1192,6 +1192,16 @@
       #define HAS_BUSY true
       #define HAS_INPUT true
       #define HAS_SLEEP true
+
+      // RNode Settings menu (Menu.h), button-only navigation (tap = next,
+      // double-tap = back, hold = select/open - see menu_button_press()).
+      // No encoder on this board, same pattern as BOARD_HELTEC_T096. The
+      // panel is a color ST7789 TFT rather than a 128x64 SSD1306 OLED, so
+      // the menu renders into its own off-screen canvas (Display.h,
+      // BOARD_HELTEC_T114-only block) instead of drawing straight to the
+      // unbuffered display - see MENU_GFX in Menu.h.
+      #define HAS_MENU true
+
       #define DIO2_AS_RF_SWITCH true
       #define CONFIG_UART_BUFFER_SIZE 6144
       #define CONFIG_QUEUE_SIZE 6144
@@ -1203,6 +1213,15 @@
 
       #define PIN_T114_ADC_EN 6
       #define PIN_VEXT_EN 21
+
+      // Battery voltage sensing (measure_battery(), Power.h) goes through
+      // pin_vbat and a fixed volts-per-ADC-count constant, same as
+      // BOARD_PROMICRO - the RNode Settings menu's Hardware page exposes a
+      // recalibration knob as a %/of-default correction against this
+      // default (see BATTERY_V_SCALE_DEFAULT/battery_v_scale, Config.h/
+      // Power.h).
+      #define HAS_BATTERY_DIVIDER true
+      #define BATTERY_V_SCALE_DEFAULT 0.017165
 
       // LED
       #define LED_T114_GREEN 3
@@ -1222,7 +1241,10 @@
       #define PIN_T114_BUSY 17
 
       // TFT
-      #define DISPLAY_SCALE 2
+      #define DISPLAY_SCALE 1
+      // Colourize the waterfall (RX green, TX blue) and lamps/battery/
+      // banners; set to false for an all-monochrome display
+      #define USE_COLOR_DISPLAY true
       #define PIN_T114_TFT_MOSI 9
       #define PIN_T114_TFT_MISO 11 // not connected
       #define PIN_T114_TFT_SCK 8

@@ -250,6 +250,13 @@
 	uint32_t stat_rx		= 0;
 	uint32_t stat_tx		= 0;
 
+	// Packet counters (not byte counters like stat_rx/stat_tx above) -
+	// incremented once per packet delivered to the host (kiss_write_packet())
+	// or handed to the radio for transmission (transmit()), on every board,
+	// not just ones with a display to show them on.
+	uint32_t packet_rx_count	= 0;
+	uint32_t packet_tx_count	= 0;
+
 	#define STATUS_INTERVAL_MS 3
 	#if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
 	  #define DCD_SAMPLES 2500

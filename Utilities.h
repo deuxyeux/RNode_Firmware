@@ -698,9 +698,9 @@ void set_rns_link_state(uint8_t new_state) {
 	#endif
 #elif MCU_VARIANT == MCU_NRF52
     #if HAS_NP == true
-      void led_rx_on()  { npset(0, 0, 0xFF); }
+      void led_rx_on()  { npset(0, 0xFF, 0); }
       void led_rx_off() {	npset(0, 0, 0); }
-      void led_tx_on()  { npset(0xFF, 0x50, 0x00); }
+      void led_tx_on()  { npset(0, 0, 0xFF); }
       void led_tx_off() { npset(0, 0, 0); }
 			void led_id_on()  { npset(0x90, 0, 0x70); }
 			void led_id_off() { npset(0, 0, 0); }
@@ -1631,7 +1631,7 @@ void kiss_indicate_disp() {
 		// distinguishable by length alone (the disp_area/stat_area split's
 		// default geometry and a raw DISP_W x DISP_H buffer both happen to
 		// total the same byte count on boards that have a Settings menu).
-		#if HAS_MENU == true && BOARD_MODEL != BOARD_HELTEC_T096
+		#if HAS_MENU == true && BOARD_MODEL != BOARD_HELTEC_T096 && BOARD_MODEL != BOARD_HELTEC_T114
 			// The menu draws straight to display's own buffer instead of
 			// disp_area/stat_area (which it never touches), so reading those
 			// while the menu is open would return stale main-screen content
@@ -1643,17 +1643,28 @@ void kiss_indicate_disp() {
 			size_t fb_len = ((DISP_W+7)/8)*DISP_H;
 			for (size_t i = 0; i < fb_len; i++) { escaped_serial_write(fb[i]); }
 		#else
-			// T096's ST7735 has no framebuffer of its own to point at (see
-			// the branch above) and its menu renders into a separate canvas
-			// (menu_canvas, Menu.h/Display.h) rather than disp_area/stat_area
-			// - this channel just doesn't reflect the menu's content on this
-			// board, only whatever the normal operational screen last drew.
+			// T096/T114's TFTs have no framebuffer of their own to point at
+			// (see the branch above) and their menu renders into a separate
+			// canvas (menu_canvas, Menu.h/Display.h) rather than disp_area/
+			// stat_area - this channel just doesn't reflect the menu's
+			// content on these boards, only whatever the normal operational
+			// screen last drew.
 			escaped_serial_write(0x00);
 			uint8_t *da = disp_area.getBuffer();
-			uint8_t *sa = stat_area.getBuffer();
 			size_t da_len = ((disp_area.width()+7)/8)*disp_area.height();
-			size_t sa_len = ((stat_area.width()+7)/8)*stat_area.height();
 			for (size_t i = 0; i < da_len; i++) { escaped_serial_write(da[i]); }
+			#if BOARD_MODEL == BOARD_HELTEC_T114
+				// Landscape draws into its own, differently-sized stat_area_land
+				// instead of stat_area (see draw_stat_area()'s landscape branch,
+				// Display.h) - report whichever one's actually active, or this
+				// channel would keep sending stat_area's buffer, which landscape
+				// never touches and would read back all zeros.
+				uint8_t *sa = (disp_mode == DISP_MODE_LANDSCAPE) ? stat_area_land.getBuffer() : stat_area.getBuffer();
+				size_t sa_len = (disp_mode == DISP_MODE_LANDSCAPE) ? ((stat_area_land.width()+7)/8)*stat_area_land.height() : ((stat_area.width()+7)/8)*stat_area.height();
+			#else
+				uint8_t *sa = stat_area.getBuffer();
+				size_t sa_len = ((stat_area.width()+7)/8)*stat_area.height();
+			#endif
 			for (size_t i = 0; i < sa_len; i++) { escaped_serial_write(sa[i]); }
 		#endif
 	#else

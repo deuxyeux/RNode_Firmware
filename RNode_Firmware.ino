@@ -457,6 +457,8 @@ void lora_receive() {
 }
 
 inline void kiss_write_packet() {
+  packet_rx_count++;
+
   serial_write(FEND);
   serial_write(CMD_DATA);
   
@@ -657,15 +659,6 @@ bool startRadio() {
   update_radio_lock();
   if (!radio_online && !console_active) {
     if (!radio_locked && hw_ready) {
-      // Sync word is session-only (never loaded from EEPROM). Reset the
-      // cached value here, before begin(), so it can't go stale relative
-      // to the hardware: begin() below always re-applies each driver's
-      // own compiled-in default sync word internally (sx127x.cpp/sx126x.cpp/
-      // sx128x.cpp), so no explicit setSyncWord() call is needed after
-      // begin() the way setTXPower()/setBandwidth()/etc. are re-applied
-      // below - this line just keeps kiss_indicate_syncword()'s report in
-      // sync with what begin() actually just wrote to the radio.
-      lora_sw = 0x12;
       if (!LoRa->begin(lora_freq)) {
         // The radio could not be started.
         // Indicate this failure over both the
@@ -683,6 +676,7 @@ bool startRadio() {
         setBandwidth();
         setSpreadingFactor();
         setCodingRate();
+        setSyncWord();
         getFrequency();
 
         LoRa->enableCrc();
@@ -884,6 +878,8 @@ void update_airtime() {
 
 void transmit(uint16_t size) {
   if (radio_online) {
+    packet_tx_count++;
+
     if (!promisc) {
       uint16_t  written = 0;
       uint8_t header  = random(256) & 0xF0;
@@ -955,6 +951,27 @@ void serial_callback(uint8_t sbyte) {
             fifo16_push(&packet_lengths, l);
             current_packet_start = queue_cursor;
         }
+    }
+
+  } else if (IN_FRAME && sbyte == FEND && command == CMD_SYNC_WORD && frame_len > 0) {
+    IN_FRAME = false;
+
+    if (frame_len == 1 && cmdbuf[0] == 0xFF) {
+      kiss_indicate_syncword();
+    } else if (frame_len == 1) {
+      lora_sw = cmdbuf[0];
+      if (op_mode == MODE_HOST) setSyncWord();
+      kiss_indicate_syncword();
+    } else {
+      // Two bytes: an already nibble-interleaved sync word register pair
+      // (sx126x/sx128x form, e.g. 0x14/0x24 for logical sync word 0x12 -
+      // see sx126x::setSyncWord()) sent directly by the host instead of
+      // the raw logical byte. Decode back to the logical byte so lora_sw
+      // stays in its one canonical raw-byte form and every driver's
+      // existing setSyncWord(uint8_t) keeps working unchanged.
+      lora_sw = (cmdbuf[0] & 0xF0) | ((cmdbuf[1] >> 4) & 0x0F);
+      if (op_mode == MODE_HOST) setSyncWord();
+      kiss_indicate_syncword();
     }
 
   } else if (sbyte == FEND) {
@@ -1156,12 +1173,15 @@ void serial_callback(uint8_t sbyte) {
         kiss_indicate_codingrate();
       }
     } else if (command == CMD_SYNC_WORD) {
-      if (sbyte == 0xFF) {
-        kiss_indicate_syncword();
+      if (sbyte == FESC) {
+        ESCAPE = true;
       } else {
-        lora_sw = sbyte;
-        if (op_mode == MODE_HOST) setSyncWord();
-        kiss_indicate_syncword();
+        if (ESCAPE) {
+          if (sbyte == TFEND) sbyte = FEND;
+          if (sbyte == TFESC) sbyte = FESC;
+          ESCAPE = false;
+        }
+        if (frame_len < CMD_L) cmdbuf[frame_len++] = sbyte;
       }
     } else if (command == CMD_IMPLICIT) {
       set_implicit_length(sbyte);
@@ -2238,6 +2258,20 @@ void sleep_now() {
       #if BOARD_MODEL == BOARD_HELTEC_T114
         npset(0,0,0);
         digitalWrite(PIN_VEXT_EN, LOW);
+        // set_contrast() (Display.h) drives this pin with analogWrite(),
+        // which hands it to one of the nRF52's HardwarePWM peripherals
+        // (HwPWMx[], cores/nRF5/HardwarePWM.h) via PSEL.OUT - that
+        // peripheral keeps driving the pin's actual output level
+        // regardless of what pinMode()/digitalWrite() do afterward
+        // (neither touches PWM ownership at all, only the GPIO's own
+        // PIN_CNF/OUT registers, which the PWM peripheral overrides at the
+        // pin mux level), so a plain digitalWrite(HIGH) alone silently did
+        // nothing here - removePin() releases the pin back to plain GPIO
+        // control first.
+        for (int hwpwm_i = 0; hwpwm_i < HWPWM_MODULE_NUM; hwpwm_i++) {
+          if (HwPWMx[hwpwm_i]->checkPin(PIN_T114_TFT_BLGT)) { HwPWMx[hwpwm_i]->removePin(PIN_T114_TFT_BLGT); }
+        }
+        pinMode(PIN_T114_TFT_BLGT, OUTPUT);
         digitalWrite(PIN_T114_TFT_BLGT, HIGH);
         digitalWrite(PIN_T114_TFT_EN, HIGH);
       #elif BOARD_MODEL == BOARD_HELTEC_T096

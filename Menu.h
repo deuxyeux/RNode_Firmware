@@ -36,10 +36,14 @@
   // convention in this file, tuning happens live on hardware, not here.
   #if BOARD_MODEL == BOARD_HELTEC_T096
     #define MENU_GFX menu_canvas
+    #define MENU_FONT SMALL_FONT
     #define MENU_CONTENT_W (MENU_CANVAS_W - 8) // 4px margin each side
     #define MENU_LIST_ROW_H 11
     #define MENU_LIST_VISIBLE_ROWS 4
     #define MENU_LIST_TOP_Y 15
+    // Org_01's ascent is ~4px, so a 7px baseline offset centers it fine in
+    // an 11px row - see MENU_LIST_BASELINE_OFF's use in draw_menu_list_disp().
+    #define MENU_LIST_BASELINE_OFF 7
     #define MENU_LIST_FOOTER_HLINE_Y (MENU_CANVAS_H - 21)
     #define MENU_LIST_FOOTER_TEXT_Y (MENU_CANVAS_H - 17)
     #define MENU_EDIT_VALUE_CX (MENU_CANVAS_W / 2)
@@ -48,12 +52,48 @@
     #define MENU_EDIT_ARROW_R_EDGE (MENU_CANVAS_W - 5)
     #define MENU_EDIT_FOOTER_HLINE_Y (MENU_CANVAS_H - 21)
     #define MENU_EDIT_FOOTER_TEXT_Y (MENU_CANVAS_H - 17)
+  #elif BOARD_MODEL == BOARD_HELTEC_T114
+    // Same off-screen-canvas reasoning as T096 above (Adafruit_ST7789 has
+    // no framebuffer either) - menu_canvas here is portrait, 135x240
+    // (Display.h), so there's a lot more vertical room than T096's 80px-
+    // tall canvas: more visible rows, roomier row height. Starting points,
+    // same as T096's - tune live on hardware.
+    //
+    // Panel's big enough to afford a bigger font too - Tamsyn6x12 (already
+    // linked in for the WiFi text-entry screen, see TEXT_ENTRY_FONT above)
+    // instead of the tiny Org_01 every other board's menu uses. Row height/
+    // edit-screen Y positions below are bumped up to give its 12px-tall
+    // glyphs headroom Org_01 never needed.
+    #define MENU_GFX menu_canvas
+    #define MENU_FONT TEXT_ENTRY_FONT
+    #define MENU_CONTENT_W (MENU_CANVAS_W - 8) // 4px margin each side
+    #define MENU_LIST_ROW_H 20
+    #define MENU_LIST_VISIBLE_ROWS 8
+    #define MENU_LIST_TOP_Y 22
+    // Tamsyn6x12's ascent is 9px (glyph top sits 9px above the baseline,
+    // per its own GFXglyph yOffset=-9) - a 7px offset (right for Org_01's
+    // ~4px ascent) clipped the tops of letters against the selection box.
+    // Centering 12px-tall glyphs in a 20px row wants ~4px of margin above
+    // and below, so baseline = 4 (margin) + 9 (ascent) = 13.
+    #define MENU_LIST_BASELINE_OFF 13
+    #define MENU_LIST_FOOTER_HLINE_Y (MENU_CANVAS_H - 21)
+    // +3 past the plain "same margin as the row baseline" value - otherwise
+    // the footer text's own ascent pokes above MENU_LIST_FOOTER_HLINE_Y.
+    #define MENU_LIST_FOOTER_TEXT_Y (MENU_CANVAS_H - 12)
+    #define MENU_EDIT_VALUE_CX (MENU_CANVAS_W / 2)
+    #define MENU_EDIT_VALUE_Y 102
+    #define MENU_EDIT_ARROW_Y 96
+    #define MENU_EDIT_ARROW_R_EDGE (MENU_CANVAS_W - 5)
+    #define MENU_EDIT_FOOTER_HLINE_Y (MENU_CANVAS_H - 21)
+    #define MENU_EDIT_FOOTER_TEXT_Y (MENU_CANVAS_H - 15)
   #else
     #define MENU_GFX display
+    #define MENU_FONT SMALL_FONT
     #define MENU_CONTENT_W 120
     #define MENU_LIST_ROW_H 11
     #define MENU_LIST_VISIBLE_ROWS 4
     #define MENU_LIST_TOP_Y 15
+    #define MENU_LIST_BASELINE_OFF 7
     #define MENU_LIST_FOOTER_HLINE_Y 59
     #define MENU_LIST_FOOTER_TEXT_Y 63
     #define MENU_EDIT_VALUE_CX 64
@@ -338,7 +378,7 @@
   // applies to every HAS_MENU board regardless of WiFi/Ethernet) - hence
   // living here, ungated, rather than under either feature's own #if.
   #if HAS_INPUT == true || HAS_WIFI == true || HAS_ETHERNET == true
-    #if BOARD_MODEL == BOARD_HELTEC_T096
+    #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_T114
       // Same footprint-tracking idea as the generic branch below, but in
       // panel (not canvas-local) coordinates, since the box is pushed
       // through menu_popup_canvas (Display.h) at whatever panel offset
@@ -354,10 +394,10 @@
       // operational-screen content that belongs there. Needed because,
       // unlike the generic branch below, nothing here relies on a
       // periodic full-screen clear to make a box disappear on its own -
-      // T096 only ever repaints the panel regions it explicitly pushes
-      // to. Called by draw_button_hold_overlay() whenever a hold ends
-      // without a new box replacing this one - including well after the
-      // box was last drawn, e.g. right after exiting a menu session a
+      // T096/T114 only ever repaint the panel regions they explicitly
+      // push to. Called by draw_button_hold_overlay() whenever a hold
+      // ends without a new box replacing this one - including well after
+      // the box was last drawn, e.g. right after exiting a menu session a
       // hold escalated into opening (menu_popup_prev_panel_* is never
       // touched again once menu_is_open() goes true, so it's still
       // sitting on coordinates from before the menu ever opened).
@@ -389,15 +429,14 @@
     // reuse draw_menu_list_disp()'s own row_h/baseline convention - the
     // same font at the same tightness, already proven to fit cleanly.
     void draw_menu_status_rect(const char *text) {
-      #if BOARD_MODEL == BOARD_HELTEC_T096
+      #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_T114
         // Only ever reached today via draw_button_hold_overlay() (menu
-        // closed, landscape) - the menu-open popup path (Sync NTP,
-        // Clear Static) needs HAS_WIFI/HAS_ETHERNET, which this board
-        // doesn't have. Draws into its own small canvas
-        // (menu_popup_canvas, Display.h, kept <=80px wide to stay within
-        // drawBitmap()'s region-cache cutoff) rather than menu_canvas -
-        // that canvas is sized and positioned for the portrait
-        // list-screen case only, not this landscape overlay.
+        // closed) - the menu-open popup path (Sync NTP, Clear Static)
+        // needs HAS_WIFI/HAS_ETHERNET, which neither board has. Draws
+        // into its own small canvas (menu_popup_canvas, Display.h, kept
+        // within drawBitmap()'s region-cache cutoff) rather than
+        // menu_canvas - that canvas is sized and positioned for the
+        // list-screen case only, not this overlay.
         menu_popup_canvas.setFont(SMALL_FONT);
         menu_popup_canvas.setTextWrap(false);
         menu_popup_canvas.setTextSize(1);
@@ -558,11 +597,12 @@
     // per-cycle pipeline, which already pushes once at the end.
     void draw_button_hold_overlay() {
       if (menu_is_open() || !button_pressed()) {
-        #if BOARD_MODEL == BOARD_HELTEC_T096
-          // T096 has no periodic full-screen clear to make a leftover
-          // box disappear on its own (see menu_status_rect_clear()'s own
-          // comment) - explicitly erase it once the hold that drew it
-          // ends, whether that's a release or the menu having opened.
+        #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_T114
+          // Neither board has a periodic full-screen clear to make a
+          // leftover box disappear on its own (see
+          // menu_status_rect_clear()'s own comment) - explicitly erase it
+          // once the hold that drew it ends, whether that's a release or
+          // the menu having opened.
           menu_status_rect_clear();
         #endif
         return;
@@ -571,7 +611,7 @@
       if (tier != BUTTON_HOLD_TIER_NONE) {
         draw_menu_status_rect(button_hold_tier_text(tier));
       } else {
-        #if BOARD_MODEL == BOARD_HELTEC_T096
+        #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_T114
           menu_status_rect_clear();
         #endif
       }
@@ -2124,7 +2164,7 @@
   // edge. Shows up to 4 rows at a time, scrolling to keep the cursor
   // visible - lists have grown past 4 items and will likely keep growing.
   void draw_menu_list_disp(const char *title, const char **labels, char valbufs[][24], uint8_t count, uint8_t cursor) {
-    MENU_GFX.setFont(SMALL_FONT);
+    MENU_GFX.setFont(MENU_FONT);
     MENU_GFX.setTextSize(1);
     MENU_GFX.setTextColor(SSD1306_WHITE);
     MENU_GFX.setCursor(6, 8);
@@ -2142,7 +2182,7 @@
     for (uint8_t vi = 0; vi < visible_rows && (first + vi) < count; vi++) {
       uint8_t i = first + vi;
       uint8_t row_top = MENU_LIST_TOP_Y + vi * row_h;
-      uint8_t y = row_top + 7; // text baseline
+      uint8_t y = row_top + MENU_LIST_BASELINE_OFF; // text baseline
       if (i == cursor) {
         MENU_GFX.fillRect(4, row_top, MENU_CONTENT_W, row_h - 1, SSD1306_WHITE);
         MENU_GFX.setTextColor(SSD1306_BLACK);
@@ -2175,7 +2215,7 @@
   }
 
   void draw_menu_edit_disp(const char *title, const char *valbuf) {
-    MENU_GFX.setFont(SMALL_FONT);
+    MENU_GFX.setFont(MENU_FONT);
     MENU_GFX.setTextSize(1);
     MENU_GFX.setTextColor(SSD1306_WHITE);
     MENU_GFX.setCursor(6, 9);
@@ -2228,7 +2268,7 @@
     // highlight visibly moves rightward - and everything left of it
     // accumulates legible - as each octet is confirmed.
     void draw_menu_addr_edit_disp(const char *title, uint8_t *octets, uint8_t active_idx) {
-      MENU_GFX.setFont(SMALL_FONT);
+      MENU_GFX.setFont(MENU_FONT);
       MENU_GFX.setTextSize(1);
       MENU_GFX.setTextColor(SSD1306_WHITE);
       MENU_GFX.setCursor(6, 9);
@@ -2277,7 +2317,7 @@
         }
       }
 
-      MENU_GFX.setFont(SMALL_FONT);
+      MENU_GFX.setFont(MENU_FONT);
       MENU_GFX.setTextSize(1);
       MENU_GFX.setTextColor(SSD1306_WHITE);
       MENU_GFX.drawFastHLine(4, 50, 120, SSD1306_WHITE);
@@ -2301,7 +2341,7 @@
     // for two rows in the same vertical space that screen uses for one,
     // and digits/separators here have no descenders to leave room for.
     void draw_menu_datetime_edit_disp(uint8_t active_idx) {
-      MENU_GFX.setFont(SMALL_FONT);
+      MENU_GFX.setFont(MENU_FONT);
       MENU_GFX.setTextSize(1);
       MENU_GFX.setTextColor(SSD1306_WHITE);
       MENU_GFX.setCursor(6, 9);
@@ -2361,7 +2401,7 @@
         }
       }
 
-      MENU_GFX.setFont(SMALL_FONT);
+      MENU_GFX.setFont(MENU_FONT);
       MENU_GFX.setTextSize(1);
       MENU_GFX.setTextColor(SSD1306_WHITE);
       MENU_GFX.drawFastHLine(4, 50, 120, SSD1306_WHITE);
@@ -2381,7 +2421,7 @@
     // portion of the string plus the pending wheel selection, which is
     // always what's being actively edited (append-only, see plan notes).
     void draw_menu_text_edit_disp(const char *title, const char *text_buf, uint8_t wheel_idx) {
-      MENU_GFX.setFont(SMALL_FONT);
+      MENU_GFX.setFont(MENU_FONT);
       MENU_GFX.setTextSize(1);
       MENU_GFX.setTextColor(SSD1306_WHITE);
       MENU_GFX.setCursor(6, 9);
@@ -2433,7 +2473,7 @@
       MENU_GFX.setCursor(cand_x + 1, 32);
       MENU_GFX.print(candidate);
 
-      MENU_GFX.setFont(SMALL_FONT);
+      MENU_GFX.setFont(MENU_FONT);
       MENU_GFX.setTextSize(1);
       MENU_GFX.setTextColor(SSD1306_WHITE);
       MENU_GFX.drawFastHLine(4, 50, 120, SSD1306_WHITE);
@@ -2443,7 +2483,7 @@
   #endif
 
   void draw_settings_menu_disp() {
-    #if BOARD_MODEL == BOARD_HELTEC_T096
+    #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_T114
       // Unlike the other boards (whose display.clearDisplay() call in
       // update_display() wipes the whole panel buffer before getting
       // here every cycle), nothing clears menu_canvas on its own - it's

@@ -255,11 +255,9 @@ void measure_battery() {
       float battery_measurement = (float)(analogRead(pin_vbat)) * 0.00418;
     #elif BOARD_MODEL == BOARD_T3S3
       float battery_measurement = (float)(analogRead(pin_vbat)) / 4095.0*6.7828;
-    #elif BOARD_MODEL == BOARD_HELTEC_T114
-      float battery_measurement = (float)(analogRead(pin_vbat)) * 0.017165;
     #elif BOARD_MODEL == BOARD_HELTEC_T096
       float battery_measurement = (float)(analogRead(pin_vbat)) * 0.017165;
-    #elif BOARD_MODEL == BOARD_PROMICRO
+    #elif BOARD_MODEL == BOARD_HELTEC_T114 || BOARD_MODEL == BOARD_PROMICRO
       float battery_measurement = (float)(analogRead(pin_vbat)) * battery_v_scale;
     #elif BOARD_MODEL == BOARD_TECHO
       float battery_measurement = (float)(analogRead(pin_vbat)) * 0.007067;
