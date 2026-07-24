@@ -718,6 +718,19 @@
       #define Vext GPIO_NUM_36
       #define LORA_PA_MODEL LORA_PA_UNKNOWN
 
+      // RNode Settings menu (Menu.h), button-only navigation (tap = next,
+      // double-tap = back, hold = select/open - see menu_button_press()).
+      // No encoder, buzzer, or voltage divider on this board, so
+      // HAS_ENCODER/HAS_BUZZER/HAS_VSENSE/HAS_BATTERY_DIVIDER all stay at
+      // their default false (Boards.h fallback block below) - the Hardware
+      // page still shows CPU Temp via IS_ESP32S3 above, and WiFi IP/
+      // Netmask/MAC via HAS_WIFI above. The panel's normal Orientation is
+      // portrait (see disp_mode/setRotation(1) below in Display.h), but the
+      // menu itself always forces landscape while open regardless (generic
+      // update_display() handling, Display.h) - same as every other HAS_MENU
+      // board, no board-specific menu layout needed here.
+      #define HAS_MENU true
+
       const int pin_btn_usr1 = 0;
 
       #if defined(EXTERNAL_LEDS)
