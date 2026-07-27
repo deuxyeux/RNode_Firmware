@@ -86,6 +86,60 @@ uint32_t gnss_chars_processed()  { return gps_parser.charsProcessed(); }
 uint32_t gnss_checksum_passed()  { return gps_parser.passedChecksum(); }
 uint32_t gnss_checksum_failed()  { return gps_parser.failedChecksum(); }
 
+// Module presence auto-detection - relevant on any HAS_GPS board, but
+// especially MeshAdventurer-S3's ATGM336H, an optional add-on most builds
+// don't have installed (GNSS_ENABLED_DEFAULT false there, Boards.h): a user
+// who turns GPS on with no module actually wired would otherwise just see
+// permanently-zero Fix/Satellites forever, indistinguishable from "no sky
+// view yet". NMEA is a one-way broadcast (no ping/ack to probe with), so
+// presence can only be inferred from what's actually arriving on the UART -
+// specifically, at least one *complete, checksum-valid* NMEA sentence
+// (gnss_checksum_passed()) since detection last (re)started, not merely any
+// raw byte (gnss_chars_processed()). Confirmed on real hardware that raw
+// bytes alone are far too weak a signal: a floating/unconnected RX pin with
+// no module wired at all still picks up stray electrical noise and racks up
+// a nonzero char count with zero valid sentences ever assembled - a real
+// module reliably produces complete sentences within a second or two of
+// power-up, noise essentially never does. gnss_checksum_passed() is (like
+// charsProcessed()) a monotonic since-boot counter TinyGPSPlus never
+// resets, so a plain "is it > 0" check would wrongly stay PRESENT forever
+// after a module that was once seen gets unplugged and GPS is toggled
+// off/on again; a baseline snapshot at the start of each detection run
+// avoids that.
+#define GNSS_DETECT_PROBING 0 // still within its attempt window, no verdict yet
+#define GNSS_DETECT_PRESENT 1 // saw a new valid NMEA sentence since detection started
+#define GNSS_DETECT_ABSENT  2 // GNSS_DETECT_MAX_ATTEMPTS elapsed with nothing
+#define GNSS_DETECT_ATTEMPT_MS   1000 // how often gnss_update() re-checks
+#define GNSS_DETECT_MAX_ATTEMPTS 5    // ~5s total before giving up
+
+uint8_t  gnss_detect_state = GNSS_DETECT_PROBING;
+uint32_t gnss_detect_baseline_sentences = 0;
+uint8_t  gnss_detect_attempts = 0;
+unsigned long gnss_detect_last_attempt_ms = 0;
+
+// Called whenever GPS transitions to enabled (gnss_set_enabled() below,
+// which covers both gnss_init() at boot and the Settings menu's Enabled
+// toggle) - a fresh detection run starts from a fresh baseline every time,
+// so a module that gets plugged in after a prior ABSENT verdict, or
+// unplugged after a prior PRESENT one, is re-evaluated rather than stuck on
+// a stale result.
+void gnss_detect_reset() {
+  gnss_detect_state = GNSS_DETECT_PROBING;
+  gnss_detect_baseline_sentences = gps_parser.passedChecksum();
+  gnss_detect_attempts = 0;
+  gnss_detect_last_attempt_ms = millis();
+}
+
+// "Module" rather than gnss_chip_name() while probing/absent - the chip
+// name (Boards.h's GPS_MODEL) is just a compile-time label for whichever
+// chip this board is wired for, not proof it's actually there.
+const char *gnss_module_status_text() {
+  if (!gnss_enabled)                            return "OFF";
+  if (gnss_detect_state == GNSS_DETECT_PRESENT)  return gnss_chip_name();
+  if (gnss_detect_state == GNSS_DETECT_ABSENT)   return "NOT DETECTED";
+  return "DETECTING...";
+}
+
 // Shared by gnss_init() (boot) and the Settings menu's Enabled toggle
 // (Menu.h, MENU_STATE_GNSS_EDIT) - the single place that actually power-
 // cycles the receiver, so both paths stay in sync. Two independent,
@@ -116,6 +170,7 @@ void gnss_set_enabled(bool en) {
     #else
       GPS_SERIAL.begin(GPS_BAUD_RATE);
     #endif
+    gnss_detect_reset();
   } else {
     GPS_SERIAL.end();
   }
@@ -157,5 +212,17 @@ void gnss_init() {
 void gnss_update() {
   while (gnss_enabled && GPS_SERIAL.available()) {
     gps_parser.encode(GPS_SERIAL.read());
+  }
+
+  if (gnss_enabled && gnss_detect_state == GNSS_DETECT_PROBING) {
+    if (gps_parser.passedChecksum() > gnss_detect_baseline_sentences) {
+      gnss_detect_state = GNSS_DETECT_PRESENT;
+    } else if (millis() - gnss_detect_last_attempt_ms >= GNSS_DETECT_ATTEMPT_MS) {
+      gnss_detect_last_attempt_ms = millis();
+      gnss_detect_attempts++;
+      if (gnss_detect_attempts >= GNSS_DETECT_MAX_ATTEMPTS) {
+        gnss_detect_state = GNSS_DETECT_ABSENT;
+      }
+    }
   }
 }

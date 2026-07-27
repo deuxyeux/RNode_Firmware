@@ -90,11 +90,28 @@
     // the footer text's own ascent pokes above MENU_LIST_FOOTER_HLINE_Y.
     #define MENU_LIST_FOOTER_TEXT_Y (MENU_CANVAS_H - 12)
     #define MENU_EDIT_VALUE_CX (MENU_CANVAS_W / 2)
-    #define MENU_EDIT_VALUE_Y 102
-    #define MENU_EDIT_ARROW_Y 96
+    // Re-centered within the content region between the header hline (y=15)
+    // and the footer hline (MENU_EDIT_FOOTER_HLINE_Y, y=219) - the original
+    // 102/96 (T096's own starting values, just carried over) sat visibly
+    // high in T114's much taller 240px canvas, confirmed offset-up on real
+    // hardware. That region's midpoint is 15+(219-15)/2=117; Tamsyn6x12 at
+    // size 2 has an 18px ascent and no meaningful descent on digits, so its
+    // visual center is baseline-9, giving baseline=117+9=126.
+    //
+    // Arrows were first kept at a fixed 6px-above-value gap (matching the
+    // value visually instead of centering independently), but confirmed
+    // still sitting visibly high on real hardware - centering them
+    // independently instead: at size 1, Tamsyn6x12's ascent is 9px, so its
+    // visual center is baseline-4.5; solving baseline-4.5=117 (the same
+    // content-region midpoint the value uses) gives baseline=121.5,
+    // rounded to 122.
+    #define MENU_EDIT_VALUE_Y 126
+    #define MENU_EDIT_ARROW_Y 122
     #define MENU_EDIT_ARROW_R_EDGE (MENU_CANVAS_W - 5)
     #define MENU_EDIT_FOOTER_HLINE_Y (MENU_CANVAS_H - 21)
-    #define MENU_EDIT_FOOTER_TEXT_Y (MENU_CANVAS_H - 15)
+    // -12 rather than -15 - nudged 3px further down from the footer hline
+    // (2px then 1px more), per user request on real hardware.
+    #define MENU_EDIT_FOOTER_TEXT_Y (MENU_CANVAS_H - 12)
   #else
     #define MENU_GFX display
     #define MENU_FONT SMALL_FONT
@@ -319,27 +336,37 @@
 
   #if HAS_GPS == true
     #define GNSS_ITEM_ENABLED    0   // editable, immediate-commit toggle - power-cycles PIN_GPS_EN live
-    #define GNSS_ITEM_FIX        1   // read-only
-    #define GNSS_ITEM_SATELLITES 2   // read-only
-    #define GNSS_ITEM_LATITUDE   3   // read-only
-    #define GNSS_ITEM_LONGITUDE  4   // read-only
-    #define GNSS_ITEM_ALTITUDE   5   // read-only
-    // GPS time (UTC) - populates independently of Fix/location (see
+    // Auto-detected module presence (gnss_module_status_text(), GNSS.h) -
+    // shows the chip name once real NMEA bytes have been seen since
+    // Enabled last went true, "DETECTING..." during the first
+    // GNSS_DETECT_MAX_ATTEMPTS probe attempts, or "NOT DETECTED" once
+    // those are exhausted with nothing received. Matters most on boards
+    // where the receiver is an optional add-on (MeshAdventurer-S3's
+    // ATGM336H) - otherwise turning Enabled on with no module wired would
+    // just show permanently-zero Fix/Satellites, indistinguishable from
+    // "no sky view yet".
+    #define GNSS_ITEM_MODULE     1   // read-only
+    #define GNSS_ITEM_FIX        2   // read-only
+    #define GNSS_ITEM_SATELLITES 3   // read-only
+    #define GNSS_ITEM_LATITUDE   4   // read-only
+    #define GNSS_ITEM_LONGITUDE  5   // read-only
+    #define GNSS_ITEM_ALTITUDE   6   // read-only
+    // GNSS time (UTC) - populates independently of Fix/location (see
     // gnss_time_valid(), GNSS.h) - a receiver typically syncs time before
     // ever achieving a position fix, so this is a genuine diagnostic: Time
     // valid but Fix/Satellites still 0 confirms sentence parsing works
     // end-to-end and it's an antenna/sky-visibility issue, not firmware.
-    #define GNSS_ITEM_TIME       6   // read-only
+    #define GNSS_ITEM_TIME       7   // read-only
     // Raw link-health counters (gnss_chars_processed()/checksum_passed()/
     // failed(), GNSS.h) - genuine bring-up diagnostics for any HAS_GPS
     // board, not a one-off debug hack: distinguishes "MCU never receives
     // anything" (wrong pins/baud/power) from "receiving garbage" (baud
     // mismatch) from "valid data, chip just isn't getting a fix" (antenna/
     // hardware, not firmware).
-    #define GNSS_ITEM_NMEA_CHARS 7   // read-only
-    #define GNSS_ITEM_NMEA_CKSUM 8   // read-only - "passed/failed"
-    #define GNSS_ITEM_BACK       9
-    #define GNSS_ITEM_COUNT      10
+    #define GNSS_ITEM_NMEA_CHARS 8   // read-only
+    #define GNSS_ITEM_NMEA_CKSUM 9   // read-only - "passed/failed"
+    #define GNSS_ITEM_BACK       10
+    #define GNSS_ITEM_COUNT      11
   #endif
 
   #if HAS_SENSORS == true
@@ -379,16 +406,11 @@
       #define HW_NEXT_A2 HW_NEXT_A
     #endif
 
-    #if HAS_GPS == true
-      // Read-only - gnss_chip_name(), GNSS.h. Lives here rather than on the
-      // GNSS page itself, alongside the rest of this board's other
-      // component identification (CPU Temp etc.) - GNSS's own page stays
-      // scoped to live receiver data (Enabled/Fix/Satellites/Lat/Lon/Alt).
-      #define HW_ITEM_GPS_CHIP HW_NEXT_A2
-      #define HW_NEXT_A3       (HW_NEXT_A2 + 1)
-    #else
-      #define HW_NEXT_A3 HW_NEXT_A2
-    #endif
+    // No GPS chip-identification item here (removed - redundant with the
+    // GNSS page's own Module row, GNSS_ITEM_MODULE, which shows the exact
+    // same gnss_module_status_text() value plus the live Enabled/Fix/etc.
+    // fields it belongs alongside).
+    #define HW_NEXT_A3 HW_NEXT_A2
 
     #if HAS_WIFI == true
       #define HW_ITEM_WIFI_IP  HW_NEXT_A3
@@ -1362,8 +1384,8 @@
 
       const char *gps_result_text(uint8_t result) {
         if      (result == GPS_SYNC_ERR_NO_RTC)    return "NO RTC FOUND";
-        else if (result == GPS_SYNC_ERR_DISABLED)  return "GPS DISABLED";
-        else if (result == GPS_SYNC_ERR_NO_FIX)    return "NO GPS TIME";
+        else if (result == GPS_SYNC_ERR_DISABLED)  return "GNSS DISABLED";
+        else if (result == GPS_SYNC_ERR_NO_FIX)    return "NO GNSS TIME";
         else if (result == GPS_SYNC_ERR_RTC_WRITE) return "RTC WRITE FAIL";
         return "SYNCED!";
       }
@@ -2961,12 +2983,12 @@
         format_tz_offset(rtc_get_tz_offset_qh(), valbufs[RTC_ITEM_TIMEZONE]);
 
         #if MCU_VARIANT == MCU_ESP32 && (HAS_WIFI == true || HAS_ETHERNET == true)
-          labels[RTC_ITEM_SYNC_NTP] = "Sync NTP";
+          labels[RTC_ITEM_SYNC_NTP] = "Sync via NTP";
           valbufs[RTC_ITEM_SYNC_NTP][0] = 0;
         #endif
 
         #if HAS_GPS == true
-          labels[RTC_ITEM_SYNC_GPS] = "Sync GPS";
+          labels[RTC_ITEM_SYNC_GPS] = "Sync via GNSS";
           valbufs[RTC_ITEM_SYNC_GPS][0] = 0;
         #endif
 
@@ -2993,6 +3015,9 @@
         labels[GNSS_ITEM_ENABLED] = "Enabled";
         sprintf(valbufs[GNSS_ITEM_ENABLED], gnss_enabled ? "ON" : "OFF");
 
+        labels[GNSS_ITEM_MODULE] = "Module";
+        sprintf(valbufs[GNSS_ITEM_MODULE], "%s", gnss_module_status_text());
+
         labels[GNSS_ITEM_FIX] = "Fix";
         sprintf(valbufs[GNSS_ITEM_FIX], gnss_has_fix() ? "YES" : "NO");
 
@@ -3011,7 +3036,7 @@
         if (gnss_has_fix()) sprintf(valbufs[GNSS_ITEM_ALTITUDE], "%.0fm", gnss_altitude_meters());
         else                 sprintf(valbufs[GNSS_ITEM_ALTITUDE], "N/A");
 
-        labels[GNSS_ITEM_TIME] = "GPS Time";
+        labels[GNSS_ITEM_TIME] = "GNSS Time";
         if (gnss_time_valid()) sprintf(valbufs[GNSS_ITEM_TIME], "%02u:%02u:%02u", gnss_time_hour(), gnss_time_minute(), gnss_time_second());
         else                    sprintf(valbufs[GNSS_ITEM_TIME], "N/A");
 
@@ -3097,10 +3122,8 @@
           else                sprintf(valbufs[HW_ITEM_BATTERY], "N/A");
         #endif
 
-        #if HAS_GPS == true
-          labels[HW_ITEM_GPS_CHIP] = "GPS Chip";
-          sprintf(valbufs[HW_ITEM_GPS_CHIP], "%s", gnss_chip_name());
-        #endif
+        // No GNSS Chip row here anymore - redundant with the GNSS page's
+        // own Module row (GNSS_ITEM_MODULE), see HW_NEXT_A3's own comment.
 
         #if HAS_WIFI == true
           // wr_device_ip/subnet only mean anything once actually connected

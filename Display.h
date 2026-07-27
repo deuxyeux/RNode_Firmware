@@ -265,17 +265,13 @@ bool device_firmware_ok();
   #define STAT_AREA_W 135
   #define STAT_AREA_H 130
   #define DISP_AREA_W 135
-  // Canvas is allocated at 120 rows (was 110) so landscape's radio-params/
-  // GNSS box (Display.h, draw_disp_area()'s BOARD_HELTEC_T114 branch) has
-  // room for a 5th line - landscape's own push there only sends rows 0-119
-  // to a physical area with genuine spare room below it (its content sits
-  // at panel row p_ad_y=3 through 3+120-1=122, comfortably inside the
-  // 135-row landscape-oriented panel). Portrait's own 110+130=240 exact
-  // stacking (the comment above) is untouched - see DISP_AREA_PORTRAIT_H,
-  // which keeps portrait's own push/stat_area positioning pinned to the
-  // original 110 regardless of this canvas now being taller, so portrait
-  // is unaffected by rows 110-119 existing.
-  #define DISP_AREA_H 120
+  // Was briefly grown to 120 rows (from 110) to fit a landscape-only 5th
+  // line in the radio-params/GNSS box (Display.h, draw_disp_area()'s
+  // BOARD_HELTEC_T114 branch) - that line (GNSS Time) got merged onto the
+  // Fix line instead, so the extra rows are unused again; reverted back to
+  // matching DISP_AREA_PORTRAIT_H exactly, same as before that 5th line
+  // ever existed.
+  #define DISP_AREA_H 110
   #define DISP_AREA_PORTRAIT_H 110
   #define DISP_BM_X 36
   #define DIAG_COL2 64
@@ -464,11 +460,10 @@ void update_area_positions() {
       p_ad_x = (135-DISP_AREA_W)/2;
       p_ad_y = 0;
       p_as_x = (135-STAT_AREA_W)/2;
-      // DISP_AREA_PORTRAIT_H (110), not DISP_AREA_H (120) - the canvas
-      // itself is taller now (landscape's radio-params/GNSS box uses the
-      // extra rows), but portrait's own stacking stays pinned to the
-      // original height so stat_area doesn't shift down into where those
-      // extra rows would otherwise land - see DISP_AREA_H's own comment.
+      // DISP_AREA_PORTRAIT_H, same value as DISP_AREA_H now - kept as its
+      // own constant since portrait's stacking should stay pinned to it
+      // regardless of whether DISP_AREA_H ever grows again for some other
+      // reason (see its own comment).
       p_as_y = DISP_AREA_PORTRAIT_H;
       t114_wf_pixel_width = WF_BORDER_W-4;
     } else if (disp_mode == DISP_MODE_LANDSCAPE) {
@@ -1689,6 +1684,34 @@ void draw_mw_icon(int px, int py, Adafruit_GFX &gfx = stat_area) {
   }
 }
 
+#if HAS_GPS == true
+// Plain on/off indicator for gnss_enabled (GNSS.h) - not a fix/data
+// readout (T114's own alternating GNSS info page, draw_disp_area()'s
+// BOARD_HELTEC_T114 branch, already covers that in detail) - just whether
+// the receiver is currently switched on, same semantic level as
+// draw_lora_icon()/draw_mw_icon() above (radio_online/mw_radio_online -
+// "is this subsystem active", not link/fix detail). Text label instead of
+// new bitmap art, same shortcut draw_espnow_icon() below already takes.
+void draw_gps_icon(int px, int py, Adafruit_GFX &gfx = stat_area) {
+  bool active = gnss_enabled;
+  // 17px-tall fill (not 16), same as draw_espnow_icon()/draw_eth_icon()
+  // below - bm_frame's border lines sit one row further apart than the
+  // 16px icon grid, so a 16px fill leaves the bottom interior row
+  // showing through as an unfilled dark line.
+  gfx.fillRect(px, py, 16, 17, active ? SSD1306_WHITE : SSD1306_BLACK);
+  gfx.setFont(&Picopixel);
+  gfx.setTextSize(1);
+  gfx.setTextWrap(false);
+  gfx.setTextColor(active ? SSD1306_BLACK : SSD1306_WHITE);
+
+  const char *buf = "GPS";
+  int16_t tx1, ty1; uint16_t tw, th;
+  gfx.getTextBounds(buf, 0, 0, &tx1, &ty1, &tw, &th);
+  gfx.setCursor(px + (16 - (int16_t)tw) / 2, py + 11);
+  gfx.print(buf);
+}
+#endif
+
 #if HAS_ESPNOW == true
 // espnow_ui_active()/espnow_display_rx/espnow_display_tx (ESPNOW.h) aren't
 // declared yet at this point - Display.h is #include'd (Utilities.h) before
@@ -2290,6 +2313,9 @@ void draw_stat_area() {
         draw_cable_icon(1, st_box_y0, stat_area_land);
         draw_bt_icon(1, st_box_y1, stat_area_land);
         draw_lora_icon(21, st_box_y0, stat_area_land);
+        #if HAS_GPS == true
+          draw_gps_icon(41, st_box_y0, stat_area_land);
+        #endif
         #if BOARD_MODEL == BOARD_MESHPOE_S3
           draw_eth_icon(21, st_box_y1, stat_area_land);
         #elif HAS_ESPNOW == true
@@ -2398,8 +2424,10 @@ void draw_stat_area() {
         stat_area.drawRect(0,  rx_box_y,    18, 19, SSD1306_WHITE);  // RX
         stat_area.drawRect(20, rx_box_y,    18, 19, SSD1306_WHITE);  // TX
 
-        // Three extra empty boxes, same size/spacing, one to the right of
-        // each of lora/2.4G/TX - reserved slots, no icon drawn inside yet.
+        // Three extra boxes, same size/spacing, one to the right of each of
+        // lora/2.4G/TX - the first (lora's row) now holds draw_gps_icon()
+        // (HAS_GPS boards only); the other two stay reserved, no icon drawn
+        // inside yet.
         stat_area.drawRect(40, st_box_y0-1, 18, 19, SSD1306_WHITE);
         stat_area.drawRect(40, st_box_y1-1, 18, 19, SSD1306_WHITE);
         stat_area.drawRect(40, rx_box_y,    18, 19, SSD1306_WHITE);
@@ -2439,6 +2467,9 @@ void draw_stat_area() {
       draw_cable_icon(1, st_box_y0);
       draw_bt_icon(1, st_box_y1);
       draw_lora_icon(21, st_box_y0);
+      #if HAS_GPS == true
+        draw_gps_icon(41, st_box_y0);
+      #endif
       #if BOARD_MODEL == BOARD_MESHPOE_S3
         draw_eth_icon(21, st_box_y1);
       #elif HAS_ESPNOW == true
@@ -3163,11 +3194,11 @@ void draw_disp_area() {
         // this box to match whatever's actually going to be visible, or
         // its right edge would be silently cropped off mid-push.
         int16_t disp_w = (disp_mode == DISP_MODE_LANDSCAPE) ? DISP_AREA_LAND_BOX_W : disp_area.width();
-        // Landscape gets the canvas's full (grown) height, fitting a 5th
-        // GNSS line - portrait stays pinned to the original height (both
-        // matching DISP_AREA_PORTRAIT_H, not disp_area.height()), since
-        // portrait's own push/stat_area positioning don't have the same
-        // spare room landscape does (see DISP_AREA_H's own comment).
+        // disp_area.height() and DISP_AREA_PORTRAIT_H are the same value
+        // now (see DISP_AREA_H's own comment) - box_h works out identical
+        // either way, kept as a mode-conditional expression rather than
+        // collapsed to one so this doesn't silently change again if
+        // DISP_AREA_H ever grows for some other reason.
         int16_t box_h = ((disp_mode == DISP_MODE_LANDSCAPE) ? disp_area.height() : DISP_AREA_PORTRAIT_H) - 64;
         disp_area.fillRect(0, 64, disp_w, box_h, SSD1306_BLACK);
         // Border box, matching the waterfall's - drawn every cycle
@@ -3181,7 +3212,11 @@ void draw_disp_area() {
         disp_area.setTextColor(SSD1306_WHITE); disp_area.setTextSize(1);
         // Landscape-only nudge - portrait's own rows (76/86/96/106) are
         // already tuned against the box's portrait height, unaffected.
-        int16_t rp_y_off = (disp_mode == DISP_MODE_LANDSCAPE) ? -3 : 0;
+        // -1 rather than -3 - moved 2px further down for both the LoRa-
+        // params and GNSS-params pages, per user request on real hardware
+        // (T114 only - this whole block is already scoped to
+        // BOARD_HELTEC_T114, every other board's layout is untouched).
+        int16_t rp_y_off = (disp_mode == DISP_MODE_LANDSCAPE) ? -1 : 0;
 
         // Alternates this box with a GNSS info page (same fields as the
         // Settings menu's own GNSS page, Menu.h) every RADIO_PARAMS_PAGE_MS
@@ -3215,50 +3250,43 @@ void draw_disp_area() {
             // here too rather than leaving T114 on the old wording. Chip
             // name dropped per explicit request - matches every other
             // variant's page exactly now, not just the wording.
-            disp_area.setCursor(4, 76+rp_y_off);
-            disp_area.printf("Fix: %s", gnss_has_fix() ? "YES" : "NO");
+            disp_area.setCursor(4, 73+rp_y_off);
+            // Fix and Time share this line in both orientations - the fit
+            // (measured against DISP_AREA_LAND_BOX_W's 118px-wide box,
+            // landscape's narrower of the two, Org_01/SMALL_FONT, ~100px
+            // used) doesn't depend on disp_mode at all, so this doesn't
+            // need its own landscape/portrait branch the way some of this
+            // box's other layout tweaks do. No space after either colon
+            // (unlike the other lines here) to stay inside that margin.
+            if (gnss_time_valid()) disp_area.printf("Fix: %s Time: %02u:%02u:%02u", gnss_has_fix() ? "YES" : "NO", gnss_time_hour(), gnss_time_minute(), gnss_time_second());
+            else                    disp_area.printf("Fix: %s Time: N/A", gnss_has_fix() ? "YES" : "NO");
 
-            disp_area.setCursor(4, 86+rp_y_off);
+            disp_area.setCursor(4, 83+rp_y_off);
             if (gnss_has_fix()) disp_area.printf("Sats: %u  Alt: %.0fm", (unsigned)gnss_satellite_count(), gnss_altitude_meters());
             else                 disp_area.printf("Sats: %u  Alt: N/A", (unsigned)gnss_satellite_count());
 
-            disp_area.setCursor(4, 96+rp_y_off);
+            disp_area.setCursor(4, 93+rp_y_off);
             if (gnss_has_fix()) disp_area.printf("Lat: %.5f", gnss_latitude());
             else                 disp_area.printf("Lat: N/A");
 
-            disp_area.setCursor(4, 106+rp_y_off);
+            disp_area.setCursor(4, 103+rp_y_off);
             if (gnss_has_fix()) disp_area.printf("Long: %.5f", gnss_longitude());
             else                 disp_area.printf("Long: N/A");
-
-            // Landscape-only 5th line, in the box's own extra height there
-            // (see box_h/DISP_AREA_H above) - portrait's box is unchanged/
-            // unenlarged, so there's no room for it there; the Settings
-            // menu's own GNSS page always has Time regardless of
-            // orientation.
-            if (disp_mode == DISP_MODE_LANDSCAPE) {
-              disp_area.setCursor(4, 116+rp_y_off);
-              // "GNSS Time (UTC):" confirmed too long on real hardware -
-              // ran past the box's right edge, per user report. Shortened
-              // to "GNSS Time:" (still UTC - see gnss_time_valid()/GNSS.h -
-              // just not spelled out in the label anymore).
-              if (gnss_time_valid()) disp_area.printf("GNSS Time: %02u:%02u:%02u", gnss_time_hour(), gnss_time_minute(), gnss_time_second());
-              else                    disp_area.printf("GNSS Time: N/A");
-            }
           } else
         #endif
         {
-          disp_area.setCursor(4, 76+rp_y_off);
+          disp_area.setCursor(4, 73+rp_y_off);
           disp_area.printf("%.3fMHz", (float)lora_freq/1000000.0);
-          disp_area.setCursor(4, 86+rp_y_off);
+          disp_area.setCursor(4, 83+rp_y_off);
           disp_area.printf("BW %.0fK SF%d CR4:%d", (float)lora_bw/1000.0, lora_sf, lora_cr);
-          disp_area.setCursor(4, 96+rp_y_off);
+          disp_area.setCursor(4, 93+rp_y_off);
           disp_area.printf("TX POWER %ddBm", lora_txp);
           // noise_floor (Config.h) defaults to -292 (same never-sampled
           // sentinel as last_rssi) until update_noise_floor() has
           // collected a full NOISE_FLOOR_SAMPLES window (RNode_Firmware.
           // ino) - stays blank until then rather than showing that.
           if (noise_floor != -292) {
-            disp_area.setCursor(4, 106+rp_y_off);
+            disp_area.setCursor(4, 103+rp_y_off);
             disp_area.printf("NOISE FLOOR %ddBm", noise_floor);
           }
         }
@@ -3300,10 +3328,12 @@ void update_disp_area() {
       int16_t disp_row_bytes = (disp_area.width()+7)/8;
       drawBitmap(p_ad_x, p_ad_y, disp_area.getBuffer(), DISP_AREA_LAND_BOX_W, disp_area.height(), SSD1306_WHITE, SSD1306_BLACK, disp_row_bytes);
     } else {
-      // DISP_AREA_PORTRAIT_H (110), not disp_area.height() (120) - portrait
-      // must not push the extra rows the canvas grew by for landscape's
-      // benefit, or they'd land on stat_area's own territory (p_as_y is
-      // pinned to DISP_AREA_PORTRAIT_H too, see update_area_positions()).
+      // DISP_AREA_PORTRAIT_H, same value as disp_area.height() now (see
+      // DISP_AREA_H's own comment) - kept explicit rather than switched to
+      // disp_area.height() so portrait stays pinned to it (not
+      // stat_area's own territory, p_as_y is pinned to
+      // DISP_AREA_PORTRAIT_H too, see update_area_positions()) if
+      // DISP_AREA_H ever grows again for some other reason.
       drawBitmap(p_ad_x, p_ad_y, disp_area.getBuffer(), disp_area.width(), DISP_AREA_PORTRAIT_H, SSD1306_WHITE, SSD1306_BLACK);
     }
   #else
