@@ -169,6 +169,11 @@
   #define LORA_PA_GC1109   0x01
   #define LORA_PA_KCT8103L 0x02
 
+  #define GPS_MODEL_UNKNOWN 0x00
+  #define GPS_MODEL_UC6580  0x01
+  #define GPS_MODEL_L76K    0x02
+  #define GPS_MODEL_AT6558  0x03
+
   #define HAS_DISPLAY false
   #define HAS_BLUETOOTH false
   #define HAS_BLE false
@@ -235,10 +240,6 @@
     #define EEPROM_SIZE 1024
     #define EEPROM_OFFSET EEPROM_SIZE-EEPROM_RESERVED
     #define CONFIG_OFFSET 0
-
-    #define GPS_BAUD_RATE 9600
-    #define PIN_GPS_TX 12
-    #define PIN_GPS_RX 34
 
     #if BOARD_MODEL == BOARD_GENERIC_ESP32
       #define HAS_DISPLAY true
@@ -364,6 +365,30 @@
       // the Settings menu's Voltage Divider Ratio field (vsense_divider_ratio,
       // Config.h), persisted to EEPROM (ADDR_CONF_VSR) via CMD_VSENSE_DIV.
       #define VSENSE_DIVIDER_RATIO_DEFAULT 12.9
+
+      // Optional ATGM336H GNSS module (AT6558 chipset) - a "high power"
+      // unit with no enable/power-control pin at all, unlike either nRF52
+      // HAS_GPS board, so neither PIN_GPS_EN nor PIN_GPS_STANDBY apply here
+      // - the Settings menu's Enabled toggle (GNSS.h) only starts/stops
+      // GPS_SERIAL on this board, nothing hardware-side to power-cycle.
+      // ESP32's UART peripherals bind pins at .begin() time (not at compile
+      // time like the nRF52 boards' Serial2), so GPS_SERIAL is Serial1 (the
+      // only free hardware UART - Serial0/GPIO43-44 is this board's own
+      // HAS_DEBUG_UART channel below, and the default Serial is the native
+      // USB CDC KISS link) with its rx/tx pins passed explicitly - see
+      // gnss_set_enabled(), GNSS.h.
+      #define HAS_GPS true
+      #define GPS_MODEL GPS_MODEL_AT6558
+      #define GPS_SERIAL Serial1
+      #define GPS_BAUD_RATE 9600 // AT6558's factory-default NMEA baud
+      #define PIN_GPS_RX 3
+      #define PIN_GPS_TX 16
+      #define PIN_GPS_PPS 5
+      // This is an optional, not-always-populated add-on (unlike T096/
+      // T114's built-in receivers) - defaults off so a board without the
+      // module installed doesn't sit there listening to an unconnected
+      // UART by default.
+      #define GNSS_ENABLED_DEFAULT false
 
       const int pin_sclk = 1;
       const int pin_reset = 2;
@@ -717,6 +742,28 @@
       #define OCP_TUNED 0x28
       #define Vext GPIO_NUM_36
       #define LORA_PA_MODEL LORA_PA_UNKNOWN
+
+      // Built-in L76K GNSS - unlike T114's board revision, this one has a
+      // real dedicated enable pin (not shared with Vext/the display), plus
+      // a working reset pin and the same soft-standby line - all fully
+      // wired (not commented out) in the vendor reference design, so this
+      // is a standard always-populated feature, not an optional add-on -
+      // GNSS_ENABLED_DEFAULT stays at its global default (true).
+      // gnss_set_enabled() (GNSS.h) drives both PIN_GPS_EN and
+      // PIN_GPS_STANDBY together on Enabled toggle - harmless overlap
+      // (STANDBY is moot with EN off; both HIGH when on matches the
+      // reference driver's own behavior of using both independently).
+      #define HAS_GPS true
+      #define GPS_MODEL GPS_MODEL_L76K
+      #define GPS_SERIAL Serial1
+      #define GPS_BAUD_RATE 9600 // L76K's factory-default NMEA baud
+
+      #define PIN_GPS_RX 39      // MCU RX - wired to GPS TX-out
+      #define PIN_GPS_TX 38      // MCU TX - wired to GPS RX-in
+      #define PIN_GPS_PPS 41
+      #define PIN_GPS_EN 34      // active LOW
+      #define PIN_GPS_RESET 42   // active LOW, needs a >100ms hold to reset
+      #define PIN_GPS_STANDBY 40 // HIGH=force wake, LOW=allow sleep
 
       // RNode Settings menu (Menu.h), button-only navigation (tap = next,
       // double-tap = back, hold = select/open - see menu_button_press()).
@@ -1227,6 +1274,31 @@
       #define PIN_T114_ADC_EN 6
       #define PIN_VEXT_EN 21
 
+      #define HAS_GPS true
+      #define GPS_MODEL GPS_MODEL_L76K
+
+      // L76K GNSS, wired to this core's second hardware UART (Serial2 -
+      // cores/nRF5/Uart.cpp auto-instantiates it since PIN_SERIAL2_RX/TX
+      // are always defined on this variant,
+      // ~/.arduino15/packages/Heltec_nRF52/hardware/Heltec_nRF52/variants/
+      // HT-n5262/variant.h - same core family as T096's HT-n5262G). No
+      // name collisions with vendor macros here (unlike T096's variant.h,
+      // this one defines no GPS_*/PIN_GPS_* macros of its own), so no
+      // #undef guards needed.
+      #define GPS_SERIAL Serial2
+      #define GPS_BAUD_RATE 9600 // L76K's factory-default NMEA baud
+
+      #define PIN_GPS_RX 37   // Serial2 RX - MCU receives here (wired to GPS TX-out)
+      #define PIN_GPS_TX 39   // Serial2 TX - MCU transmits here (wired to GPS RX-in)
+      #define PIN_GPS_PPS 36
+
+      // No dedicated GPS enable pin on this board revision - GPS shares
+      // PIN_VEXT_EN above with the display, so a T096-style PIN_GPS_EN
+      // power-cutoff would also kill the display. The "Enabled" toggle
+      // instead drives the L76K's own PIN_GPS_STANDBY line (soft sleep/
+      // wake, independent of VEXT) - see GNSS.h's gnss_set_enabled().
+      #define PIN_GPS_STANDBY 34
+
       // Battery voltage sensing (measure_battery(), Power.h) goes through
       // pin_vbat and a fixed volts-per-ADC-count constant, same as
       // BOARD_PROMICRO - the RNode Settings menu's Hardware page exposes a
@@ -1377,6 +1449,39 @@
       #define PIN_T096_TFT_RST 13
       #define PIN_T096_TFT_EN 26
       #define PIN_T096_TFT_BLGT 44
+
+      #define HAS_GPS true
+      #define GPS_MODEL GPS_MODEL_UC6580
+
+      // UC6580 GNSS, wired to this core's second hardware UART (Serial2 -
+      // cores/nRF5/Uart.cpp auto-instantiates it since PIN_SERIAL2_RX/TX
+      // are always defined on this variant,
+      // ~/.arduino15/packages/Heltec_nRF52/hardware/Heltec_nRF52/variants/
+      // HT-n5262G/variant.h). GPS_SERIAL is a portability indirection so
+      // GNSS.h says GPS_SERIAL instead of hardcoding Serial2 - a future
+      // ESP32 GPS board would define this to Serial1 and additionally need
+      // explicit rx/tx args at .begin() time.
+      #define GPS_SERIAL Serial2
+      #define GPS_BAUD_RATE 115200
+
+      // No name collision with the vendor core's own GPS_RX_PIN/GPS_TX_PIN.
+      // PIN_GPS_RX=23 is genuinely the MCU's receive pin (wired to GPS
+      // TX-out) - the vendor header's own inline comment on this pin is
+      // backwards, verified against Uart::Uart()'s real PSEL.RXD/TXD
+      // assignment (cores/nRF5/Uart.cpp), not just copied from the vendor
+      // header.
+      #define PIN_GPS_RX 23
+      #define PIN_GPS_TX 25
+
+      // The vendor variant.h defines these exact names too (same values,
+      // different token spelling, e.g. "(0+6)" vs "6") - #undef first to
+      // avoid a harmless macro-redefinition warning.
+      #undef PIN_GPS_EN
+      #define PIN_GPS_EN 6        // active LOW
+      #undef PIN_GPS_PPS
+      #define PIN_GPS_PPS 43
+      #undef PIN_GPS_RESET
+      #define PIN_GPS_RESET 46    // active LOW, needs a >100ms hold to reset
 
       // pins for buttons on Heltec T096
       const int pin_btn_usr1 = 42;
@@ -1589,6 +1694,13 @@
     #define HAS_RTC false
   #endif
 
+  // Whether a GNSS receiver (GNSS.h) is present. No global PIN_GPS_*
+  // fallback is needed - GNSS.h is only ever #include'd when HAS_GPS is
+  // true, same reasoning as HAS_RTC's pins above never needing one.
+  #ifndef HAS_GPS
+    #define HAS_GPS false
+  #endif
+
   // Whether this board has a free UART broken out to a header/pins that
   // isn't used for anything else (Serial/KISS included) - see
   // BOARD_MESHPOE_S3's block above for the pattern (Serial0/GPIO43-44).
@@ -1614,6 +1726,13 @@
   // has ever touched Sound in the menu) - see sound_enabled, Utilities.h.
   #ifndef SOUND_ENABLED_DEFAULT
     #define SOUND_ENABLED_DEFAULT true
+  #endif
+
+  // Whether the GNSS receiver defaults to enabled at first boot (before the
+  // user has ever touched Enabled on the Settings menu's GNSS page) - see
+  // gnss_enabled, GNSS.h.
+  #ifndef GNSS_ENABLED_DEFAULT
+    #define GNSS_ENABLED_DEFAULT true
   #endif
 
   #ifndef VSENSE_DIVIDER_RATIO_DEFAULT

@@ -303,6 +303,29 @@ void setup() {
     rtc_init();
   #endif
 
+  #if HAS_SENSORS == true
+    sensors_init();
+  #endif
+
+  #if HAS_GPS == true
+    // ADDR_CONF_GNS is a raw physical byte, not offset via eeprom_addr() -
+    // it resolves to a different (platform-appropriate) genuinely-free
+    // address per MCU_VARIANT - see its own comment, ROM.h.
+    #if HAS_EEPROM
+      uint8_t gns_raw = EEPROM.read(ADDR_CONF_GNS);
+    #elif MCU_VARIANT == MCU_NRF52
+      uint8_t gns_raw = eeprom_read(ADDR_CONF_GNS);
+    #endif
+    // Explicit ON/OFF only ever get written as GNS_ENABLE_BYTE/
+    // GNS_DISABLE_BYTE (see gns_conf_save()) - any other value (erased
+    // EEPROM reads 0xFF) means "never touched", so leave gnss_enabled at
+    // its compiled default (GNSS.h, defaults true) instead of forcing it
+    // either way.
+    if (gns_raw == GNS_ENABLE_BYTE) gnss_enabled = true;
+    else if (gns_raw == GNS_DISABLE_BYTE) gnss_enabled = false;
+    gnss_init();
+  #endif
+
   #if HAS_BUZZER == true
     #if HAS_EEPROM
       uint8_t snd_raw = EEPROM.read(eeprom_addr(ADDR_CONF_SND));
@@ -1104,6 +1127,10 @@ void serial_callback(uint8_t sbyte) {
           uint8_t status = rtc_sync_ntp();
           kiss_indicate_ntp_sync(status);
         }
+      #endif
+    } else if (command == CMD_SENSOR) {
+      #if HAS_SENSORS == true
+        kiss_indicate_sensor();
       #endif
     } else if (command == CMD_TXPOWER) {
       #if HAS_ESPNOW == true
@@ -2190,6 +2217,10 @@ void loop() {
 
   #if HAS_ESPNOW == true
     if (espnow_enabled) update_espnow();
+  #endif
+
+  #if HAS_GPS == true
+    gnss_update();
   #endif
 
   #if HAS_INPUT

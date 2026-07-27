@@ -39,19 +39,28 @@
     #define MENU_FONT SMALL_FONT
     #define MENU_CONTENT_W (MENU_CANVAS_W - 8) // 4px margin each side
     #define MENU_LIST_ROW_H 11
-    #define MENU_LIST_VISIBLE_ROWS 4
+    // 5 rows * 11px from MENU_LIST_TOP_Y (15) reaches y=70, which is exactly
+    // where the footer below now starts - same zero-gap fit the original
+    // 4-row layout had at y=59, just one row taller. The previous 4-row
+    // layout only used the canvas up to ~y=67 (footer text baseline 63 +
+    // descender), leaving a bare ~13px unused at the bottom of the 80px
+    // canvas (MENU_CANVAS_H, Display.h) - confirmed on hardware.
+    #define MENU_LIST_VISIBLE_ROWS 5
     #define MENU_LIST_TOP_Y 15
     // Org_01's ascent is ~4px, so a 7px baseline offset centers it fine in
     // an 11px row - see MENU_LIST_BASELINE_OFF's use in draw_menu_list_disp().
     #define MENU_LIST_BASELINE_OFF 7
-    #define MENU_LIST_FOOTER_HLINE_Y (MENU_CANVAS_H - 21)
-    #define MENU_LIST_FOOTER_TEXT_Y (MENU_CANVAS_H - 17)
+    #define MENU_LIST_FOOTER_HLINE_Y (MENU_CANVAS_H - 10)
+    #define MENU_LIST_FOOTER_TEXT_Y (MENU_CANVAS_H - 6)
     #define MENU_EDIT_VALUE_CX (MENU_CANVAS_W / 2)
     #define MENU_EDIT_VALUE_Y 36
     #define MENU_EDIT_ARROW_Y 34
     #define MENU_EDIT_ARROW_R_EDGE (MENU_CANVAS_W - 5)
-    #define MENU_EDIT_FOOTER_HLINE_Y (MENU_CANVAS_H - 21)
-    #define MENU_EDIT_FOOTER_TEXT_Y (MENU_CANVAS_H - 17)
+    // Matches the list screen's footer position above - same footer line
+    // height across every T096 menu screen, even though the edit screen's
+    // own content doesn't need the reclaimed space.
+    #define MENU_EDIT_FOOTER_HLINE_Y (MENU_CANVAS_H - 10)
+    #define MENU_EDIT_FOOTER_TEXT_Y (MENU_CANVAS_H - 6)
   #elif BOARD_MODEL == BOARD_HELTEC_T114
     // Same off-screen-canvas reasoning as T096 above (Adafruit_ST7789 has
     // no framebuffer either) - menu_canvas here is portrait, 135x240
@@ -123,6 +132,9 @@
   #define MENU_STATE_RTC_EDIT       16  // Set Time/Date: sequential Year/Month/Day/Hour/Minute/Second editor
   #define MENU_STATE_STATUS_POPUP   17  // Generic transient status box (Sync NTP, Clear Static, ...) - see menu_open_popup()
   #define MENU_STATE_RTC_TZ_EDIT    18  // editing the Timezone display-offset field
+  #define MENU_STATE_GNSS_LIST      19  // GNSS submenu list (HAS_GPS boards)
+  #define MENU_STATE_GNSS_EDIT      20  // editing the Enabled field
+  #define MENU_STATE_SENSORS_LIST   21  // Sensors submenu list (HAS_SENSORS boards) - read-only, no edit state
 
   // The Hardware page exists whenever there's anything board-level worth
   // showing (battery/voltage sensing via HAS_PMU, or an ESP32-S3's CPU
@@ -206,11 +218,25 @@
     #define MENU_NEXT_IDX_A3 MENU_NEXT_IDX_A2
   #endif
 
-  #if MENU_HAS_HW_PAGE == true
-    #define MENU_ITEM_HARDWARE MENU_NEXT_IDX_A3
-    #define MENU_NEXT_IDX_B (MENU_NEXT_IDX_A3 + 1)
+  #if HAS_GPS == true
+    #define MENU_ITEM_GNSS   MENU_NEXT_IDX_A3
+    #define MENU_NEXT_IDX_A4 (MENU_NEXT_IDX_A3 + 1)
   #else
-    #define MENU_NEXT_IDX_B MENU_NEXT_IDX_A3
+    #define MENU_NEXT_IDX_A4 MENU_NEXT_IDX_A3
+  #endif
+
+  #if HAS_SENSORS == true
+    #define MENU_ITEM_SENSORS MENU_NEXT_IDX_A4
+    #define MENU_NEXT_IDX_A5   (MENU_NEXT_IDX_A4 + 1)
+  #else
+    #define MENU_NEXT_IDX_A5 MENU_NEXT_IDX_A4
+  #endif
+
+  #if MENU_HAS_HW_PAGE == true
+    #define MENU_ITEM_HARDWARE MENU_NEXT_IDX_A5
+    #define MENU_NEXT_IDX_B (MENU_NEXT_IDX_A5 + 1)
+  #else
+    #define MENU_NEXT_IDX_B MENU_NEXT_IDX_A5
   #endif
 
   #define MENU_ITEM_SAVE_EXIT MENU_NEXT_IDX_B
@@ -276,8 +302,59 @@
     #else
       #define RTC_NEXT_0 4
     #endif
-    #define RTC_ITEM_BACK  RTC_NEXT_0
+
+    // No MCU_VARIANT/network guard here, unlike Sync NTP above - reading
+    // the GNSS receiver's own NMEA date/time (GNSS.h) has no platform or
+    // networking dependency at all, see rtc_sync_gps() (RTC.h).
+    #if HAS_GPS == true
+      #define RTC_ITEM_SYNC_GPS RTC_NEXT_0
+      #define RTC_NEXT_1 (RTC_NEXT_0 + 1)
+    #else
+      #define RTC_NEXT_1 RTC_NEXT_0
+    #endif
+
+    #define RTC_ITEM_BACK  RTC_NEXT_1
     #define RTC_ITEM_COUNT (RTC_ITEM_BACK + 1)
+  #endif
+
+  #if HAS_GPS == true
+    #define GNSS_ITEM_ENABLED    0   // editable, immediate-commit toggle - power-cycles PIN_GPS_EN live
+    #define GNSS_ITEM_FIX        1   // read-only
+    #define GNSS_ITEM_SATELLITES 2   // read-only
+    #define GNSS_ITEM_LATITUDE   3   // read-only
+    #define GNSS_ITEM_LONGITUDE  4   // read-only
+    #define GNSS_ITEM_ALTITUDE   5   // read-only
+    // GPS time (UTC) - populates independently of Fix/location (see
+    // gnss_time_valid(), GNSS.h) - a receiver typically syncs time before
+    // ever achieving a position fix, so this is a genuine diagnostic: Time
+    // valid but Fix/Satellites still 0 confirms sentence parsing works
+    // end-to-end and it's an antenna/sky-visibility issue, not firmware.
+    #define GNSS_ITEM_TIME       6   // read-only
+    // Raw link-health counters (gnss_chars_processed()/checksum_passed()/
+    // failed(), GNSS.h) - genuine bring-up diagnostics for any HAS_GPS
+    // board, not a one-off debug hack: distinguishes "MCU never receives
+    // anything" (wrong pins/baud/power) from "receiving garbage" (baud
+    // mismatch) from "valid data, chip just isn't getting a fix" (antenna/
+    // hardware, not firmware).
+    #define GNSS_ITEM_NMEA_CHARS 7   // read-only
+    #define GNSS_ITEM_NMEA_CKSUM 8   // read-only - "passed/failed"
+    #define GNSS_ITEM_BACK       9
+    #define GNSS_ITEM_COUNT      10
+  #endif
+
+  #if HAS_SENSORS == true
+    // Fully read-only - no editable fields, so unlike GNSS's own list above
+    // there's no matching MENU_STATE_SENSORS_EDIT, only BACK does anything
+    // on confirm (see menu_confirm_select()). Humidity/Pressure read N/A on
+    // a BMP280-only board (see sensor_model, Sensors.h) - BMP280 has no
+    // humidity element at all, and this firmware doesn't ship a plain
+    // BMP180-style pressure-only path.
+    #define SENSORS_ITEM_MODEL    0   // read-only - sensor_chip_name(), Sensors.h
+    #define SENSORS_ITEM_TEMP     1   // read-only
+    #define SENSORS_ITEM_HUMIDITY 2   // read-only - N/A on BMP280
+    #define SENSORS_ITEM_PRESSURE 3   // read-only
+    #define SENSORS_ITEM_BACK     4
+    #define SENSORS_ITEM_COUNT    5
   #endif
 
   #if MENU_HAS_HW_PAGE == true
@@ -302,13 +379,24 @@
       #define HW_NEXT_A2 HW_NEXT_A
     #endif
 
-    #if HAS_WIFI == true
-      #define HW_ITEM_WIFI_IP  HW_NEXT_A2
-      #define HW_ITEM_WIFI_NM  (HW_NEXT_A2 + 1)
-      #define HW_ITEM_WIFI_MAC (HW_NEXT_A2 + 2)
-      #define HW_NEXT_B        (HW_NEXT_A2 + 3)
+    #if HAS_GPS == true
+      // Read-only - gnss_chip_name(), GNSS.h. Lives here rather than on the
+      // GNSS page itself, alongside the rest of this board's other
+      // component identification (CPU Temp etc.) - GNSS's own page stays
+      // scoped to live receiver data (Enabled/Fix/Satellites/Lat/Lon/Alt).
+      #define HW_ITEM_GPS_CHIP HW_NEXT_A2
+      #define HW_NEXT_A3       (HW_NEXT_A2 + 1)
     #else
-      #define HW_NEXT_B HW_NEXT_A2
+      #define HW_NEXT_A3 HW_NEXT_A2
+    #endif
+
+    #if HAS_WIFI == true
+      #define HW_ITEM_WIFI_IP  HW_NEXT_A3
+      #define HW_ITEM_WIFI_NM  (HW_NEXT_A3 + 1)
+      #define HW_ITEM_WIFI_MAC (HW_NEXT_A3 + 2)
+      #define HW_NEXT_B        (HW_NEXT_A3 + 3)
+    #else
+      #define HW_NEXT_B HW_NEXT_A3
     #endif
 
     #if HAS_BLUETOOTH == true || HAS_BLE == true
@@ -372,8 +460,8 @@
   // navigable submenu (no title/footer chrome, no selectable items).
   // Reused by several unrelated features that just need to show a brief
   // message on top of whatever's currently on screen: the menu-open popup
-  // below (Sync NTP's progress/result, Clear Static's confirmation - both
-  // WiFi/Ethernet-specific, see MENU_STATE_STATUS_POPUP further down) and
+  // below (Sync NTP/Sync GPS's progress/result, Clear Static's confirmation -
+  // WiFi/Ethernet/GPS+RTC-specific, see MENU_STATE_STATUS_POPUP further down) and
   // button_hold_process()'s main-button-hold feedback (menu-closed,
   // applies to every HAS_MENU board regardless of WiFi/Ethernet) - hence
   // living here, ungated, rather than under either feature's own #if.
@@ -618,7 +706,13 @@
     }
   #endif
 
-  #if HAS_WIFI == true || HAS_ETHERNET == true
+  // Sync GPS (RTC.h/rtc_sync_gps()) only ever needs this where HAS_RTC is
+  // also true - HAS_GPS alone (e.g. T096/T114, no HAS_RTC) would pull in
+  // this block for nothing, and its T096/T114-specific footprint-tracking
+  // branch just below has never been built against a board with no
+  // WiFi/Ethernet of its own, so guarding on bare HAS_GPS risks surfacing
+  // bugs in a path nothing would actually use.
+  #if HAS_WIFI == true || HAS_ETHERNET == true || (HAS_GPS == true && HAS_RTC == true)
     // Menu-open popup state (MENU_STATE_STATUS_POPUP) - dismissed by any
     // input, returning to menu_popup_return_state. menu_button_press()/
     // menu_encoder_button()/menu_encoder_rotate() each special-case
@@ -804,6 +898,21 @@
     // confirm (tz_conf_save(), Utilities.h) - display-only, nothing to
     // reboot or re-init, same reasoning as Ethernet's Speed field.
     int8_t staged_tz_offset_qh = 0;
+  #endif
+
+  #if HAS_GPS == true
+    uint8_t gnss_menu_cursor = 0;
+    // Working copy while inside MENU_STATE_GNSS_EDIT - synced fresh from
+    // the live gnss_enabled value on entry (see menu_confirm_select()), not
+    // staged at whole-menu-open time, since this commits immediately (and
+    // live power-cycles the receiver) on confirm rather than deferring to
+    // SAVE & EXIT - same immediate-commit pattern as RTC's own Timezone
+    // field above.
+    bool staged_gnss_enabled = true;
+  #endif
+
+  #if HAS_SENSORS == true
+    uint8_t sensors_menu_cursor = 0;
   #endif
 
   #if MENU_HAS_HW_PAGE == true
@@ -1244,6 +1353,21 @@
         return "SYNCED!";
       }
     #endif
+
+    #if HAS_GPS == true
+      // Same auto-dismiss-on-success-only reasoning as Sync NTP's own
+      // NTP_SYNC_SUCCESS_POPUP_MS above - errors stay up until dismissed,
+      // worth making sure they're actually seen.
+      #define GPS_SYNC_SUCCESS_POPUP_MS 5000
+
+      const char *gps_result_text(uint8_t result) {
+        if      (result == GPS_SYNC_ERR_NO_RTC)    return "NO RTC FOUND";
+        else if (result == GPS_SYNC_ERR_DISABLED)  return "GPS DISABLED";
+        else if (result == GPS_SYNC_ERR_NO_FIX)    return "NO GPS TIME";
+        else if (result == GPS_SYNC_ERR_RTC_WRITE) return "RTC WRITE FAIL";
+        return "SYNCED!";
+      }
+    #endif
   #endif
 
   void menu_stage_from_live() {
@@ -1612,6 +1736,21 @@
         step_tz_offset(dir, wrap);
       }
     #endif
+    #if HAS_GPS == true
+      else if (menu_state == MENU_STATE_GNSS_LIST) {
+        buzzer_encoder_tick_melody();
+        gnss_menu_cursor = menu_clamp_cursor(gnss_menu_cursor, dir, GNSS_ITEM_COUNT, wrap);
+      } else if (menu_state == MENU_STATE_GNSS_EDIT) {
+        buzzer_encoder_tick_melody();
+        staged_gnss_enabled = !staged_gnss_enabled;
+      }
+    #endif
+    #if HAS_SENSORS == true
+      else if (menu_state == MENU_STATE_SENSORS_LIST) {
+        buzzer_encoder_tick_melody();
+        sensors_menu_cursor = menu_clamp_cursor(sensors_menu_cursor, dir, SENSORS_ITEM_COUNT, wrap);
+      }
+    #endif
     #if MENU_HAS_HW_PAGE == true
       else if (menu_state == MENU_STATE_HW_LIST) {
         buzzer_encoder_tick_melody();
@@ -1727,6 +1866,18 @@
         else if (menu_cursor == MENU_ITEM_RTC) {
           menu_state = MENU_STATE_RTC_LIST;
           rtc_menu_cursor = 0;
+        }
+      #endif
+      #if HAS_GPS == true
+        else if (menu_cursor == MENU_ITEM_GNSS) {
+          menu_state = MENU_STATE_GNSS_LIST;
+          gnss_menu_cursor = 0;
+        }
+      #endif
+      #if HAS_SENSORS == true
+        else if (menu_cursor == MENU_ITEM_SENSORS) {
+          menu_state = MENU_STATE_SENSORS_LIST;
+          sensors_menu_cursor = 0;
         }
       #endif
       #if MENU_HAS_HW_PAGE == true
@@ -1986,6 +2137,20 @@
             }
           }
         #endif
+        #if HAS_GPS == true
+          else if (rtc_menu_cursor == RTC_ITEM_SYNC_GPS) {
+            // Unlike Sync NTP above, this never blocks - GNSS.h continuously
+            // parses NMEA in the background (gnss_update(), polled from
+            // loop()), so there's no "CONNECTING" stage to show first, just
+            // the final result (rtc_sync_gps(), RTC.h). Same auto-dismiss-
+            // on-success-only behavior as Sync NTP otherwise.
+            uint8_t result = rtc_sync_gps();
+            menu_open_popup(gps_result_text(result), MENU_STATE_RTC_LIST);
+            if (result == GPS_SYNC_OK) {
+              menu_popup_auto_dismiss_at = millis() + GPS_SYNC_SUCCESS_POPUP_MS;
+            }
+          }
+        #endif
       } else if (menu_state == MENU_STATE_RTC_EDIT) {
         if (rtc_edit_field_idx < 5) {
           // Not the last field yet - just advance, same screen.
@@ -2011,6 +2176,39 @@
       // path at all. menu_button_press()/menu_encoder_button()/
       // menu_encoder_rotate() each dismiss it directly, before ever
       // calling into menu_confirm_select() (see those functions).
+    #endif
+    #if HAS_GPS == true
+      else if (menu_state == MENU_STATE_GNSS_LIST) {
+        // Chip/Fix/Satellites/Latitude/Longitude/Altitude are read-only -
+        // only BACK and Enabled do anything, same as RTC's Time/Date rows.
+        if (gnss_menu_cursor == GNSS_ITEM_BACK) {
+          menu_state = MENU_STATE_LIST;
+        } else if (gnss_menu_cursor == GNSS_ITEM_ENABLED) {
+          // Sync fresh from the live value, same immediate-commit
+          // reasoning as RTC's own Timezone field above.
+          staged_gnss_enabled = gnss_enabled;
+          menu_state = MENU_STATE_GNSS_EDIT;
+        }
+      } else if (menu_state == MENU_STATE_GNSS_EDIT) {
+        // Commits + live power-cycles the receiver here rather than
+        // staging until SAVE & EXIT - a power-saving toggle should apply
+        // the instant it's confirmed, same immediate-commit pattern as
+        // RTC's Timezone field.
+        if (staged_gnss_enabled != gnss_enabled) {
+          gns_conf_save(staged_gnss_enabled);
+          gnss_set_enabled(staged_gnss_enabled);
+        }
+        menu_state = MENU_STATE_GNSS_LIST;
+      }
+    #endif
+    #if HAS_SENSORS == true
+      else if (menu_state == MENU_STATE_SENSORS_LIST) {
+        // Every row is read-only - only BACK does anything, same as the
+        // Hardware page's own info-only rows.
+        if (sensors_menu_cursor == SENSORS_ITEM_BACK) {
+          menu_state = MENU_STATE_LIST;
+        }
+      }
     #endif
     #if MENU_HAS_HW_PAGE == true
       else if (menu_state == MENU_STATE_HW_LIST) {
@@ -2540,6 +2738,16 @@
         sprintf(valbufs[MENU_ITEM_RTC], ">"); // opens a submenu, not an inline value
       #endif
 
+      #if HAS_GPS == true
+        labels[MENU_ITEM_GNSS] = "GNSS";
+        sprintf(valbufs[MENU_ITEM_GNSS], ">"); // opens a submenu, not an inline value
+      #endif
+
+      #if HAS_SENSORS == true
+        labels[MENU_ITEM_SENSORS] = "Sensors";
+        sprintf(valbufs[MENU_ITEM_SENSORS], ">"); // opens a submenu, not an inline value
+      #endif
+
       #if MENU_HAS_HW_PAGE == true
         labels[MENU_ITEM_HARDWARE] = "Hardware";
         sprintf(valbufs[MENU_ITEM_HARDWARE], ">"); // opens a submenu, not an inline value
@@ -2757,6 +2965,11 @@
           valbufs[RTC_ITEM_SYNC_NTP][0] = 0;
         #endif
 
+        #if HAS_GPS == true
+          labels[RTC_ITEM_SYNC_GPS] = "Sync GPS";
+          valbufs[RTC_ITEM_SYNC_GPS][0] = 0;
+        #endif
+
         labels[RTC_ITEM_SET] = "Set Time/Date";
         valbufs[RTC_ITEM_SET][0] = 0;
 
@@ -2770,6 +2983,76 @@
         char valbuf[8];
         format_tz_offset(staged_tz_offset_qh, valbuf);
         draw_menu_edit_disp("TIMEZONE", valbuf);
+      }
+    #endif
+    #if HAS_GPS == true
+      else if (menu_state == MENU_STATE_GNSS_LIST) {
+        const char *labels[GNSS_ITEM_COUNT];
+        char valbufs[GNSS_ITEM_COUNT][24];
+
+        labels[GNSS_ITEM_ENABLED] = "Enabled";
+        sprintf(valbufs[GNSS_ITEM_ENABLED], gnss_enabled ? "ON" : "OFF");
+
+        labels[GNSS_ITEM_FIX] = "Fix";
+        sprintf(valbufs[GNSS_ITEM_FIX], gnss_has_fix() ? "YES" : "NO");
+
+        labels[GNSS_ITEM_SATELLITES] = "Satellites";
+        sprintf(valbufs[GNSS_ITEM_SATELLITES], "%u", (unsigned)gnss_satellite_count());
+
+        labels[GNSS_ITEM_LATITUDE] = "Latitude";
+        if (gnss_has_fix()) sprintf(valbufs[GNSS_ITEM_LATITUDE], "%.5f", gnss_latitude());
+        else                 sprintf(valbufs[GNSS_ITEM_LATITUDE], "N/A");
+
+        labels[GNSS_ITEM_LONGITUDE] = "Longitude";
+        if (gnss_has_fix()) sprintf(valbufs[GNSS_ITEM_LONGITUDE], "%.5f", gnss_longitude());
+        else                 sprintf(valbufs[GNSS_ITEM_LONGITUDE], "N/A");
+
+        labels[GNSS_ITEM_ALTITUDE] = "Altitude";
+        if (gnss_has_fix()) sprintf(valbufs[GNSS_ITEM_ALTITUDE], "%.0fm", gnss_altitude_meters());
+        else                 sprintf(valbufs[GNSS_ITEM_ALTITUDE], "N/A");
+
+        labels[GNSS_ITEM_TIME] = "GPS Time";
+        if (gnss_time_valid()) sprintf(valbufs[GNSS_ITEM_TIME], "%02u:%02u:%02u", gnss_time_hour(), gnss_time_minute(), gnss_time_second());
+        else                    sprintf(valbufs[GNSS_ITEM_TIME], "N/A");
+
+        labels[GNSS_ITEM_NMEA_CHARS] = "NMEA Chars";
+        sprintf(valbufs[GNSS_ITEM_NMEA_CHARS], "%lu", (unsigned long)gnss_chars_processed());
+
+        labels[GNSS_ITEM_NMEA_CKSUM] = "NMEA OK/Err";
+        sprintf(valbufs[GNSS_ITEM_NMEA_CKSUM], "%lu/%lu", (unsigned long)gnss_checksum_passed(), (unsigned long)gnss_checksum_failed());
+
+        labels[GNSS_ITEM_BACK] = "BACK";
+        valbufs[GNSS_ITEM_BACK][0] = 0;
+
+        draw_menu_list_disp("GNSS", labels, valbufs, GNSS_ITEM_COUNT, gnss_menu_cursor);
+      } else if (menu_state == MENU_STATE_GNSS_EDIT) {
+        draw_menu_edit_disp("GNSS ENABLED", staged_gnss_enabled ? "ON" : "OFF");
+      }
+    #endif
+    #if HAS_SENSORS == true
+      else if (menu_state == MENU_STATE_SENSORS_LIST) {
+        const char *labels[SENSORS_ITEM_COUNT];
+        char valbufs[SENSORS_ITEM_COUNT][24];
+
+        labels[SENSORS_ITEM_MODEL] = "Sensor";
+        sprintf(valbufs[SENSORS_ITEM_MODEL], "%s", sensor_chip_name());
+
+        labels[SENSORS_ITEM_TEMP] = "Temp";
+        if (sensor_present) sprintf(valbufs[SENSORS_ITEM_TEMP], "%.1fC", sensor_temperature_c());
+        else                 sprintf(valbufs[SENSORS_ITEM_TEMP], "N/A");
+
+        labels[SENSORS_ITEM_HUMIDITY] = "Humidity";
+        if (sensor_present && sensor_model == SENSOR_MODEL_BME280) sprintf(valbufs[SENSORS_ITEM_HUMIDITY], "%.1f%%", sensor_humidity_percent());
+        else                                                        sprintf(valbufs[SENSORS_ITEM_HUMIDITY], "N/A");
+
+        labels[SENSORS_ITEM_PRESSURE] = "Pressure";
+        if (sensor_present) sprintf(valbufs[SENSORS_ITEM_PRESSURE], "%.0fhPa", sensor_pressure_hpa());
+        else                 sprintf(valbufs[SENSORS_ITEM_PRESSURE], "N/A");
+
+        labels[SENSORS_ITEM_BACK] = "BACK";
+        valbufs[SENSORS_ITEM_BACK][0] = 0;
+
+        draw_menu_list_disp("SENSORS", labels, valbufs, SENSORS_ITEM_COUNT, sensors_menu_cursor);
       }
     #endif
     #if HAS_WIFI == true || HAS_ETHERNET == true
@@ -2812,6 +3095,11 @@
           labels[HW_ITEM_BATTERY] = "Battery Voltage";
           if (battery_ready) sprintf(valbufs[HW_ITEM_BATTERY], "%.2fV", battery_voltage);
           else                sprintf(valbufs[HW_ITEM_BATTERY], "N/A");
+        #endif
+
+        #if HAS_GPS == true
+          labels[HW_ITEM_GPS_CHIP] = "GPS Chip";
+          sprintf(valbufs[HW_ITEM_GPS_CHIP], "%s", gnss_chip_name());
         #endif
 
         #if HAS_WIFI == true

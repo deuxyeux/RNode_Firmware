@@ -277,3 +277,47 @@ uint8_t rtc_sync_ntp(rtc_sync_status_cb_t status_cb = nullptr) {
 }
 
 #endif
+
+#if HAS_GPS == true
+
+// rtc_sync_gps()'s return value - same reason-code convention as
+// rtc_sync_ntp()'s NTP_SYNC_* above, for the same reason (the Settings
+// menu's Sync GPS result popup needs to say *why* it failed, not just
+// "failed").
+#define GPS_SYNC_OK            0
+#define GPS_SYNC_ERR_NO_RTC    1
+#define GPS_SYNC_ERR_DISABLED  2
+#define GPS_SYNC_ERR_NO_FIX    3
+#define GPS_SYNC_ERR_RTC_WRITE 4
+
+// Syncs the RTC from the GNSS receiver's own NMEA date/time (GNSS.h)
+// instead of a network NTP server - useful on boards with no WiFi/Ethernet
+// at all (rtc_sync_ntp() above is compiled out there), or simply as a
+// no-network alternative on ones that do. Unlike rtc_sync_ntp(), this never
+// blocks: GNSS.h continuously parses NMEA in the background (gnss_update(),
+// polled from loop()), so whatever date/time it's already latched either
+// is or isn't there - no round-trip to wait on, no status_cb needed.
+//
+// Checks gnss_date_valid()/gnss_time_valid() (GNSS.h), not gnss_has_fix() -
+// a GNSS receiver typically syncs time (and date, same sentences) well
+// before it ever gets a position fix, so requiring a full fix here would
+// make this fail in cases where the RTC could already be set correctly.
+uint8_t rtc_sync_gps() {
+  if (!rtc_present) return GPS_SYNC_ERR_NO_RTC;
+  if (!gnss_enabled) return GPS_SYNC_ERR_DISABLED;
+  if (!gnss_date_valid() || !gnss_time_valid()) return GPS_SYNC_ERR_NO_FIX;
+
+  int32_t days = rtc_days_from_civil((int32_t)gnss_date_year(), (uint32_t)gnss_date_month(), (uint32_t)gnss_date_day());
+  uint32_t epoch = (uint32_t)days * 86400UL + (uint32_t)gnss_time_hour() * 3600UL + (uint32_t)gnss_time_minute() * 60UL + gnss_time_second();
+
+  DEBUG_LOG("[GPS Sync] date=%04u-%02u-%02u time=%02u:%02u:%02u epoch=%lu\r\n",
+    (unsigned)gnss_date_year(), (unsigned)gnss_date_month(), (unsigned)gnss_date_day(),
+    (unsigned)gnss_time_hour(), (unsigned)gnss_time_minute(), (unsigned)gnss_time_second(),
+    (unsigned long)epoch);
+
+  if (!rtc_set_unixtime(epoch)) { DEBUG_LOG("[GPS Sync] RTC write failed\r\n"); return GPS_SYNC_ERR_RTC_WRITE; }
+
+  return GPS_SYNC_OK;
+}
+
+#endif

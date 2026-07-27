@@ -145,6 +145,9 @@ void drot_conf_save(uint8_t val);
   void kiss_indicate_time();
   void tz_conf_save(uint8_t val);
 #endif
+#if HAS_GPS == true
+  void gns_conf_save(bool is_enabled);
+#endif
 #if MCU_VARIANT == MCU_ESP32 && HAS_RTC == true && (HAS_WIFI == true || HAS_ETHERNET == true)
   void kiss_indicate_ntp_sync(uint8_t status);
 #endif
@@ -152,12 +155,35 @@ void eeprom_update(int mapped_addr, uint8_t byte);
 void buzzer_encoder_tick_melody();
 void buzzer_encoder_click_melody();
 
+#if HAS_GPS == true
+  // Must come before Display.h below - the T114 branch of draw_disp_area()
+  // (Display.h) reads gnss_enabled/gnss_* accessors directly to alternate
+  // the radio-parameters box with a GNSS info page.
+  #include "GNSS.h"
+#endif
+
 #if HAS_DISPLAY == true
   #include "Display.h"
 #else
 	void display_unblank() {}
 	bool display_blanked = false;
 	#define DISPLAY_IS_OLED false
+#endif
+
+// Whether an I2C environment sensor (BMP280/BME280, Sensors.h) can be
+// auto-detected on this board. Reuses whatever I2C bus display_init()
+// (Display.h) already brought up for the board's I2C OLED panel
+// (DISPLAY_IS_OLED, set just above) rather than standing up a bus of its
+// own - boards with a SPI color display (T096/T114) or no display at all
+// have no live I2C bus to probe, and wiring one up for them would mean
+// picking new board-specific pins, out of scope for this auto-detect-only
+// feature.
+#ifndef HAS_SENSORS
+  #define HAS_SENSORS (HAS_DISPLAY == true && DISPLAY_IS_OLED == true)
+#endif
+#if HAS_SENSORS == true
+  #include "Sensors.h"
+  void kiss_indicate_sensor();
 #endif
 
 #if HAS_BLUETOOTH == true || HAS_BLE == true
@@ -1416,6 +1442,42 @@ void kiss_indicate_ntp_sync(uint8_t status) {
 }
 #endif
 
+#if HAS_SENSORS == true
+// Read-only query, same "command byte alone triggers an immediate reply"
+// pattern as kiss_indicate_stat_rx()/_tx()/_rssi() above - no set side to
+// this command, unlike CMD_TIME. Temperature/humidity are scaled by 100
+// (hundredths of a degree C / percent) into signed/unsigned 16-bit fields;
+// pressure is sent as raw Pascals (uint32) - the unit sensor_pressure_pa()
+// (Sensors.h) already returns, so no precision is lost converting it.
+// Humidity's field reads as 0xFFFF when there's no BME280 present (a
+// BMP280 has no humidity element at all) - present/model let the host
+// tell "no sensor" apart from "sensor present, this field just doesn't
+// apply", same reasoning as GNSS's own N/A fields when there's no fix.
+void kiss_indicate_sensor() {
+	#if HAS_ESPNOW == true
+	  kiss_select_interface(0);
+	#endif
+
+	int16_t  temp_cc  = sensor_present ? (int16_t)(sensor_temperature_c()*100.0f) : 0;
+	uint16_t humid_cc = (sensor_present && sensor_model == SENSOR_MODEL_BME280) ? (uint16_t)(sensor_humidity_percent()*100.0f) : 0xFFFF;
+	uint32_t press_pa = sensor_present ? (uint32_t)sensor_pressure_pa() : 0;
+
+	serial_write(FEND);
+	serial_write(CMD_SENSOR);
+	escaped_serial_write(sensor_present ? 0x01 : 0x00);
+	escaped_serial_write(sensor_model);
+	escaped_serial_write(temp_cc>>8);
+	escaped_serial_write(temp_cc);
+	escaped_serial_write(humid_cc>>8);
+	escaped_serial_write(humid_cc);
+	escaped_serial_write(press_pa>>24);
+	escaped_serial_write(press_pa>>16);
+	escaped_serial_write(press_pa>>8);
+	escaped_serial_write(press_pa);
+	serial_write(FEND);
+}
+#endif
+
 void kiss_indicate_st_alock() {
 	uint16_t at = (uint16_t)(st_airtime_limit*100*100);
 	#if HAS_ESPNOW == true
@@ -2338,6 +2400,21 @@ void enc_conf_save(bool is_enabled) {
 		eeprom_update(eeprom_addr(ADDR_CONF_ENA), ENC_ENABLE_BYTE);
 	} else {
 		eeprom_update(eeprom_addr(ADDR_CONF_ENA), ENC_DISABLE_BYTE);
+	}
+  #if !HAS_EEPROM && MCU_VARIANT == MCU_NRF52
+    eeprom_flush();
+  #endif
+}
+#endif
+
+#if HAS_GPS == true
+// ADDR_CONF_GNS is a raw physical byte, not offset via eeprom_addr() - see
+// its own comment, ROM.h.
+void gns_conf_save(bool is_enabled) {
+	if (is_enabled) {
+		eeprom_update(ADDR_CONF_GNS, GNS_ENABLE_BYTE);
+	} else {
+		eeprom_update(ADDR_CONF_GNS, GNS_DISABLE_BYTE);
 	}
   #if !HAS_EEPROM && MCU_VARIANT == MCU_NRF52
     eeprom_flush();

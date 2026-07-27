@@ -81,8 +81,40 @@
   #define ESPNOW_DISABLE_BYTE 0x00
   #define WS_ENABLE_BYTE  0x01
   #define WS_DISABLE_BYTE 0x00
+  #define GNS_ENABLE_BYTE  0x01
+  #define GNS_DISABLE_BYTE 0x00
 
   #define EEPROM_RESERVED 200
+
+  // Whether the GNSS receiver (HAS_GPS boards, GNSS.h) is allowed to
+  // initialize at all. The checksummed info region above (0x00-0xC7,
+  // EEPROM_RESERVED bytes wide) is completely full - ADDR_CONF_WS is
+  // explicitly the last free byte there. Growing EEPROM_RESERVED to make
+  // room was tried and reverted: it shifts EEPROM_OFFSET, which reindexes
+  // every eeprom_addr()-mapped byte, including this device's own already-
+  // provisioned ADDR_PRODUCT/MODEL/HW_REV/CHKSUM - on real hardware that
+  // silently misaligns those reads against data written under the old
+  // offset, breaking eeprom_product_valid()/eeprom_checksum_valid() and
+  // producing exactly the "missing config" state this was tested against.
+  // Instead, this uses a raw, non-offset physical byte, picked per-platform
+  // since "genuinely free space" is a different address on each - see
+  // gns_conf_save() (Utilities.h) and its boot-time load
+  // (RNode_Firmware.ino), both of which use this value directly rather than
+  // through eeprom_addr()/config_addr().
+  #if MCU_VARIANT == MCU_NRF52
+    // The low "config" region (CONFIG_SIZE/CONFIG_OFFSET, only ever defined
+    // in Boards.h's MCU_ESP32 scope) is genuinely dead space on every nRF52
+    // board, since config_addr() never even compiles there.
+    #define ADDR_CONF_GNS 0x00
+  #elif MCU_VARIANT == MCU_ESP32
+    // CONFIG_SIZE (256, below) reserves 0x00-0xFF for WiFi/Ethernet config -
+    // real usage there stops at ADDR_CONF_ETH_DNS+4=0x62, but the declared
+    // 256-byte width is treated as off-limits headroom for that region, not
+    // free space. EEPROM_OFFSET is 824 on the default 1024-byte ESP32
+    // EEPROM_SIZE (1024-200), so 256-823 is a genuinely unclaimed gap -
+    // this just takes its first byte.
+    #define ADDR_CONF_GNS 256
+  #endif
   
   #define CONFIG_SIZE     256
   #define ADDR_CONF_SSID 0x00

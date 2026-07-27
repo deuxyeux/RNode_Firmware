@@ -83,6 +83,12 @@
   // 7634). Payload is WS_ENABLE_BYTE/WS_DISABLE_BYTE (ROM.h), handled like
   // CMD_ESPNOW_ENABLE - see ws_conf_save() (WebSocketRemote.h).
   #define CMD_WS_ENABLE   0x75
+  // Query the currently-detected I2C environment sensor (BMP280/BME280,
+  // Sensors.h) - read-only, same "command byte alone triggers an immediate
+  // reply, payload byte ignored" pattern as CMD_STAT_RX/TX/RSSI/SNR, not a
+  // set/get pair like CMD_TIME. See kiss_indicate_sensor() (Utilities.h)
+  // for the reply's wire format.
+  #define CMD_SENSOR      0x76
   #define CMD_WIFI_IP     0x84
   #define CMD_WIFI_NM     0x85
   #define CMD_SND         0x86

@@ -41,6 +41,9 @@ prep-esp32:
 	arduino-cli lib install "XPowersLib"
 	arduino-cli lib install "Crypto"
 	arduino-cli lib install "WebSockets"
+	arduino-cli lib install "Adafruit Unified Sensor"
+	arduino-cli lib install "Adafruit BMP280 Library"
+	arduino-cli lib install "Adafruit BME280 Library"
 
 prep-samd:
 	arduino-cli core update-index --config-file arduino-cli.yaml
@@ -54,6 +57,7 @@ prep-nrf:
 	arduino-cli core install "promicro:nrf52" --config-file arduino-cli.yaml
 	sed -i.bak 's/nicenanov2\.build\.ldscript=nrf52840_s140_v7\.ld/nicenanov2.build.ldscript=nrf52840_s140_v6.ld/' ~/.arduino15/packages/promicro/hardware/nrf52/1.0.2/boards.txt
 	arduino-cli lib install "GxEPD2"
+	arduino-cli lib install "TinyGPSPlus"
 	arduino-cli config set library.enable_unsafe_install true
 	arduino-cli lib install --git-url https://github.com/liamcottle/esp8266-oled-ssd1306#e16cee124fe26490cb14880c679321ad8ac89c95
 	pip install adafruit-nrfutil --upgrade --break-system-packages
