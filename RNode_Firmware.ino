@@ -55,6 +55,12 @@ volatile bool serial_buffering = false;
 char sbuf[128];
 
 void setup() {
+  #if HAS_OTA == true
+    // Field recovery path for a bad OTA update - must run before anything
+    // else in boot (radio/display/network init), see OTA.h.
+    ota_check_recovery_button();
+  #endif
+
   DEBUG_UART_BEGIN();
   DEBUG_LOG("RNode starting\r\n");
 
@@ -437,6 +443,9 @@ void setup() {
         eth_speed_mode = EEPROM.read(eeprom_addr(ADDR_CONF_ETHSPD));
         if (eth_speed_mode > ETH_SPEED_OFF) eth_speed_mode = ETH_SPEED_AUTO; // erased EEPROM (0xFF) => default
         init_ethernet();
+      #endif
+      #if HAS_OTA == true
+        ota_server_init();
       #endif
       kiss_indicate_reset();
     }
@@ -2215,6 +2224,10 @@ void loop() {
     if (ws_enabled) update_ws();
   #endif
 
+  #if HAS_OTA == true
+    if (!console_active) ota_loop();
+  #endif
+
   #if HAS_ESPNOW == true
     if (espnow_enabled) update_espnow();
   #endif
@@ -2338,8 +2351,20 @@ void button_event(uint8_t event, unsigned long duration) {
       // sleep/BT-pairing/console tiers fire while the user is mid-edit.
       // Doubles as an alternate control everywhere except WiFi SSID/PSK
       // text entry, where it stays a dedicated backspace key instead (see
-      // menu_main_button_del()).
-      if (menu_state == MENU_STATE_WIFI_TEXT_EDIT) {
+      // menu_main_button_del()) - but only when there's an actual encoder
+      // doing the character-wheel/save duty instead. On a button-only
+      // board (or an encoder board with the encoder runtime-disabled,
+      // encoder_enabled) this button IS the only input, so it has to stay
+      // on the normal menu_button_press() dispatch (tap=next char,
+      // double-tap=previous char, hold=confirm char/DEL/save - same
+      // primitives wheel_move()/menu_confirm_select() already use for the
+      // encoder path) or WiFi SSID/PSK entry is otherwise entirely stuck.
+      #if HAS_ENCODER == true
+        bool wifi_text_edit_has_encoder = encoder_enabled;
+      #else
+        bool wifi_text_edit_has_encoder = false;
+      #endif
+      if (menu_state == MENU_STATE_WIFI_TEXT_EDIT && wifi_text_edit_has_encoder) {
         menu_main_button_del();
         display_unblank();
       } else {

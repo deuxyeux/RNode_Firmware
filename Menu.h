@@ -152,6 +152,10 @@
   #define MENU_STATE_GNSS_LIST      19  // GNSS submenu list (HAS_GPS boards)
   #define MENU_STATE_GNSS_EDIT      20  // editing the Enabled field
   #define MENU_STATE_SENSORS_LIST   21  // Sensors submenu list (HAS_SENSORS boards) - read-only, no edit state
+  #define MENU_STATE_FWUPD_LIST     22  // F/W Update submenu list (HAS_OTA boards) - Current/Latest/Update/Back
+  #define MENU_STATE_FWUPD_CONFIRM  23  // UPDATE/CANCEL list before Update actually runs - same pattern as MENU_STATE_WIFI_TEXT_CONFIRM
+  #define MENU_STATE_MEM_LIST       24  // Hardware > Memory submenu (MCU_ESP32 boards) - Heap/PSRAM bar graphs, read-only
+  #define MENU_STATE_MEM_DETAIL     25  // Memory > Heap or PSRAM detail readout (Total/Used/Free/Min Free), read-only
 
   // The Hardware page exists whenever there's anything board-level worth
   // showing (battery/voltage sensing via HAS_PMU, or an ESP32-S3's CPU
@@ -256,7 +260,16 @@
     #define MENU_NEXT_IDX_B MENU_NEXT_IDX_A5
   #endif
 
-  #define MENU_ITEM_SAVE_EXIT MENU_NEXT_IDX_B
+  #if HAS_OTA == true
+    // Network OTA updates (OTA.h) - see MENU_STATE_FWUPD_LIST/
+    // MENU_STATE_FWUPD_CONFIRM below.
+    #define MENU_ITEM_FW_UPDATE MENU_NEXT_IDX_B
+    #define MENU_NEXT_IDX_C (MENU_NEXT_IDX_B + 1)
+  #else
+    #define MENU_NEXT_IDX_C MENU_NEXT_IDX_B
+  #endif
+
+  #define MENU_ITEM_SAVE_EXIT MENU_NEXT_IDX_C
   #define MENU_ITEM_COUNT     (MENU_ITEM_SAVE_EXIT + 1)
 
   #if HAS_WIFI == true
@@ -304,6 +317,14 @@
     #define ETH_ITEM_CLEAR        6
     #define ETH_ITEM_BACK         7
     #define ETH_ITEM_COUNT        8
+  #endif
+
+  #if HAS_OTA == true
+    #define FWUPD_ITEM_CURRENT 0  // read-only - the running build (BUILD_NUMBER)
+    #define FWUPD_ITEM_LATEST  1  // read-only - fetched from the update server once, on opening this list (see menu_confirm_select())
+    #define FWUPD_ITEM_UPDATE  2  // opens MENU_STATE_FWUPD_CONFIRM - a plain UPDATE/CANCEL list, same pattern as WiFi's SAVE/DISCARD (MENU_STATE_WIFI_TEXT_CONFIRM)
+    #define FWUPD_ITEM_BACK    3
+    #define FWUPD_ITEM_COUNT   4
   #endif
 
   #if HAS_RTC == true
@@ -376,10 +397,10 @@
     // a BMP280-only board (see sensor_model, Sensors.h) - BMP280 has no
     // humidity element at all, and this firmware doesn't ship a plain
     // BMP180-style pressure-only path.
-    #define SENSORS_ITEM_MODEL    0   // read-only - sensor_chip_name(), Sensors.h
-    #define SENSORS_ITEM_TEMP     1   // read-only
-    #define SENSORS_ITEM_HUMIDITY 2   // read-only - N/A on BMP280
-    #define SENSORS_ITEM_PRESSURE 3   // read-only
+    #define SENSORS_ITEM_TEMP     0   // read-only
+    #define SENSORS_ITEM_HUMIDITY 1   // read-only - N/A on BMP280
+    #define SENSORS_ITEM_PRESSURE 2   // read-only
+    #define SENSORS_ITEM_MODEL    3   // read-only - sensor_chip_name(), Sensors.h
     #define SENSORS_ITEM_BACK     4
     #define SENSORS_ITEM_COUNT    5
   #endif
@@ -442,7 +463,23 @@
       #define HW_NEXT_D HW_NEXT_C2
     #endif
 
-    #define HW_ITEM_BACK  HW_NEXT_D
+    // Heap/PSRAM diagnostics - ESP.getFreeHeap()/getPsramSize()/etc are
+    // Arduino-ESP32-specific, so this row (and the submenu it opens) is
+    // gated on the MCU, not on anything board-specific - unlike most other
+    // HW_ITEM_* rows it isn't tied to a particular board's wiring, so it
+    // shows on every MCU_ESP32 board that reaches the Hardware page at all
+    // (T096/T114/MeshPoE-S3/MeshAdventurer-S3/Heltec32_v4). psramFound() is
+    // checked at runtime (not a compile-time PSRAM-enabled guard) so boards
+    // without PSRAM wired/enabled just show "N/A" instead of needing their
+    // own #if branch here.
+    #if MCU_VARIANT == MCU_ESP32
+      #define HW_ITEM_MEMORY HW_NEXT_D
+      #define HW_NEXT_E      (HW_NEXT_D + 1)
+    #else
+      #define HW_NEXT_E HW_NEXT_D
+    #endif
+
+    #define HW_ITEM_BACK  HW_NEXT_E
     #define HW_ITEM_COUNT (HW_ITEM_BACK + 1)
 
     #if HAS_GPIO_MENU == true
@@ -457,6 +494,29 @@
       #endif
       #define GPIO_ITEM_BACK  GPIO_NEXT_0
       #define GPIO_ITEM_COUNT (GPIO_ITEM_BACK + 1)
+    #endif
+
+    #if MCU_VARIANT == MCU_ESP32
+      // Both rows are drawn as bar graphs, not text - selecting either one
+      // (not BACK) drops into MENU_STATE_MEM_DETAIL, a plain text readout
+      // of that metric, same "list row opens a submenu" pattern as
+      // HW_ITEM_GPIO -> MENU_STATE_GPIO_LIST.
+      #define MEM_ITEM_HEAP  0
+      #define MEM_ITEM_PSRAM 1
+      #define MEM_ITEM_BACK  2
+      #define MEM_ITEM_COUNT 3
+
+      // Detail screen - fully read-only, only BACK does anything on
+      // confirm. Which metric (Heap vs PSRAM) it's showing is tracked by
+      // mem_menu_cursor staying at MEM_ITEM_HEAP/MEM_ITEM_PSRAM while this
+      // state is active, same reuse-the-parent-cursor pattern HW_EDIT uses
+      // for hw_menu_cursor (HW_ITEM_VOLTAGE vs HW_ITEM_BATTERY).
+      #define MEM_DETAIL_ITEM_TOTAL   0
+      #define MEM_DETAIL_ITEM_USED    1
+      #define MEM_DETAIL_ITEM_FREE    2
+      #define MEM_DETAIL_ITEM_MINFREE 3
+      #define MEM_DETAIL_ITEM_BACK    4
+      #define MEM_DETAIL_ITEM_COUNT   5
     #endif
   #endif
 
@@ -939,6 +999,10 @@
 
   #if MENU_HAS_HW_PAGE == true
     uint8_t hw_menu_cursor = 0;
+    #if MCU_VARIANT == MCU_ESP32
+      uint8_t mem_menu_cursor = 0;
+      uint8_t mem_detail_cursor = 0;
+    #endif
     #if HAS_VSENSE == true
       // Raw EEPROM format (ratio*10, see vsr_conf_save()/Utilities.h) -
       // synced fresh from the live value on entering MENU_STATE_HW_EDIT
@@ -966,6 +1030,20 @@
       // fields above.
       uint8_t staged_gpio_pin_idx = 0;
     #endif
+  #endif
+
+  #if HAS_OTA == true
+    uint8_t fwupd_menu_cursor = 0;
+    // Fetched once when MENU_STATE_FWUPD_LIST is opened from the main list
+    // (see menu_confirm_select()), not re-fetched on every redraw or when
+    // returning here from MENU_STATE_FWUPD_CONFIRM's CANCEL.
+    long fwupd_latest_build = 0;
+    bool fwupd_latest_ok = false;
+    // 0 = UPDATE, 1 = CANCEL - same 2-item list-with-cursor pattern as
+    // WiFi's text_confirm_cursor (SAVE/DISCARD), but defaults to CANCEL (1)
+    // rather than the primary action, since this one reboots and reflashes
+    // the device instead of just saving a text field.
+    uint8_t fwupd_confirm_cursor = 1;
   #endif
 
   bool menu_is_open() {
@@ -1202,25 +1280,38 @@
       staged_wifi_mode = (uint8_t)v;
     }
 
-    // Rudimentary on-screen keyboard: a single cyclic wheel of 96 positions
+    // Rudimentary on-screen keyboard: a single cyclic wheel of 98 positions
     // (rotary encoder has no separate cursor-move axis, so editing is
     // append + backspace only - see [[project_encoder_settings_menu]] design
-    // notes). Common characters first, DEL right after (frequently needed,
-    // shouldn't require scrolling past rare symbols to reach). Saving is
-    // handled by a long-press "Save?" dialog (MENU_STATE_WIFI_TEXT_CONFIRM),
-    // not a wheel position - dialing all the way around to a DONE entry
-    // every time was tedious.
-    #define WHEEL_DEL_IDX 64
-    #define WHEEL_LEN     96
-    const char WHEEL_CORE[] = " abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"; // 64 chars, idx 0-63
-    const char WHEEL_SYMS[] = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"; // 31 chars, idx 65-95
+    // notes). Common characters first. DEL and SAVE both sit right after
+    // space, before 'a' - reachable in 1-2 taps/detents from the default
+    // start position without any special gesture: selecting either is the
+    // exact same "hold to confirm whatever's currently on the wheel" action
+    // used for every ordinary character, on both encoder and button-only
+    // boards (see menu_confirm_select()'s MENU_STATE_WIFI_TEXT_EDIT case) -
+    // no separate long-press-to-save exists anymore, which used to only be
+    // reachable from the encoder and left button-only boards with no way to
+    // save at all. A second DEL is kept further round the wheel (after '9',
+    // before the symbols) for whoever's mid-cycling through the alphabet
+    // and doesn't want to dial all the way back to the start.
+    #define WHEEL_QUICKDEL_IDX  1
+    #define WHEEL_QUICKSAVE_IDX 2
+    #define WHEEL_DEL_IDX       66
+    #define WHEEL_LEN           98
+    const char WHEEL_CORE[] = " abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"; // 64 chars - [0] is space (idx 0 direct), [1..63] is 'a'..'9' (idx 3..65, offset by the 2 quick meta-positions)
+    const char WHEEL_SYMS[] = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"; // 31 chars, idx 67-97
 
-    // Returns 0 for the DEL meta position - callers check the index against
-    // WHEEL_DEL_IDX before treating this as a literal character.
+    bool wheel_is_del(uint8_t idx)  { return idx == WHEEL_QUICKDEL_IDX || idx == WHEEL_DEL_IDX; }
+    bool wheel_is_save(uint8_t idx) { return idx == WHEEL_QUICKSAVE_IDX; }
+
+    // Returns 0 for the DEL/SAVE meta positions - callers check those via
+    // wheel_is_del()/wheel_is_save() before treating this as a literal
+    // character.
     char wheel_char_at(uint8_t idx) {
-      if (idx < 64) return WHEEL_CORE[idx];
-      if (idx == WHEEL_DEL_IDX) return 0;
-      return WHEEL_SYMS[idx - 65];
+      if (idx == 0) return WHEEL_CORE[0]; // space
+      if (wheel_is_del(idx) || wheel_is_save(idx)) return 0;
+      if (idx < WHEEL_DEL_IDX) return WHEEL_CORE[idx-2]; // 'a'..'9'
+      return WHEEL_SYMS[idx - (WHEEL_DEL_IDX+1)];
     }
 
     void wheel_move(int8_t dir) {
@@ -1798,6 +1889,27 @@
           step_gpio_pin_idx(dir, wrap);
         }
       #endif
+      #if MCU_VARIANT == MCU_ESP32
+        else if (menu_state == MENU_STATE_MEM_LIST) {
+          buzzer_encoder_tick_melody();
+          mem_menu_cursor = menu_clamp_cursor(mem_menu_cursor, dir, MEM_ITEM_COUNT, wrap);
+        } else if (menu_state == MENU_STATE_MEM_DETAIL) {
+          buzzer_encoder_tick_melody();
+          mem_detail_cursor = menu_clamp_cursor(mem_detail_cursor, dir, MEM_DETAIL_ITEM_COUNT, wrap);
+        }
+      #endif
+    #endif
+    #if HAS_OTA == true
+      else if (menu_state == MENU_STATE_FWUPD_LIST) {
+        buzzer_encoder_tick_melody();
+        fwupd_menu_cursor = menu_clamp_cursor(fwupd_menu_cursor, dir, FWUPD_ITEM_COUNT, wrap);
+      } else if (menu_state == MENU_STATE_FWUPD_CONFIRM) {
+        // Plain 2-item list (UPDATE/CANCEL) - same tap-to-move/hold-to-
+        // select navigation as everywhere else, same pattern as WiFi's
+        // SAVE/DISCARD (MENU_STATE_WIFI_TEXT_CONFIRM/text_confirm_cursor).
+        buzzer_encoder_tick_melody();
+        fwupd_confirm_cursor = menu_clamp_cursor(fwupd_confirm_cursor, dir, 2, wrap);
+      }
     #endif
   }
 
@@ -1839,18 +1951,11 @@
 
     if (duration > 700) {
       // Long-press: identical from anywhere inside the menu - commit & exit.
-      // The one exception is text entry, where dialing all the way around
-      // to a "confirm and exit the whole menu" action would be tedious and
-      // easy to trigger by accident mid-word - long-press there instead
-      // opens a small local "Save?" dialog scoped to just this field.
-      #if HAS_WIFI == true
-        if (menu_state == MENU_STATE_WIFI_TEXT_EDIT) {
-          buzzer_encoder_click_melody();
-          text_confirm_cursor = 0; // default to SAVE
-          menu_state = MENU_STATE_WIFI_TEXT_CONFIRM;
-          return;
-        }
-      #endif
+      // Text entry no longer needs an exception here - SAVE is a wheel
+      // position now (see WHEEL_QUICKSAVE_IDX), reached with the exact same
+      // confirm gesture as any character, so there's no longer a "dialing
+      // all the way around" tedium to work around, and this can behave
+      // like every other state.
       if (menu_state != MENU_STATE_CLOSED) {
         buzzer_encoder_click_melody();
         menu_commit_and_exit();
@@ -1906,6 +2011,23 @@
         else if (menu_cursor == MENU_ITEM_HARDWARE) {
           menu_state = MENU_STATE_HW_LIST;
           hw_menu_cursor = 0;
+        }
+      #endif
+      #if HAS_OTA == true
+        else if (menu_cursor == MENU_ITEM_FW_UPDATE) {
+          menu_state = MENU_STATE_FWUPD_LIST;
+          fwupd_menu_cursor = 0;
+          // Fetched fresh every time this list is opened from the main
+          // menu (not on every redraw, and not re-fetched if you back out
+          // of MENU_STATE_FWUPD_CONFIRM's CANCEL back to here) - same
+          // "blocks briefly, live popup" reasoning as Sync NTP.
+          if (ota_network_up()) {
+            menu_draw_popup("CHECKING...");
+            long current; bool newer;
+            fwupd_latest_ok = ota_do_check(&current, &fwupd_latest_build, &newer);
+          } else {
+            fwupd_latest_ok = false;
+          }
         }
       #endif
       else {
@@ -1967,7 +2089,7 @@
           text_edit_field = wifi_menu_cursor;
           const char *src = (text_edit_field == WIFI_ITEM_SSID) ? staged_wifi_ssid : staged_wifi_psk;
           strncpy(text_edit_buf, src, 32); text_edit_buf[32] = 0;
-          wheel_index = 1; // 'a'
+          wheel_index = 3; // 'a' (0=space, 1=DEL, 2=SAVE)
           menu_state = MENU_STATE_WIFI_TEXT_EDIT;
         }
       } else if (menu_state == MENU_STATE_WIFI_EDIT) {
@@ -1997,12 +2119,20 @@
         }
       } else if (menu_state == MENU_STATE_WIFI_TEXT_EDIT) {
         uint8_t len = strlen(text_edit_buf);
-        if (wheel_index == WHEEL_DEL_IDX) {
+        if (wheel_is_del(wheel_index)) {
           if (len > 0) text_edit_buf[len-1] = 0;
+        } else if (wheel_is_save(wheel_index)) {
+          // Same dialog a long-press used to reach on encoder boards only -
+          // now reachable identically (dial to it, then the same confirm
+          // gesture as any character) on both encoder and button-only
+          // boards, so that special-cased long-press no longer exists (see
+          // menu_encoder_button()).
+          text_confirm_cursor = 0; // default to SAVE
+          menu_state = MENU_STATE_WIFI_TEXT_CONFIRM;
         } else if (len < 32) {
           text_edit_buf[len] = wheel_char_at(wheel_index);
           text_edit_buf[len+1] = 0;
-          wheel_index = 1; // reset to 'a' for the next character
+          wheel_index = 3; // reset to 'a' for the next character
         }
       } else if (menu_state == MENU_STATE_WIFI_TEXT_CONFIRM) {
         if (text_confirm_cursor == 0) { // SAVE
@@ -2266,6 +2396,12 @@
             gpio_menu_cursor = 0;
           }
         #endif
+        #if MCU_VARIANT == MCU_ESP32
+          else if (hw_menu_cursor == HW_ITEM_MEMORY) {
+            menu_state = MENU_STATE_MEM_LIST;
+            mem_menu_cursor = MEM_ITEM_BACK; // read-only info screen - default to BACK, not the first graph row
+          }
+        #endif
       }
       #if HAS_VSENSE == true || HAS_BATTERY_DIVIDER == true
         else if (menu_state == MENU_STATE_HW_EDIT) {
@@ -2314,6 +2450,57 @@
           menu_state = MENU_STATE_GPIO_LIST;
         }
       #endif
+      #if MCU_VARIANT == MCU_ESP32
+        else if (menu_state == MENU_STATE_MEM_LIST) {
+          // Selecting Heap or PSRAM drops into its detail readout - same
+          // "list row opens a submenu" pattern as HW_ITEM_GPIO. mem_menu_cursor
+          // itself is left as-is (still MEM_ITEM_HEAP/MEM_ITEM_PSRAM), so
+          // MENU_STATE_MEM_DETAIL's draw/confirm code can tell which metric
+          // it's showing - same reuse-the-parent-cursor pattern HW_EDIT
+          // uses for hw_menu_cursor.
+          if (mem_menu_cursor == MEM_ITEM_BACK) {
+            menu_state = MENU_STATE_HW_LIST;
+          } else {
+            mem_detail_cursor = 0;
+            menu_state = MENU_STATE_MEM_DETAIL;
+          }
+        } else if (menu_state == MENU_STATE_MEM_DETAIL) {
+          // Fully read-only - only BACK does anything.
+          if (mem_detail_cursor == MEM_DETAIL_ITEM_BACK) {
+            menu_state = MENU_STATE_MEM_LIST;
+          }
+        }
+      #endif
+    #endif
+    #if HAS_OTA == true
+      else if (menu_state == MENU_STATE_FWUPD_LIST) {
+        // CURRENT/LATEST are read-only info rows (fetched once on opening
+        // this list from the main menu - see MENU_ITEM_FW_UPDATE above) -
+        // only BACK and UPDATE do anything, same as HW_LIST's read-only
+        // rows above.
+        if (fwupd_menu_cursor == FWUPD_ITEM_BACK) {
+          menu_state = MENU_STATE_LIST;
+        } else if (fwupd_menu_cursor == FWUPD_ITEM_UPDATE) {
+          fwupd_confirm_cursor = 1; // default CANCEL - see its own declaration
+          menu_state = MENU_STATE_FWUPD_CONFIRM;
+        }
+      } else if (menu_state == MENU_STATE_FWUPD_CONFIRM) {
+        if (fwupd_confirm_cursor == 0) { // UPDATE
+          // Blocks for the whole download - menu_draw_popup as the
+          // progress callback keeps the screen live throughout (same
+          // pattern as Sync NTP/rtc_sync_ntp()). Success reboots from
+          // inside ota_reboot() and never returns.
+          const esp_partition_t *target = ota_do_pull_download(menu_draw_popup);
+          if (target && ota_verify_and_set_boot(target)) {
+            menu_draw_popup("INSTALLING...");
+            ota_reboot(menu_draw_popup);
+          } else {
+            menu_open_popup("UPDATE FAILED", MENU_STATE_FWUPD_LIST);
+          }
+        } else { // CANCEL
+          menu_state = MENU_STATE_FWUPD_LIST;
+        }
+      }
     #endif
     // menu_state == MENU_STATE_CLOSED + short click: no-op (reserved).
   }
@@ -2433,6 +2620,106 @@
       MENU_GFX.print("tap:next hold:open");
     #endif
   }
+
+  #if MCU_VARIANT == MCU_ESP32
+    // Compact horizontal bar meter, sized to fit inside one MENU_LIST_ROW_H
+    // row (outlined rect + a filled portion proportional to `frac`, no
+    // embedded number) - the user asked for graphs "the same size as
+    // regular lines", not a second text readout of a value HW_LIST's own
+    // rows already print elsewhere.
+    void draw_menu_bar_meter(int16_t x, int16_t y, int16_t w, int16_t h, float frac, uint16_t color) {
+      if (frac < 0) frac = 0;
+      if (frac > 1) frac = 1;
+      MENU_GFX.drawRect(x, y, w, h, color);
+      int16_t fill_w = (int16_t)((w - 2) * frac + 0.5);
+      if (fill_w > 0) MENU_GFX.fillRect(x + 1, y + 1, fill_w, h - 2, color);
+    }
+
+    void draw_menu_memory_disp() {
+      MENU_GFX.setFont(MENU_FONT);
+      MENU_GFX.setTextSize(1);
+      MENU_GFX.setTextColor(SSD1306_WHITE);
+      MENU_GFX.setCursor(6, 8);
+      MENU_GFX.print("MEMORY");
+      MENU_GFX.drawFastHLine(4, 12, MENU_CONTENT_W, SSD1306_WHITE);
+
+      const uint8_t row_h = MENU_LIST_ROW_H;
+      const int16_t bar_x = 46;
+      const int16_t bar_h = (row_h > 6) ? (row_h - 5) : (row_h - 2);
+
+      // Percentage field is reserved at "100%"'s width (not each row's
+      // actual string width) so the bar's right edge doesn't shift around
+      // as the digit count changes - only the text within the field is
+      // right-aligned per row.
+      int16_t x1, y1; uint16_t pct_field_w, th;
+      MENU_GFX.getTextBounds("100%", 0, 0, &x1, &y1, &pct_field_w, &th);
+      const int16_t row_right  = 4 + MENU_CONTENT_W - 2;
+      const int16_t pct_left   = row_right - pct_field_w;
+      const int16_t bar_w      = (pct_left - 4) - bar_x;
+
+      for (uint8_t i = 0; i < MEM_ITEM_COUNT; i++) {
+        uint8_t row_top = MENU_LIST_TOP_Y + i * row_h;
+        uint8_t y = row_top + MENU_LIST_BASELINE_OFF;
+        uint16_t fg = SSD1306_WHITE;
+        if (i == mem_menu_cursor) {
+          MENU_GFX.fillRect(4, row_top, MENU_CONTENT_W, row_h - 1, SSD1306_WHITE);
+          fg = SSD1306_BLACK;
+        }
+        MENU_GFX.setTextColor(fg);
+        MENU_GFX.setCursor(8, y);
+
+        if (i == MEM_ITEM_BACK) {
+          MENU_GFX.print("BACK");
+          continue;
+        }
+
+        int16_t bar_y = row_top + (row_h - bar_h) / 2;
+        bool has_psram = psramFound();
+        uint32_t total = 0, free_b = 0;
+        bool have_reading = true;
+        if (i == MEM_ITEM_HEAP) {
+          MENU_GFX.print("Heap");
+          total = ESP.getHeapSize();
+          free_b = ESP.getFreeHeap();
+        } else { // MEM_ITEM_PSRAM
+          MENU_GFX.print("PSRAM");
+          if (has_psram) {
+            total = ESP.getPsramSize();
+            free_b = ESP.getFreePsram();
+          } else {
+            have_reading = false;
+          }
+        }
+
+        if (have_reading) {
+          float used_frac = total ? (float)(total - free_b) / total : 0;
+          draw_menu_bar_meter(bar_x, bar_y, bar_w, bar_h, used_frac, fg);
+
+          char pctbuf[6];
+          sprintf(pctbuf, "%d%%", (int)(used_frac * 100.0f + 0.5f));
+          uint16_t pw, ph;
+          MENU_GFX.getTextBounds(pctbuf, 0, 0, &x1, &y1, &pw, &ph);
+          MENU_GFX.setCursor(row_right - pw, y);
+          MENU_GFX.print(pctbuf);
+        } else {
+          uint16_t w, h;
+          MENU_GFX.getTextBounds("N/A", 0, 0, &x1, &y1, &w, &h);
+          MENU_GFX.setCursor(row_right - w, y);
+          MENU_GFX.print("N/A");
+        }
+      }
+
+      MENU_GFX.setTextColor(SSD1306_WHITE);
+      MENU_GFX.drawFastHLine(4, MENU_LIST_FOOTER_HLINE_Y, MENU_CONTENT_W, SSD1306_WHITE);
+      MENU_GFX.setCursor(6, MENU_LIST_FOOTER_TEXT_Y);
+      #if HAS_ENCODER == true
+        if (encoder_enabled) MENU_GFX.print("turn:move press:open");
+        else                 MENU_GFX.print("tap:next hold:open");
+      #else
+        MENU_GFX.print("tap:next hold:open");
+      #endif
+    }
+  #endif
 
   void draw_menu_edit_disp(const char *title, const char *valbuf) {
     MENU_GFX.setFont(MENU_FONT);
@@ -2649,7 +2936,8 @@
       MENU_GFX.drawFastHLine(4, 15, 120, SSD1306_WHITE);
 
       char candidate[6];
-      if (wheel_idx == WHEEL_DEL_IDX) sprintf(candidate, "DEL");
+      if (wheel_is_del(wheel_idx))       sprintf(candidate, "DEL");
+      else if (wheel_is_save(wheel_idx)) sprintf(candidate, "SAVE");
       else { candidate[0] = wheel_char_at(wheel_idx); candidate[1] = 0; }
 
       // FreeMono9pt7b only for the actual typed content, at its natural
@@ -2698,7 +2986,19 @@
       MENU_GFX.setTextColor(SSD1306_WHITE);
       MENU_GFX.drawFastHLine(4, 50, 120, SSD1306_WHITE);
       MENU_GFX.setCursor(6, 59);
-      MENU_GFX.print("turn:char hold:save");
+      // Same encoder_enabled branch as every other footer hint in this
+      // file (e.g. the main list's "turn:move press:open" vs "tap:next
+      // hold:open") - this one just never had it, leaving button-only
+      // boards shown a caption for input hardware they don't have. "hold:
+      // ok" (not "hold:save") since a hold just confirms whatever the
+      // wheel is currently on - a character, DEL, or SAVE (WHEEL_QUICKSAVE_
+      // IDX) - not something SAVE-specific.
+      #if HAS_ENCODER == true
+        if (encoder_enabled) MENU_GFX.print("turn:char hold:ok");
+        else                 MENU_GFX.print("tap:char hold:ok");
+      #else
+        MENU_GFX.print("tap:char hold:ok");
+      #endif
     }
   #endif
 
@@ -2773,6 +3073,11 @@
       #if MENU_HAS_HW_PAGE == true
         labels[MENU_ITEM_HARDWARE] = "Hardware";
         sprintf(valbufs[MENU_ITEM_HARDWARE], ">"); // opens a submenu, not an inline value
+      #endif
+
+      #if HAS_OTA == true
+        labels[MENU_ITEM_FW_UPDATE] = "F/W Update";
+        sprintf(valbufs[MENU_ITEM_FW_UPDATE], ">"); // opens a submenu, not an inline value
       #endif
 
       labels[MENU_ITEM_SAVE_EXIT] = "SAVE & EXIT";
@@ -3059,9 +3364,6 @@
         const char *labels[SENSORS_ITEM_COUNT];
         char valbufs[SENSORS_ITEM_COUNT][24];
 
-        labels[SENSORS_ITEM_MODEL] = "Sensor";
-        sprintf(valbufs[SENSORS_ITEM_MODEL], "%s", sensor_chip_name());
-
         labels[SENSORS_ITEM_TEMP] = "Temp";
         if (sensor_present) sprintf(valbufs[SENSORS_ITEM_TEMP], "%.1fC", sensor_temperature_c());
         else                 sprintf(valbufs[SENSORS_ITEM_TEMP], "N/A");
@@ -3073,6 +3375,9 @@
         labels[SENSORS_ITEM_PRESSURE] = "Pressure";
         if (sensor_present) sprintf(valbufs[SENSORS_ITEM_PRESSURE], "%.0fhPa", sensor_pressure_hpa());
         else                 sprintf(valbufs[SENSORS_ITEM_PRESSURE], "N/A");
+
+        labels[SENSORS_ITEM_MODEL] = "Sensor";
+        sprintf(valbufs[SENSORS_ITEM_MODEL], "%s", sensor_chip_name());
 
         labels[SENSORS_ITEM_BACK] = "BACK";
         valbufs[SENSORS_ITEM_BACK][0] = 0;
@@ -3206,6 +3511,11 @@
           sprintf(valbufs[HW_ITEM_GPIO], ">"); // opens a submenu, not an inline value
         #endif
 
+        #if MCU_VARIANT == MCU_ESP32
+          labels[HW_ITEM_MEMORY] = "Memory";
+          sprintf(valbufs[HW_ITEM_MEMORY], ">"); // opens a submenu, not an inline value
+        #endif
+
         labels[HW_ITEM_BACK] = "BACK";
         valbufs[HW_ITEM_BACK][0] = 0;
 
@@ -3268,6 +3578,81 @@
           draw_menu_edit_disp(title, valbuf);
         }
       #endif
+      #if MCU_VARIANT == MCU_ESP32
+        else if (menu_state == MENU_STATE_MEM_LIST) {
+          draw_menu_memory_disp();
+        } else if (menu_state == MENU_STATE_MEM_DETAIL) {
+          const char *labels[MEM_DETAIL_ITEM_COUNT];
+          char valbufs[MEM_DETAIL_ITEM_COUNT][24];
+
+          uint32_t total = 0, free_b = 0, min_free = 0;
+          bool have_reading = true;
+          if (mem_menu_cursor == MEM_ITEM_HEAP) {
+            total    = ESP.getHeapSize();
+            free_b   = ESP.getFreeHeap();
+            min_free = ESP.getMinFreeHeap();
+          } else { // MEM_ITEM_PSRAM
+            if (psramFound()) {
+              total    = ESP.getPsramSize();
+              free_b   = ESP.getFreePsram();
+              min_free = ESP.getMinFreePsram();
+            } else {
+              have_reading = false;
+            }
+          }
+
+          labels[MEM_DETAIL_ITEM_TOTAL]   = "Total";
+          labels[MEM_DETAIL_ITEM_USED]    = "Used";
+          labels[MEM_DETAIL_ITEM_FREE]    = "Free";
+          labels[MEM_DETAIL_ITEM_MINFREE] = "Min Free";
+          if (have_reading) {
+            sprintf(valbufs[MEM_DETAIL_ITEM_TOTAL],   "%.1fKB", total / 1024.0);
+            sprintf(valbufs[MEM_DETAIL_ITEM_USED],    "%.1fKB", (total - free_b) / 1024.0);
+            sprintf(valbufs[MEM_DETAIL_ITEM_FREE],    "%.1fKB", free_b / 1024.0);
+            sprintf(valbufs[MEM_DETAIL_ITEM_MINFREE], "%.1fKB", min_free / 1024.0);
+          } else {
+            sprintf(valbufs[MEM_DETAIL_ITEM_TOTAL],   "N/A");
+            sprintf(valbufs[MEM_DETAIL_ITEM_USED],    "N/A");
+            sprintf(valbufs[MEM_DETAIL_ITEM_FREE],    "N/A");
+            sprintf(valbufs[MEM_DETAIL_ITEM_MINFREE], "N/A");
+          }
+
+          labels[MEM_DETAIL_ITEM_BACK] = "BACK";
+          valbufs[MEM_DETAIL_ITEM_BACK][0] = 0;
+
+          draw_menu_list_disp(mem_menu_cursor == MEM_ITEM_HEAP ? "HEAP" : "PSRAM",
+            labels, valbufs, MEM_DETAIL_ITEM_COUNT, mem_detail_cursor);
+        }
+      #endif
+    #endif
+    #if HAS_OTA == true
+      else if (menu_state == MENU_STATE_FWUPD_LIST) {
+        const char *labels[FWUPD_ITEM_COUNT];
+        char valbufs[FWUPD_ITEM_COUNT][24];
+
+        labels[FWUPD_ITEM_CURRENT] = "Current";
+        snprintf(valbufs[FWUPD_ITEM_CURRENT], 24, "%s.%d", ota_current_version().c_str(), BUILD_NUMBER);
+
+        labels[FWUPD_ITEM_LATEST] = "Latest";
+        if (fwupd_latest_ok) snprintf(valbufs[FWUPD_ITEM_LATEST], 24, "%s.%ld", ota_current_version().c_str(), fwupd_latest_build);
+        else                  sprintf(valbufs[FWUPD_ITEM_LATEST], "N/A");
+
+        labels[FWUPD_ITEM_UPDATE] = "Update";
+        sprintf(valbufs[FWUPD_ITEM_UPDATE], ">"); // opens a submenu, not an inline value
+
+        labels[FWUPD_ITEM_BACK] = "BACK";
+        valbufs[FWUPD_ITEM_BACK][0] = 0;
+
+        draw_menu_list_disp("F/W UPDATE", labels, valbufs, FWUPD_ITEM_COUNT, fwupd_menu_cursor);
+      } else if (menu_state == MENU_STATE_FWUPD_CONFIRM) {
+        // Plain 2-item list, same draw_menu_list_disp() as everywhere else -
+        // same pattern as WiFi's SAVE/DISCARD (MENU_STATE_WIFI_TEXT_CONFIRM).
+        const char *labels[2] = { "UPDATE", "CANCEL" };
+        char valbufs[2][24];
+        valbufs[0][0] = 0;
+        valbufs[1][0] = 0;
+        draw_menu_list_disp("UPDATE?", labels, valbufs, 2, fwupd_confirm_cursor);
+      }
     #endif
   }
 

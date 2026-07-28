@@ -225,6 +225,14 @@ void buzzer_encoder_click_melody();
 #if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
 	#include "Device.h"
 #endif
+
+// Network OTA updates (MeshPoE-S3 only) - must come after Device.h
+// (dev_firmware_hash_target/device_save_firmware_hash) and after Remote.h/
+// Ethernet.h above (wifi_is_connected()/eth_is_connected).
+#if HAS_OTA == true
+  #include "OTA.h"
+#endif
+
 #if MCU_VARIANT == MCU_ESP32
   //https://github.com/espressif/esp-idf/issues/8855
   #if BOARD_MODEL == BOARD_HELTEC32_V3

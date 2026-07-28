@@ -180,6 +180,19 @@
   #define HAS_WIFI false
   #define HAS_ESPNOW false
   #define HAS_ETHERNET false
+  #define HAS_OTA false
+  // BUILD_NUMBER isn't OTA-specific (just a git-commit-count build identity)
+  // but is only ever meaningful on HAS_OTA boards - defined as a shared
+  // fallback here rather than duplicated per board. Makefile injects the
+  // real value (git rev-list --count HEAD) via compiler.cpp.extra_flags for
+  // every HAS_OTA board; this fallback only applies to non-Makefile builds
+  // (e.g. the Arduino IDE). Deliberately outside any #if HAS_OTA guard so
+  // it's already defined by the time each board's own block runs (a board
+  // could reference it before setting HAS_OTA true, since #define order
+  // within this file doesn't matter for a plain fallback like this).
+  #ifndef BUILD_NUMBER
+    #define BUILD_NUMBER 0
+  #endif
   #define HAS_TCXO false
   #define HAS_PMU false
   #define HAS_NP false
@@ -278,6 +291,9 @@
       #define HAS_ESPNOW true
       #define HAS_ETHERNET true
       #define HAS_CONSOLE true
+      // Network OTA firmware updates (OTA.h) - see BUILD_NUMBER's own
+      // comment above for why that fallback lives outside this board block.
+      #define HAS_OTA true
       #define HAS_EEPROM true
       #define HAS_BUSY true
       #define HAS_INPUT true
@@ -346,6 +362,11 @@
       #define HAS_WIFI true
       #define HAS_ESPNOW true
       #define HAS_CONSOLE true
+      // Network OTA firmware updates (OTA.h) - see BUILD_NUMBER's own
+      // comment (Boards.h global-defaults block) for why that fallback
+      // isn't duplicated per board. WiFi-only here (no HAS_ETHERNET on this
+      // board) - OTA.h's network-up check already covers WiFi-only boards.
+      #define HAS_OTA true
       #define HAS_EEPROM true
       #define HAS_BUSY true
       #define HAS_INPUT true

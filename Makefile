@@ -65,10 +65,16 @@ prep-nrf:
 console-site:
 	make -C Console clean site
 
-spiffs: console-site spiffs-image 
+spiffs: console-site spiffs-image
 
 spiffs-image:
 	python Release/esptool/spiffsgen.py 1966080 ./Console/build Release/console_image.bin
+
+spiffs-image-meshpoe_s3:
+	python Release/esptool/spiffsgen.py 3538944 ./Console/build Release/console_image_meshpoe_s3.bin
+
+spiffs-image-meshadventurer_s3:
+	python Release/esptool/spiffsgen.py 3538944 ./Console/build Release/console_image_meshadventurer_s3.bin
 
 upload-spiffs:
 	@echo Deploying SPIFFS image...
@@ -132,10 +138,10 @@ firmware-meshadventurer: check_bt_buffers
 	arduino-cli compile --log --fqbn esp32:esp32:esp32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF4\""
 
 firmware-meshpoe_s3: check_bt_buffers
-	arduino-cli compile --log --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DARDUINO_USB_MODE=1\" \"-DARDUINO_USB_CDC_ON_BOOT=1\" \"-DBOARD_MODEL=0xF1\""
+	arduino-cli compile --log --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,PSRAM=opi" -e --build-property "build.partitions=default_16MB" --build-property "build.flash_size=16MB" --build-property "upload.maximum_size=6553600" --build-property "compiler.cpp.extra_flags=\"-DARDUINO_USB_MODE=1\" \"-DARDUINO_USB_CDC_ON_BOOT=1\" \"-DBOARD_MODEL=0xF1\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
 
 firmware-meshadventurer_s3: check_bt_buffers
-	arduino-cli compile --log --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF2\""
+	arduino-cli compile --log --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,PSRAM=opi" -e --build-property "build.partitions=default_16MB" --build-property "build.flash_size=16MB" --build-property "upload.maximum_size=6553600" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF2\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
 
 firmware-rnode_ng_20: check_bt_buffers
 	arduino-cli compile --log --fqbn esp32:esp32:ttgo-lora32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x40\""
@@ -200,21 +206,21 @@ upload-meshpoe_s3:
 #	@sleep 1
 #	rnodeconf /dev/ttyACM0 --firmware-hash $$(./partition_hashes ./build/esp32.esp32.esp32s3/RNode_Firmware.ino.bin)
 	@sleep 3
-#	python ./Release/esptool/esptool.py --chip esp32s3 --port /dev/ttyACM0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode qio --flash_freq 80m --flash_size 16MB 0x210000 ./Release/console_image.bin
+#	python ./Release/esptool/esptool.py --chip esp32s3 --port /dev/ttyACM0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode qio --flash_freq 80m --flash_size 16MB 0xc90000 ./Release/console_image_meshpoe_s3.bin
 
 upload-meshadventurer_s3:
 	arduino-cli upload -p /dev/ttyACM0 --fqbn esp32:esp32:esp32s3
 #	@sleep 1
 #	rnodeconf /dev/ttyACM0 --firmware-hash $$(./partition_hashes ./build/esp32.esp32.esp32s3/RNode_Firmware.ino.bin)
 	@sleep 3
-	python ./Release/esptool/esptool.py --chip esp32s3 --port /dev/ttyACM0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 80m --flash_size 4MB 0x210000 ./Release/console_image.bin
+#	python ./Release/esptool/esptool.py --chip esp32s3 --port /dev/ttyACM0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode qio --flash_freq 80m --flash_size 16MB 0xc90000 ./Release/console_image_meshadventurer_s3.bin
 
 upload-meshadventurer_s3_usb:
 	arduino-cli upload -p /dev/ttyUSB0 --fqbn esp32:esp32:esp32s3
 #	@sleep 1
 #	rnodeconf /dev/ttyACM0 --firmware-hash $$(./partition_hashes ./build/esp32.esp32.esp32s3/RNode_Firmware.ino.bin)
 	@sleep 3
-	python ./Release/esptool/esptool.py --chip esp32s3 --port /dev/ttyUSB0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 80m --flash_size 4MB 0x210000 ./Release/console_image.bin
+#	python ./Release/esptool/esptool.py --chip esp32s3 --port /dev/ttyUSB0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode qio --flash_freq 80m --flash_size 16MB 0xc90000 ./Release/console_image_meshadventurer_s3.bin
 
 upload-meshadventurer:
 	arduino-cli upload -p /dev/ttyUSB0 --fqbn esp32:esp32:esp32
@@ -603,22 +609,24 @@ release-genericesp32: check_bt_buffers
 	zip --junk-paths ./Release/rnode_firmware_esp32_generic.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_esp32_generic.boot_app0 build/rnode_firmware_esp32_generic.bin build/rnode_firmware_esp32_generic.bootloader build/rnode_firmware_esp32_generic.partitions
 	rm -r build
 
-release-meshpoe_s3: check_bt_buffers
-	arduino-cli compile --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF1\""
+release-meshpoe_s3: check_bt_buffers console-site spiffs-image-meshpoe_s3
+	arduino-cli compile --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,PSRAM=opi" -e --build-property "build.partitions=default_16MB" --build-property "build.flash_size=16MB" --build-property "upload.maximum_size=6553600" --build-property "compiler.cpp.extra_flags=\"-DARDUINO_USB_MODE=1\" \"-DARDUINO_USB_CDC_ON_BOOT=1\" \"-DBOARD_MODEL=0xF1\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
 	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_meshpoe_s3.boot_app0
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bin build/rnode_firmware_meshpoe_s3.bin
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_meshpoe_s3.bootloader
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.partitions.bin build/rnode_firmware_meshpoe_s3.partitions
-	zip --junk-paths ./Release/rnode_firmware_meshpoe_s3.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_meshpoe_s3.boot_app0 build/rnode_firmware_meshpoe_s3.bin build/rnode_firmware_meshpoe_s3.bootloader build/rnode_firmware_meshpoe_s3.partitions
+	cp build/rnode_firmware_meshpoe_s3.bin Release/rnode_firmware_meshpoe_s3.bin
+	zip --junk-paths ./Release/rnode_firmware_meshpoe_s3.zip ./Release/esptool/esptool.py ./Release/console_image_meshpoe_s3.bin build/rnode_firmware_meshpoe_s3.boot_app0 build/rnode_firmware_meshpoe_s3.bin build/rnode_firmware_meshpoe_s3.bootloader build/rnode_firmware_meshpoe_s3.partitions
 	rm -r build
 
-release-meshadventurer_s3: check_bt_buffers
-	arduino-cli compile --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF2\""
+release-meshadventurer_s3: check_bt_buffers console-site spiffs-image-meshadventurer_s3
+	arduino-cli compile --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,PSRAM=opi" -e --build-property "build.partitions=default_16MB" --build-property "build.flash_size=16MB" --build-property "upload.maximum_size=6553600" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF2\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
 	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_meshadventurer_s3.boot_app0
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bin build/rnode_firmware_meshadventurer_s3.bin
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_meshadventurer_s3.bootloader
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.partitions.bin build/rnode_firmware_meshadventurer_s3.partitions
-	zip --junk-paths ./Release/rnode_firmware_meshadventurer_s3.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_meshadventurer_s3.boot_app0 build/rnode_firmware_meshadventurer_s3.bin build/rnode_firmware_meshadventurer_s3.bootloader build/rnode_firmware_meshadventurer_s3.partitions
+	cp build/rnode_firmware_meshadventurer_s3.bin Release/rnode_firmware_meshadventurer_s3.bin
+	zip --junk-paths ./Release/rnode_firmware_meshadventurer_s3.zip ./Release/esptool/esptool.py ./Release/console_image_meshadventurer_s3.bin build/rnode_firmware_meshadventurer_s3.boot_app0 build/rnode_firmware_meshadventurer_s3.bin build/rnode_firmware_meshadventurer_s3.bootloader build/rnode_firmware_meshadventurer_s3.partitions
 	rm -r build
 
 release-meshadventurer: check_bt_buffers
