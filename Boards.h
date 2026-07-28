@@ -181,15 +181,13 @@
   #define HAS_ESPNOW false
   #define HAS_ETHERNET false
   #define HAS_OTA false
-  // BUILD_NUMBER isn't OTA-specific (just a git-commit-count build identity)
-  // but is only ever meaningful on HAS_OTA boards - defined as a shared
-  // fallback here rather than duplicated per board. Makefile injects the
-  // real value (git rev-list --count HEAD) via compiler.cpp.extra_flags for
-  // every HAS_OTA board; this fallback only applies to non-Makefile builds
-  // (e.g. the Arduino IDE). Deliberately outside any #if HAS_OTA guard so
-  // it's already defined by the time each board's own block runs (a board
-  // could reference it before setting HAS_OTA true, since #define order
-  // within this file doesn't matter for a plain fallback like this).
+  // BUILD_NUMBER isn't OTA-specific - it's a plain git-commit-count build
+  // identity, injected into every board's compiler.cpp.extra_flags by the
+  // Makefile (git rev-list --count HEAD). This fallback only applies to
+  // non-Makefile builds (e.g. the Arduino IDE). Only HAS_OTA boards actually
+  // display/query it at runtime (OTA.h, Menu.h's F/W Update page, Display.h's
+  // VERSION banner) - on every other board it's compiled in but otherwise
+  // unused, which is harmless.
   #ifndef BUILD_NUMBER
     #define BUILD_NUMBER 0
   #endif

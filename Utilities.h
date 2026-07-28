@@ -1780,6 +1780,16 @@ void kiss_indicate_version() {
 	serial_write(CMD_FW_VERSION);
 	serial_write(MAJ_VERS);
 	serial_write(MIN_VERS);
+	// Appended after the original 2-byte MAJ_VERS/MIN_VERS payload, not
+	// interleaved - old clients that only read those two bytes are
+	// unaffected. BUILD_NUMBER (git commit count) can already exceed a
+	// single byte's range, so it's sent as 4 big-endian bytes, same
+	// escaped-multi-byte pattern as kiss_indicate_frequency()/_time().
+	uint32_t build_number = (uint32_t)BUILD_NUMBER;
+	escaped_serial_write(build_number>>24);
+	escaped_serial_write(build_number>>16);
+	escaped_serial_write(build_number>>8);
+	escaped_serial_write(build_number);
 	serial_write(FEND);
 }
 
