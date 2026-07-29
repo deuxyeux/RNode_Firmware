@@ -40,6 +40,11 @@ jobs:
             arduino15-
 
       - name: Install board cores and libraries
+        env:
+          HTTP_PROXY: http://192.168.0.4:3128
+          HTTPS_PROXY: http://192.168.0.4:3128
+          http_proxy: http://192.168.0.4:3128
+          https_proxy: http://192.168.0.4:3128
         run: make prep prep-nrf
 
       - name: Compile all firmware targets
