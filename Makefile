@@ -19,6 +19,11 @@
 # Version 3.3.11 of the Arduino ESP core is based on ESP-IDF v5.5.5
 ARDUINO_ESP_CORE_VER = 3.3.11
 
+# CI mirror of HelTecAutomation/Heltec_nRF52 main@998bd18e (needed for
+# HT-n5262G/heltec_t096, unreleased in the official 1.7.0 tag), versioned
+# 1.7.1 so arduino-cli picks it over the official 1.7.0 by default.
+HELTEC_NRF52_CORE_VER = 1.7.1
+
 # RNode wire-protocol version (Config.h MAJ_VERS/MIN_VERS, stored as hex
 # bytes) - combined with BUILD_NUMBER (git commit count, injected into every
 # board's compiler.cpp.extra_flags below) and stamped into every ESP32
@@ -62,9 +67,9 @@ prep-nrf:
 	arduino-cli core update-index --config-file arduino-cli.yaml
 	arduino-cli core install rakwireless:nrf52 --config-file arduino-cli.yaml
 	arduino-cli core install Heltec_nRF52:Heltec_nRF52 --config-file arduino-cli.yaml
+	sed -i.bak 's|^tools\.uf2conv\.cmd=python {runtime\.platform\.path}/tools/uf2conv/uf2conv\.py|tools.uf2conv.cmd=python3 "{runtime.platform.path}/tools/uf2conv/uf2conv.py"|; s|recipe\.objcopy\.uf2\.pattern="{tools\.uf2conv\.cmd}"|recipe.objcopy.uf2.pattern={tools.uf2conv.cmd}|' ~/.arduino15/packages/Heltec_nRF52/hardware/Heltec_nRF52/$(HELTEC_NRF52_CORE_VER)/platform.txt
 	arduino-cli core install adafruit:nrf52 --config-file arduino-cli.yaml
-	-arduino-cli core install "promicro:nrf52" --config-file arduino-cli.yaml
-	-sed -i.bak 's/nicenanov2\.build\.ldscript=nrf52840_s140_v7\.ld/nicenanov2.build.ldscript=nrf52840_s140_v6.ld/' ~/.arduino15/packages/promicro/hardware/nrf52/1.0.2/boards.txt
+	arduino-cli core install "promicro:nrf52" --config-file arduino-cli.yaml
 	arduino-cli lib install "GxEPD2"
 	arduino-cli lib install "TinyGPSPlus"
 	arduino-cli config set library.enable_unsafe_install true
@@ -399,7 +404,7 @@ upload-xiao_s3:
 	@sleep 3
 	python ./Release/esptool/esptool.py --chip esp32s3 --port /dev/ttyACM0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 80m --flash_size 4MB 0x210000 ./Release/console_image.bin
 
-firmware-all: firmware-aethernode firmware-aethernode_s3 firmware-diy_v1 firmware-featheresp32 firmware-heltec32_v2 firmware-heltec32_v2_extled firmware-heltec32_v3 firmware-heltec32_v4 firmware-heltec_t114 firmware-heltec_t096 firmware-lora32_v10 firmware-lora32_v10_extled firmware-lora32_v20 firmware-lora32_v21 firmware-lora32_v21_extled firmware-lora32_v21_tcxo firmware-meshadventurer firmware-meshpoe_s3 firmware-meshadventurer_s3 firmware-rnode_ng_20 firmware-rnode_ng_21 firmware-rak4631 firmware-t3s3 firmware-t3s3_sx127x firmware-t3s3_sx1280_pa firmware-tbeam firmware-tbeam_supreme firmware-tbeam_supreme_v3 firmware-tbeam_sx126x firmware-tdeck firmware-techo firmware-xiao_s3 firmware-genericesp32 firmware-mega2560
+firmware-all: firmware-aethernode firmware-aethernode_s3 firmware-diy_v1 firmware-featheresp32 firmware-heltec32_v2 firmware-heltec32_v2_extled firmware-heltec32_v3 firmware-heltec32_v4 firmware-heltec_t114 firmware-heltec_t096 firmware-lora32_v10 firmware-lora32_v10_extled firmware-lora32_v20 firmware-lora32_v21 firmware-lora32_v21_extled firmware-lora32_v21_tcxo firmware-meshadventurer firmware-meshpoe_s3 firmware-meshadventurer_s3 firmware-rnode_ng_20 firmware-rnode_ng_21 firmware-promicro firmware-rak4631 firmware-t3s3 firmware-t3s3_sx127x firmware-t3s3_sx1280_pa firmware-tbeam firmware-tbeam_supreme firmware-tbeam_supreme_v3 firmware-tbeam_sx126x firmware-tdeck firmware-techo firmware-xiao_s3 firmware-genericesp32
 
 release: release-all
 

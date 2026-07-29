@@ -15,18 +15,22 @@ jobs:
     runs-on: docker
     container:
       image: node:20-bookworm
+    defaults:
+      run:
+        working-directory: RNode_Firmware
     steps:
-      - name: Install build dependencies
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends \
-            curl ca-certificates git build-essential python3 zip unzip
-          rm -rf /var/lib/apt/lists/*
-
       - name: Checkout
         uses: https://code.forgejo.org/actions/checkout@v4
         with:
           fetch-depth: 0
+          path: RNode_Firmware
+
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            curl ca-certificates git build-essential python3 python-is-python3 pip zip unzip
+          rm -rf /var/lib/apt/lists/*
 
       - name: Install arduino-cli
         run: curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | BINDIR=/usr/local/bin sh
@@ -35,7 +39,7 @@ jobs:
         uses: https://code.forgejo.org/actions/cache@v4
         with:
           path: ~/.arduino15
-          key: arduino15-${{ hashFiles('arduino-cli.yaml', 'Makefile') }}
+          key: arduino15-${{ hashFiles('RNode_Firmware/arduino-cli.yaml', 'RNode_Firmware/Makefile') }}
           restore-keys: |
             arduino15-
 
