@@ -16,8 +16,8 @@
 # Version 2.0.17 of the Arduino ESP core is based on ESP-IDF v4.4.7
 #ARDUINO_ESP_CORE_VER = 2.0.17
 
-# Version 3.3.8 of the Arduino ESP core is based on ESP-IDF v5.5.4
-ARDUINO_ESP_CORE_VER = 3.3.8
+# Version 3.3.11 of the Arduino ESP core is based on ESP-IDF v5.5.5
+ARDUINO_ESP_CORE_VER = 3.3.11
 
 # RNode wire-protocol version (Config.h MAJ_VERS/MIN_VERS, stored as hex
 # bytes) - combined with BUILD_NUMBER (git commit count, injected into every
