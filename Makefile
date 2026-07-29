@@ -41,6 +41,8 @@ prep-avr:
 prep-esp32:
 	arduino-cli core update-index --config-file arduino-cli.yaml
 	arduino-cli core install esp32:esp32@$(ARDUINO_ESP_CORE_VER) --config-file arduino-cli.yaml
+	sed -i.bak 's/^#define RX_QUEUE_SIZE.*/#define RX_QUEUE_SIZE         6144/' ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/libraries/BluetoothSerial/src/BluetoothSerial.cpp
+	sed -i.bak 's/^#define TX_QUEUE_SIZE.*/#define TX_QUEUE_SIZE         384/' ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/libraries/BluetoothSerial/src/BluetoothSerial.cpp
 	arduino-cli lib install "Adafruit SSD1306"
 	arduino-cli lib install "Adafruit SH110X"
 	arduino-cli lib install "Adafruit ST7735 and ST7789 Library"
