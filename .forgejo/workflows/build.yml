@@ -1,4 +1,5 @@
 name: Build Firmware
+run-name: Build Firmware
 
 on:
   push:
