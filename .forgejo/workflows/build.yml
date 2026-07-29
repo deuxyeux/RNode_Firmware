@@ -1,0 +1,46 @@
+name: Build Firmware
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compile:
+    runs-on: docker
+    container:
+      image: debian:bookworm-slim
+    steps:
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            curl ca-certificates git build-essential python3 zip unzip
+          rm -rf /var/lib/apt/lists/*
+
+      - name: Checkout
+        uses: https://code.forgejo.org/actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install arduino-cli
+        run: curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | BINDIR=/usr/local/bin sh
+
+      - name: Cache arduino-cli cores and libraries
+        uses: https://code.forgejo.org/actions/cache@v4
+        with:
+          path: ~/.arduino15
+          key: arduino15-${{ hashFiles('arduino-cli.yaml', 'Makefile') }}
+          restore-keys: |
+            arduino15-
+
+      - name: Install board cores and libraries
+        run: make prep prep-nrf
+
+      - name: Compile all firmware targets
+        run: make firmware-all

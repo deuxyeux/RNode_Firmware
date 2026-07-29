@@ -397,6 +397,8 @@ upload-xiao_s3:
 	@sleep 3
 	python ./Release/esptool/esptool.py --chip esp32s3 --port /dev/ttyACM0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 80m --flash_size 4MB 0x210000 ./Release/console_image.bin
 
+firmware-all: firmware-aethernode firmware-aethernode_s3 firmware-diy_v1 firmware-featheresp32 firmware-heltec32_v2 firmware-heltec32_v2_extled firmware-heltec32_v3 firmware-heltec32_v4 firmware-heltec_t114 firmware-heltec_t096 firmware-lora32_v10 firmware-lora32_v10_extled firmware-lora32_v20 firmware-lora32_v21 firmware-lora32_v21_extled firmware-lora32_v21_tcxo firmware-meshadventurer firmware-meshpoe_s3 firmware-meshadventurer_s3 firmware-rnode_ng_20 firmware-rnode_ng_21 firmware-promicro firmware-rak4631 firmware-t3s3 firmware-t3s3_sx127x firmware-t3s3_sx1280_pa firmware-tbeam firmware-tbeam_supreme firmware-tbeam_supreme_v3 firmware-tbeam_sx126x firmware-tdeck firmware-techo firmware-xiao_s3 firmware-genericesp32 firmware-mega2560
+
 release: release-all
 
 release-all: console-site spiffs-image release-tbeam release-tbeam_sx1262 release-lora32_v10 release-lora32_v20 release-lora32_v21 release-lora32_v10_extled release-lora32_v20_extled release-lora32_v21_extled release-lora32_v21_tcxo release-featheresp32 release-genericesp32 release-heltec32_v2 release-heltec32_v3 release-heltec32_v4 release-heltec32_v2_extled release-heltec_t114 release-heltec_t096 release-techo release-rnode_ng_20 release-rnode_ng_21 release-t3s3 release-t3s3_sx127x release-t3s3_sx1280_pa release-tdeck release-tbeam_supreme release-tbeam_supreme_v3 release-rak4631 release-xiao_s3 release-hashes
