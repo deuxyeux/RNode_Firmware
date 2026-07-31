@@ -156,16 +156,16 @@
   #define MENU_STATE_FWUPD_CONFIRM  23  // UPDATE/CANCEL list before Update actually runs - same pattern as MENU_STATE_WIFI_TEXT_CONFIRM
   #define MENU_STATE_MEM_LIST       24  // Hardware > Memory submenu (MCU_ESP32 boards) - Heap/PSRAM bar graphs, read-only
   #define MENU_STATE_MEM_DETAIL     25  // Memory > Heap or PSRAM detail readout (Total/Used/Free/Min Free), read-only
+  #define MENU_STATE_ESPNOW_LIST    26  // ESP-NOW submenu list (HAS_ESPNOW boards) - Enabled/Mode/Back
+  #define MENU_STATE_ESPNOW_EDIT    27  // editing whichever of Enabled/Mode/LR was selected
+  #define MENU_STATE_ESPNOW_LR_CONFIRM 28 // info row + ENABLE/CANCEL list, shown only when LR is being turned on - same pattern as MENU_STATE_FWUPD_CONFIRM
 
-  // The Hardware page exists whenever there's anything board-level worth
-  // showing (battery/voltage sensing via HAS_PMU, or an ESP32-S3's CPU
-  // temp) - mirrors the exact guard RNode_Firmware.ino already uses for
-  // init_pmu()/update_pmu().
-  #if HAS_PMU == true || IS_ESP32S3
-    #define MENU_HAS_HW_PAGE true
-  #else
-    #define MENU_HAS_HW_PAGE false
-  #endif
+  // The Hardware page used to only exist when there was board-level info
+  // worth showing (battery/voltage sensing via HAS_PMU, or an ESP32-S3's
+  // CPU temp) - now that it always has at least Node Uptime (HW_ITEM_UPTIME
+  // below, millis()-based, needs no hardware capability at all), that's no
+  // longer a reason to hide the page on any board, so this is unconditional.
+  #define MENU_HAS_HW_PAGE true
 
   // CPU temperature (pmu_temperature, Power.h) is only ever populated on
   // IS_ESP32S3 boards (via temperatureRead()) and on nRF52 (every nRF52840
@@ -192,17 +192,6 @@
     #define MENU_NEXT_IDX_S 3
   #endif
 
-  #if HAS_ESPNOW == true
-    // ESP-NOW virtual interface (vport 1, ESPNOW.h) on/off -
-    // espnow_enabled/espnow_conf_save() (Utilities.h). Like Ethernet's
-    // Speed field, changing this reboots the device immediately - ESP-NOW
-    // has no runtime start/stop path, only a boot-time espnow_init() call.
-    #define MENU_ITEM_ESPNOW MENU_NEXT_IDX_S
-    #define MENU_NEXT_IDX_SN (MENU_NEXT_IDX_S + 1)
-  #else
-    #define MENU_NEXT_IDX_SN MENU_NEXT_IDX_S
-  #endif
-
   #if HAS_ENCODER == true
     // Whether a physical encoder is actually populated - some boards have
     // it PCB-provisioned but optionally installed (MeshAdventurer-S3), or
@@ -211,10 +200,23 @@
     // HAS_ENCODER capability flag. Only changes the on-screen footer hint
     // (turn/press vs tap/hold) - the encoder itself is always serviced
     // regardless, same as before this existed.
-    #define MENU_ITEM_ENCODER MENU_NEXT_IDX_SN
-    #define MENU_NEXT_IDX_0   (MENU_NEXT_IDX_SN + 1)
+    #define MENU_ITEM_ENCODER MENU_NEXT_IDX_S
+    #define MENU_NEXT_IDX_SE  (MENU_NEXT_IDX_S + 1)
   #else
-    #define MENU_NEXT_IDX_0 MENU_NEXT_IDX_SN
+    #define MENU_NEXT_IDX_SE MENU_NEXT_IDX_S
+  #endif
+
+  #if HAS_ESPNOW == true
+    // Opens the ESP-NOW submenu (Enabled + Mode fields, ESPNOW_ITEM_*,
+    // MENU_STATE_ESPNOW_LIST/EDIT) - same shape as GNSS/Sensors below.
+    // Both fields reboot on change (espnow_conf_save()/espnow_mode_conf_save(),
+    // Utilities.h) - ESP-NOW has no runtime start/stop path, only a
+    // boot-time espnow_init() call - so like WiFi's Mode field, they're
+    // only staged here and actually written by menu_commit_and_exit().
+    #define MENU_ITEM_ESPNOW MENU_NEXT_IDX_SE
+    #define MENU_NEXT_IDX_0  (MENU_NEXT_IDX_SE + 1)
+  #else
+    #define MENU_NEXT_IDX_0 MENU_NEXT_IDX_SE
   #endif
 
   #if HAS_WIFI == true
@@ -276,27 +278,36 @@
     #define WIFI_ITEM_MODE     0
     #define WIFI_ITEM_SSID     1
     #define WIFI_ITEM_PSK      2
+    // wr_channel (Config.h/ROM.h's ADDR_CONF_WCHN) - shared by AP mode's
+    // softAP() call (Remote.h) and ESP-NOW's broadcast peer (ESPNOW.h),
+    // same single setting either way. 1-14, stepped/edited the same way as
+    // Mode (MENU_STATE_WIFI_EDIT, step_wifi_channel()) - unlike the
+    // existing CMD_WIFI_CHN KISS handler (RNode_Firmware.ino), which only
+    // touches EEPROM, committing this here also updates the live wr_channel
+    // (see menu_commit_and_exit()), so AP mode picks it up immediately via
+    // wifi_remote_init() without needing a reboot.
+    #define WIFI_ITEM_CHANNEL  3
     // Static IP/netmask (ADDR_CONF_IP/NM, ROM.h) - same all-zero/all-0xFF-
     // means-unset convention as everywhere else (see addr4_read(),
     // Utilities.h). Unlike Mode/SSID/PSK's WIFI_TEXT_EDIT flow, these don't
     // get their own "Save?" confirm dialog - MENU_STATE_WIFI_ADDR_EDIT
     // finishing just updates staged_wifi_ip/nm in RAM, still deferred to
     // SAVE & EXIT like every other field in this list.
-    #define WIFI_ITEM_IP       3
-    #define WIFI_ITEM_NETMASK  4
+    #define WIFI_ITEM_IP       4
+    #define WIFI_ITEM_NETMASK  5
     // Gateway/DNS (ADDR_CONF_GW/DNS, ROM.h) - only meaningful once IP/NM
     // are actually static (DHCP already provides both otherwise), but kept
     // as plain always-present fields rather than conditionally hidden -
     // same reasoning as IP/NM themselves. Needed for anything that must
     // leave the local subnet while on a static IP, e.g. rtc_sync_ntp()
     // (RTC.h).
-    #define WIFI_ITEM_GATEWAY  5
-    #define WIFI_ITEM_DNS      6
+    #define WIFI_ITEM_GATEWAY  6
+    #define WIFI_ITEM_DNS      7
     // Single-confirm action (same as MENU_ITEM_SAVE_EXIT), not a field -
     // stages all four back to 0.0.0.0, still deferred to SAVE & EXIT.
-    #define WIFI_ITEM_CLEAR    7
-    #define WIFI_ITEM_BACK     8
-    #define WIFI_ITEM_COUNT    9
+    #define WIFI_ITEM_CLEAR    8
+    #define WIFI_ITEM_BACK     9
+    #define WIFI_ITEM_COUNT    10
   #endif
 
   #if HAS_ETHERNET == true
@@ -390,6 +401,21 @@
     #define GNSS_ITEM_COUNT      11
   #endif
 
+  #if HAS_ESPNOW == true
+    #define ESPNOW_ITEM_ENABLED 0   // editable - staged only, no self-reboot until SAVE & EXIT
+    #define ESPNOW_ITEM_MODE    1   // editable - "v1" (classic chunked) / "v2" (unfragmented) - framing only
+    #define ESPNOW_ITEM_LR      2   // editable - 802.11 LR mode ON/OFF - PHY rate only, independent of Mode
+    // Read-only - same wr_channel WiFi's own Channel field edits (WIFI_ITEM_CHANNEL,
+    // Remote.h/ESPNOW.h both use it), not a separate value. Shown here purely
+    // for visibility while looking at ESP-NOW's own settings - deliberately not
+    // a second editable control for the same byte, see menu_confirm_select()'s
+    // own comment on why. Reads the live value directly (not staged/committed
+    // through this submenu at all), same as HW_LIST's read-only info rows.
+    #define ESPNOW_ITEM_CHANNEL 3
+    #define ESPNOW_ITEM_BACK    4
+    #define ESPNOW_ITEM_COUNT   5
+  #endif
+
   #if HAS_SENSORS == true
     // Fully read-only - no editable fields, so unlike GNSS's own list above
     // there's no matching MENU_STATE_SENSORS_EDIT, only BACK does anything
@@ -479,7 +505,16 @@
       #define HW_NEXT_E HW_NEXT_D
     #endif
 
-    #define HW_ITEM_BACK  HW_NEXT_E
+    // Time since boot, HH:MM:SS - needs no hardware capability at all
+    // (millis()-based, same source Display.h's own draw_node_uptime()
+    // already uses on T114), so unlike every row above it isn't gated on
+    // anything board-specific - always the last real entry before BACK,
+    // on every board that reaches this page (which as of MENU_HAS_HW_PAGE
+    // above is now every board, period).
+    #define HW_ITEM_UPTIME HW_NEXT_E
+    #define HW_NEXT_F      (HW_NEXT_E + 1)
+
+    #define HW_ITEM_BACK  HW_NEXT_F
     #define HW_ITEM_COUNT (HW_ITEM_BACK + 1)
 
     #if HAS_GPIO_MENU == true
@@ -870,7 +905,18 @@
     bool staged_sound_enabled = true;
   #endif
   #if HAS_ESPNOW == true
+    uint8_t espnow_menu_cursor = 0;
     bool staged_espnow_enabled = true;
+    bool staged_espnow_mode_v2 = false;  // false = v1 (default), true = v2 - framing only
+    bool staged_espnow_lr_enabled = false; // 802.11 LR mode - PHY rate only, independent of the above
+    // 0 = "Disables WiFi" info row (inert, same read-only-row convention as
+    // FWUPD_LIST's CURRENT/LATEST or GNSS's Fix/Satellites - selectable but
+    // does nothing on confirm, just extra context in the space a 4-row
+    // list leaves free), 1 = ENABLE, 2 = CANCEL - same list-with-cursor
+    // pattern as fwupd_confirm_cursor, defaulting to CANCEL (2) for the
+    // same reason (this is the consequential choice, not the primary/
+    // expected one).
+    uint8_t espnow_lr_confirm_cursor = 2;
   #endif
   #if HAS_ENCODER == true
     bool staged_encoder_enabled = false;
@@ -878,6 +924,7 @@
   #if HAS_WIFI == true
     uint8_t wifi_menu_cursor = 0;
     uint8_t staged_wifi_mode = WR_WIFI_OFF;
+    uint8_t staged_wifi_channel = WR_CHANNEL_DEFAULT;
     char    staged_wifi_ssid[33] = {0};
     char    staged_wifi_psk[33]  = {0};
     // Snapshot of the actual EEPROM contents taken at the same time as
@@ -1280,6 +1327,18 @@
       staged_wifi_mode = (uint8_t)v;
     }
 
+    void step_wifi_channel(int8_t dir, bool wrap = false) {
+      int8_t v = (int8_t)staged_wifi_channel + (dir > 0 ? 1 : -1);
+      if (wrap) {
+        if (v < 1)  v = 14;
+        if (v > 14) v = 1;
+      } else {
+        if (v < 1)  v = 1;
+        if (v > 14) v = 14;
+      }
+      staged_wifi_channel = (uint8_t)v;
+    }
+
     // Rudimentary on-screen keyboard: a single cyclic wheel of 98 positions
     // (rotary encoder has no separate cursor-move axis, so editing is
     // append + backspace only - see [[project_encoder_settings_menu]] design
@@ -1492,6 +1551,8 @@
     #endif
     #if HAS_ESPNOW == true
       staged_espnow_enabled = espnow_enabled;
+      staged_espnow_mode_v2 = (espnow_mode == ESPNOW_MODE_V2);
+      staged_espnow_lr_enabled = espnow_lr_enabled;
     #endif
     #if HAS_ENCODER == true
       staged_encoder_enabled = encoder_enabled;
@@ -1507,6 +1568,7 @@
     if (staged_display_rotation > 3) staged_display_rotation = 0;
     #if HAS_WIFI == true
       staged_wifi_mode = wifi_mode;
+      staged_wifi_channel = wr_channel;
       // wr_ssid/wr_psk are only populated by wifi_remote_init(), which only
       // runs at boot if WiFi is already in STA/AP mode - if it boots OFF,
       // those globals stay empty even though EEPROM has real values. Read
@@ -1580,10 +1642,49 @@
       }
     #endif
     #if HAS_ESPNOW == true
-      if (staged_espnow_enabled != espnow_enabled) {
-        // Reboots immediately if changed (espnow_conf_save(), Utilities.h) -
-        // same as ethspd_conf_save()'s Ethernet > Speed field.
-        espnow_conf_save(staged_espnow_enabled ? ESPNOW_ENABLE_BYTE : ESPNOW_DISABLE_BYTE);
+      // If a long-press skips the explicit ENABLE/CANCEL gate (see
+      // MENU_STATE_ESPNOW_LR_CONFIRM, menu_confirm_select()) while LR is
+      // still mid-toggle or mid-confirm, treat that as CANCEL rather than
+      // silently accepting an unconfirmed "disable WiFi" change - opposite
+      // of the flush-in-progress blocks above (those stop a long-press from
+      // silently discarding an edit; this one stops it from silently
+      // accepting one). Only reverts the OFF->ON case - turning LR off
+      // needs no confirmation, so a long-press mid-way there is fine as-is.
+      if (!espnow_lr_enabled &&
+          ((menu_state == MENU_STATE_ESPNOW_EDIT && espnow_menu_cursor == ESPNOW_ITEM_LR) ||
+           menu_state == MENU_STATE_ESPNOW_LR_CONFIRM)) {
+        staged_espnow_lr_enabled = false;
+      }
+      {
+        // ESP-NOW's Enabled/Mode/LR fields are committed together rather
+        // than each independently self-rebooting (like espnow_conf_save()
+        // normally does on its own, e.g. from the CMD_ESPNOW_ENABLE KISS
+        // handler, where that's fine since there's nothing else pending).
+        // If more than one changed in the same SAVE & EXIT, and each
+        // called its own hard_reset() as soon as it saw a change,
+        // whichever ran first would reboot before the others' writes ever
+        // happened, silently losing them. Write all three raw bytes first,
+        // then make one combined reboot decision. espnow_mode_conf_save()/
+        // espnow_lr_conf_save() (Utilities.h) deliberately have no
+        // self-reboot logic of their own for this reason.
+        uint8_t staged_espnow_mode_byte = staged_espnow_mode_v2 ? ESPNOW_MODE_V2 : ESPNOW_MODE_V1;
+        bool espnow_mode_changed   = (staged_espnow_mode_byte != espnow_mode);
+        bool espnow_lr_changed     = (staged_espnow_lr_enabled != espnow_lr_enabled);
+        bool espnow_enable_changed = (staged_espnow_enabled != espnow_enabled);
+
+        if (espnow_mode_changed) {
+          espnow_mode_conf_save(staged_espnow_mode_byte);
+          espnow_mode = staged_espnow_mode_byte;
+        }
+        if (espnow_lr_changed) {
+          espnow_lr_conf_save(staged_espnow_lr_enabled ? ESPNOW_LR_ENABLE_BYTE : ESPNOW_LR_DISABLE_BYTE);
+          espnow_lr_enabled = staged_espnow_lr_enabled;
+        }
+        if (espnow_enable_changed) {
+          eeprom_update(eeprom_addr(ADDR_CONF_ESPNOW), staged_espnow_enabled ? ESPNOW_ENABLE_BYTE : ESPNOW_DISABLE_BYTE);
+          espnow_enabled = staged_espnow_enabled;
+        }
+        if (espnow_mode_changed || espnow_lr_changed || espnow_enable_changed) { hard_reset(); }
       }
     #endif
     #if HAS_ENCODER == true
@@ -1598,6 +1699,21 @@
         // the live variable, then actually (re)start the WiFi stack.
         wr_conf_save(staged_wifi_mode);
         wifi_mode = staged_wifi_mode;
+        wifi_changed = true;
+      }
+      if (staged_wifi_channel != wr_channel) {
+        // Unlike the existing CMD_WIFI_CHN KISS handler (RNode_Firmware.ino),
+        // which only writes EEPROM and needs a reboot to take effect, this
+        // also updates the live wr_channel before wifi_remote_init() below
+        // re-reads it - AP mode's softAP() call (Remote.h) picks the new
+        // channel up immediately, no reboot needed. ESP-NOW's own channel
+        // (set once in espnow_init(), ESPNOW.h) does NOT get re-applied
+        // live though - same pre-existing, documented residual limitation
+        // as an external STA AP's channel differing from wr_channel
+        // (wifi_remote_reconnect()'s own comment, Remote.h) - a reboot is
+        // still needed for ESP-NOW to pick up a changed channel.
+        eeprom_update(eeprom_addr(ADDR_CONF_WCHN), staged_wifi_channel);
+        wr_channel = staged_wifi_channel;
         wifi_changed = true;
       }
       if (strcmp(staged_wifi_ssid, live_wifi_ssid) != 0) {
@@ -1796,11 +1912,6 @@
           staged_sound_enabled = !staged_sound_enabled;
         }
       #endif
-      #if HAS_ESPNOW == true
-        else if (menu_edit_field == MENU_ITEM_ESPNOW) {
-          staged_espnow_enabled = !staged_espnow_enabled;
-        }
-      #endif
       #if HAS_ENCODER == true
         else if (menu_edit_field == MENU_ITEM_ENCODER) {
           staged_encoder_enabled = !staged_encoder_enabled;
@@ -1813,7 +1924,11 @@
         wifi_menu_cursor = menu_clamp_cursor(wifi_menu_cursor, dir, WIFI_ITEM_COUNT, wrap);
       } else if (menu_state == MENU_STATE_WIFI_EDIT) {
         buzzer_encoder_tick_melody();
-        step_wifi_mode(dir, wrap);
+        // wifi_menu_cursor still points at whichever field was open when
+        // MENU_STATE_WIFI_EDIT was entered - same "list cursor persists
+        // across states" trick ESP-NOW's shared edit state relies on.
+        if (wifi_menu_cursor == WIFI_ITEM_CHANNEL) { step_wifi_channel(dir, wrap); }
+        else                                       { step_wifi_mode(dir, wrap); }
       } else if (menu_state == MENU_STATE_WIFI_TEXT_EDIT) {
         buzzer_encoder_tick_melody();
         wheel_move(dir);
@@ -1856,6 +1971,26 @@
       } else if (menu_state == MENU_STATE_GNSS_EDIT) {
         buzzer_encoder_tick_melody();
         staged_gnss_enabled = !staged_gnss_enabled;
+      }
+    #endif
+    #if HAS_ESPNOW == true
+      else if (menu_state == MENU_STATE_ESPNOW_LIST) {
+        buzzer_encoder_tick_melody();
+        espnow_menu_cursor = menu_clamp_cursor(espnow_menu_cursor, dir, ESPNOW_ITEM_COUNT, wrap);
+      } else if (menu_state == MENU_STATE_ESPNOW_EDIT) {
+        buzzer_encoder_tick_melody();
+        // espnow_menu_cursor still points at whichever field was open when
+        // MENU_STATE_ESPNOW_EDIT was entered (WiFi's Mode field relies on
+        // the same "list cursor persists across states" behavior).
+        if (espnow_menu_cursor == ESPNOW_ITEM_ENABLED)      staged_espnow_enabled = !staged_espnow_enabled;
+        else if (espnow_menu_cursor == ESPNOW_ITEM_MODE)    staged_espnow_mode_v2 = !staged_espnow_mode_v2;
+        else                                                staged_espnow_lr_enabled = !staged_espnow_lr_enabled;
+      } else if (menu_state == MENU_STATE_ESPNOW_LR_CONFIRM) {
+        // 3-item list (info row/ENABLE/CANCEL) - same tap-to-move/hold-to-
+        // select navigation as everywhere else, same pattern as F/W
+        // Update's UPDATE/CANCEL (MENU_STATE_FWUPD_CONFIRM).
+        buzzer_encoder_tick_melody();
+        espnow_lr_confirm_cursor = menu_clamp_cursor(espnow_lr_confirm_cursor, dir, 3, wrap);
       }
     #endif
     #if HAS_SENSORS == true
@@ -2001,6 +2136,12 @@
           gnss_menu_cursor = 0;
         }
       #endif
+      #if HAS_ESPNOW == true
+        else if (menu_cursor == MENU_ITEM_ESPNOW) {
+          menu_state = MENU_STATE_ESPNOW_LIST;
+          espnow_menu_cursor = 0;
+        }
+      #endif
       #if HAS_SENSORS == true
         else if (menu_cursor == MENU_ITEM_SENSORS) {
           menu_state = MENU_STATE_SENSORS_LIST;
@@ -2049,7 +2190,7 @@
       else if (menu_state == MENU_STATE_WIFI_LIST) {
         if (wifi_menu_cursor == WIFI_ITEM_BACK) {
           menu_state = MENU_STATE_LIST;
-        } else if (wifi_menu_cursor == WIFI_ITEM_MODE) {
+        } else if (wifi_menu_cursor == WIFI_ITEM_MODE || wifi_menu_cursor == WIFI_ITEM_CHANNEL) {
           menu_state = MENU_STATE_WIFI_EDIT;
         } else if (wifi_menu_cursor == WIFI_ITEM_IP || wifi_menu_cursor == WIFI_ITEM_NETMASK ||
                    wifi_menu_cursor == WIFI_ITEM_GATEWAY || wifi_menu_cursor == WIFI_ITEM_DNS) {
@@ -2347,10 +2488,54 @@
         // the instant it's confirmed, same immediate-commit pattern as
         // RTC's Timezone field.
         if (staged_gnss_enabled != gnss_enabled) {
-          gns_conf_save(staged_gnss_enabled);
+          gnss_conf_save(staged_gnss_enabled);
           gnss_set_enabled(staged_gnss_enabled);
         }
         menu_state = MENU_STATE_GNSS_LIST;
+      }
+    #endif
+    #if HAS_ESPNOW == true
+      else if (menu_state == MENU_STATE_ESPNOW_LIST) {
+        // Channel is read-only (see its own declaration) - only
+        // ENABLED/MODE/LR actually open the shared edit screen.
+        if (espnow_menu_cursor == ESPNOW_ITEM_BACK) {
+          menu_state = MENU_STATE_LIST;
+        } else if (espnow_menu_cursor == ESPNOW_ITEM_ENABLED ||
+                   espnow_menu_cursor == ESPNOW_ITEM_MODE ||
+                   espnow_menu_cursor == ESPNOW_ITEM_LR) {
+          menu_state = MENU_STATE_ESPNOW_EDIT;
+        }
+      } else if (menu_state == MENU_STATE_ESPNOW_EDIT) {
+        // Same deferred-commit reasoning as WiFi's own Mode field - all
+        // three fields reboot on change (see menu_commit_and_exit()'s
+        // combined-write comment), so nothing is written here, only staged.
+        // Exception: turning LR ON specifically also disables WiFi remote
+        // (see the wifi_remote_init() veto, RNode_Firmware.ino) - warn and
+        // require an explicit confirm before accepting that, same as F/W
+        // Update's UPDATE/CANCEL gate. Only trips on the OFF->ON edge (not
+        // if LR was already on and is just being left alone), so re-opening
+        // an already-enabled LR field doesn't nag needlessly.
+        if (espnow_menu_cursor == ESPNOW_ITEM_LR && staged_espnow_lr_enabled && !espnow_lr_enabled) {
+          espnow_lr_confirm_cursor = 2; // default CANCEL - see its own declaration
+          menu_state = MENU_STATE_ESPNOW_LR_CONFIRM;
+        } else {
+          menu_state = MENU_STATE_ESPNOW_LIST;
+        }
+      } else if (menu_state == MENU_STATE_ESPNOW_LR_CONFIRM) {
+        if (espnow_lr_confirm_cursor == 0) {
+          // Info row ("Disables WiFi") - inert, same read-only-row
+          // convention as FWUPD_LIST/GNSS_LIST's non-actionable rows.
+          // Stay on this screen rather than falling through to either
+          // choice below.
+        } else {
+          if (espnow_lr_confirm_cursor == 2) { // CANCEL - revert to off
+            staged_espnow_lr_enabled = false;
+          }
+          // ENABLE (1) just keeps staged_espnow_lr_enabled as-is (true) -
+          // either way, nothing is written yet, same deferred-commit
+          // reasoning above.
+          menu_state = MENU_STATE_ESPNOW_LIST;
+        }
       }
     #endif
     #if HAS_SENSORS == true
@@ -3037,7 +3222,7 @@
 
       #if HAS_ESPNOW == true
         labels[MENU_ITEM_ESPNOW] = "ESP-NOW";
-        sprintf(valbufs[MENU_ITEM_ESPNOW], staged_espnow_enabled ? "ON" : "OFF");
+        sprintf(valbufs[MENU_ITEM_ESPNOW], ">"); // opens a submenu, not an inline value
       #endif
 
       #if HAS_ENCODER == true
@@ -3105,12 +3290,6 @@
           sprintf(valbuf, staged_sound_enabled ? "ON" : "OFF");
         }
       #endif
-      #if HAS_ESPNOW == true
-        else if (menu_edit_field == MENU_ITEM_ESPNOW) {
-          title = "ESP-NOW";
-          sprintf(valbuf, staged_espnow_enabled ? "ON" : "OFF");
-        }
-      #endif
       #if HAS_ENCODER == true
         else if (menu_edit_field == MENU_ITEM_ENCODER) {
           title = "ENCODER";
@@ -3135,6 +3314,9 @@
 
         labels[WIFI_ITEM_PSK] = "PSK";
         sprintf(valbufs[WIFI_ITEM_PSK], strlen(staged_wifi_psk) > 0 ? "SET" : "");
+
+        labels[WIFI_ITEM_CHANNEL] = "Channel";
+        sprintf(valbufs[WIFI_ITEM_CHANNEL], "%u", staged_wifi_channel);
 
         // "DHCP" (rather than "0.0.0.0") when unset - matching the same
         // all-zero-means-unset convention Ethernet's page uses. Shows
@@ -3167,8 +3349,13 @@
         draw_menu_list_disp("WIFI", labels, valbufs, WIFI_ITEM_COUNT, wifi_menu_cursor);
       } else if (menu_state == MENU_STATE_WIFI_EDIT) {
         char valbuf[8];
-        format_wifi_mode(staged_wifi_mode, valbuf);
-        draw_menu_edit_disp("MODE", valbuf);
+        if (wifi_menu_cursor == WIFI_ITEM_CHANNEL) {
+          sprintf(valbuf, "%u", staged_wifi_channel);
+          draw_menu_edit_disp("CHANNEL", valbuf);
+        } else {
+          format_wifi_mode(staged_wifi_mode, valbuf);
+          draw_menu_edit_disp("MODE", valbuf);
+        }
       } else if (menu_state == MENU_STATE_WIFI_ADDR_EDIT) {
         const char *title = "DNS";
         if      (wifi_menu_cursor == WIFI_ITEM_IP)      title = "IP ADDRESS";
@@ -3359,6 +3546,50 @@
         draw_menu_edit_disp("GNSS ENABLED", staged_gnss_enabled ? "ON" : "OFF");
       }
     #endif
+    #if HAS_ESPNOW == true
+      else if (menu_state == MENU_STATE_ESPNOW_LIST) {
+        const char *labels[ESPNOW_ITEM_COUNT];
+        char valbufs[ESPNOW_ITEM_COUNT][24];
+
+        labels[ESPNOW_ITEM_ENABLED] = "Enabled";
+        sprintf(valbufs[ESPNOW_ITEM_ENABLED], staged_espnow_enabled ? "ON" : "OFF");
+
+        labels[ESPNOW_ITEM_MODE] = "Version";
+        sprintf(valbufs[ESPNOW_ITEM_MODE], staged_espnow_mode_v2 ? "v2.0" : "v1.0");
+
+        labels[ESPNOW_ITEM_LR] = "LR Mode";
+        sprintf(valbufs[ESPNOW_ITEM_LR], staged_espnow_lr_enabled ? "ON" : "OFF");
+
+        labels[ESPNOW_ITEM_CHANNEL] = "Channel";
+        sprintf(valbufs[ESPNOW_ITEM_CHANNEL], "%u", wr_channel);
+
+        labels[ESPNOW_ITEM_BACK] = "BACK";
+        valbufs[ESPNOW_ITEM_BACK][0] = 0;
+
+        draw_menu_list_disp("ESP-NOW", labels, valbufs, ESPNOW_ITEM_COUNT, espnow_menu_cursor);
+      } else if (menu_state == MENU_STATE_ESPNOW_EDIT) {
+        if (espnow_menu_cursor == ESPNOW_ITEM_ENABLED) {
+          draw_menu_edit_disp("ESP-NOW ENABLED", staged_espnow_enabled ? "ON" : "OFF");
+        } else if (espnow_menu_cursor == ESPNOW_ITEM_MODE) {
+          draw_menu_edit_disp("ESP-NOW VERSION", staged_espnow_mode_v2 ? "v2.0" : "v1.0");
+        } else {
+          draw_menu_edit_disp("ESP-NOW LR MODE", staged_espnow_lr_enabled ? "ON" : "OFF");
+        }
+      } else if (menu_state == MENU_STATE_ESPNOW_LR_CONFIRM) {
+        // 3-item list, same draw_menu_list_disp() as everywhere else - same
+        // pattern as F/W Update's UPDATE/CANCEL (MENU_STATE_FWUPD_CONFIRM),
+        // with an inert info row first spelling out the actual consequence
+        // (the title alone can't fit "enabling LR disables WiFi" on a
+        // 128px-wide single line) - MENU_LIST_VISIBLE_ROWS is 4 here, so a
+        // 3-item list still fits with room to spare.
+        const char *labels[3] = { "Disables WiFi", "ENABLE", "CANCEL" };
+        char valbufs[3][24];
+        valbufs[0][0] = 0;
+        valbufs[1][0] = 0;
+        valbufs[2][0] = 0;
+        draw_menu_list_disp("ENABLE LR MODE?", labels, valbufs, 3, espnow_lr_confirm_cursor);
+      }
+    #endif
     #if HAS_SENSORS == true
       else if (menu_state == MENU_STATE_SENSORS_LIST) {
         const char *labels[SENSORS_ITEM_COUNT];
@@ -3515,6 +3746,16 @@
           labels[HW_ITEM_MEMORY] = "Memory";
           sprintf(valbufs[HW_ITEM_MEMORY], ">"); // opens a submenu, not an inline value
         #endif
+
+        // Same millis()/1000 source as Display.h's draw_node_uptime() -
+        // wraps back to 0 after ~49 days like every other millis()-based
+        // timer in this codebase already does.
+        labels[HW_ITEM_UPTIME] = "Node Uptime";
+        {
+          uint32_t up_s = millis()/1000;
+          sprintf(valbufs[HW_ITEM_UPTIME], "%02lu:%02lu:%02lu",
+            (unsigned long)(up_s/3600), (unsigned long)((up_s/60)%60), (unsigned long)(up_s%60));
+        }
 
         labels[HW_ITEM_BACK] = "BACK";
         valbufs[HW_ITEM_BACK][0] = 0;

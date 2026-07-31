@@ -72,6 +72,17 @@ bool espnow_ui_active() {
   return espnow_enabled && espnow_ready && espnow_vport_cfg.radio_state == RADIO_STATE_ON;
 }
 
+// True when ESP-NOW's LR mode has taken the shared WiFi radio for itself
+// this boot, vetoing wifi_remote_init() (RNode_Firmware.ino) - WiFi Mode
+// may still read STA/AP in the Settings menu (the EEPROM byte is untouched,
+// see Config.h's espnow_lr_enabled comment), but no actual WiFi remote
+// connection ever comes up while this is true. Single source of truth for
+// both that boot-time veto and Display.h's status icon (draw_cable_icon())
+// so the two can never drift apart.
+bool espnow_wifi_disabled() {
+  return espnow_enabled && espnow_lr_enabled;
+}
+
 // Momentary "an RX/TX just happened" flags for Display.h's ESP-NOW waterfall
 // marks - set below, consumed and cleared once by the display code each
 // refresh (mirrors display_tx's role for the LoRa path, Display.h).
@@ -132,11 +143,89 @@ bool espnow_display_tx = false;
 #define ESPNOW_CHUNK_SIZE   (ESPNOW_RAW_MTU-1)
 #define ESPNOW_FRAG_MORE    0x01
 
+// TX-side pacing. espnow_send() used to call esp_now_send() directly, back
+// to back, for every chunk of a fragmented packet - no backpressure, no
+// wait for the previous chunk to actually clear the WiFi driver's TX queue.
+// Under load this silently drops chunks (ESP_ERR_ESPNOW_NO_MEM), and would
+// get worse, not better, at LR mode's much lower PHY rate. Fixed the same
+// way the LoRa path already paces its own airtime-bound sends: queue the
+// work and drain it from loop() (update_espnow_tx(), mirroring update_espnow()
+// and LoRa's tx_queue_handler()/flush_queue()) instead of blocking wherever
+// the data originates - never inside serial_callback()'s hot path.
+//
+// No retry on send failure (unlike a reference implementation we compared
+// against, which retries NO_MEM up to 8 times with a semaphore wait). That
+// fits a threaded RTOS design, not this firmware's single loop() - and
+// isn't needed here anyway: a dropped chunk is just a dropped chunk, exactly
+// like a failed LoRa->endPacket() isn't retried either. Packet loss over a
+// long-range radio link is expected; Reticulum's own reliability layer
+// above us is what handles recovery, not this firmware.
+// LR/v2 mode sends a whole logical packet as one unfragmented frame - up to
+// this firmware's own Reticulum-facing MTU (508, Config.h), not ESP-NOW v2's
+// much larger 1470-byte hardware ceiling, which is never approached since
+// espnow_tx_buf (the accumulation buffer this is filled from) is itself
+// already capped at MTU. Classic mode's own per-frame cap (ESPNOW_RAW_MTU)
+// is smaller, so the shared chunk buffer just needs to fit the larger of
+// the two.
+#define ESPNOW_TX_CHUNK_CAP (MTU > ESPNOW_RAW_MTU ? MTU : ESPNOW_RAW_MTU)
+
+#define ESPNOW_TX_QUEUE_SIZE 12
+typedef struct {
+        uint16_t len; // was uint8_t - an LR frame can reach MTU (508), truncating/wrapping at 255
+        uint8_t data[ESPNOW_TX_CHUNK_CAP];
+} espnow_tx_chunk_t;
+static xQueueHandle espnow_tx_queue = NULL;
+volatile bool espnow_tx_busy = false;
+
 uint8_t  espnow_rx_buf[MTU];
 uint16_t espnow_rx_len = 0;
 uint8_t  espnow_rx_seq = SEQ_UNSET;
 
+// Shared tail for both modes: builds an espnow_packet_t from a complete
+// logical payload and hands it to espnow_packet_queue. Factored out so LR
+// mode (no reassembly, deliver immediately) and classic mode (deliver once
+// the last chunk of a sequence arrives) don't duplicate this.
+static void espnow_rx_deliver(const uint8_t *payload, uint16_t len, const esp_now_recv_info_t *info) {
+  espnow_packet_t *espnow_packet = (espnow_packet_t*)malloc(sizeof(espnow_packet_t) + len);
+  if (!espnow_packet) { memory_low = true; return; }
+
+  espnow_packet->len = len;
+  espnow_packet->rssi = info->rx_ctrl ? info->rx_ctrl->rssi : 0;
+
+  // ESP-NOW/WiFi has no native SNR register like LoRa, but ESP32-S3's
+  // wifi_pkt_rx_ctrl_t does expose a real noise_floor (dBm) - rssi minus
+  // that gives a genuine SNR estimate. Encoded in the same quarter-dB
+  // fixed-point units as LoRa's packetSnrRaw() so it decodes correctly
+  // on the host side (RNodeSubInterface: byte * 0.25).
+  int snr_db = 0;
+  if (info->rx_ctrl) { snr_db = info->rx_ctrl->rssi - info->rx_ctrl->noise_floor; }
+  int snr_quarter_db = snr_db * 4;
+  if (snr_quarter_db > 127) snr_quarter_db = 127;
+  if (snr_quarter_db < -128) snr_quarter_db = -128;
+  espnow_packet->snr_raw = snr_quarter_db;
+
+  memcpy(espnow_packet->mac, info->src_addr, 6);
+  memcpy(espnow_packet->data, payload, len);
+
+  if (!espnow_packet_queue || xQueueSendFromISR(espnow_packet_queue, &espnow_packet, NULL) != pdPASS) {
+    free(espnow_packet);
+  }
+}
+
 void espnow_recv_cb(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
+  if (len <= 0) return;
+
+  if (espnow_mode == ESPNOW_MODE_V2) {
+    // v2: the whole frame already IS the logical packet - no seq/more
+    // header, no reassembly. Defensive bound, not a real-world case: sizes
+    // here never approach 1470 given protocol conformance on both ends
+    // (espnow_tx_buf, this file's own TX accumulation buffer, is already
+    // capped at MTU).
+    if ((size_t)len > sizeof(espnow_rx_buf)) return;
+    espnow_rx_deliver(data, (uint16_t)len, info);
+    return;
+  }
+
   if (len <= 1) return;
 
   uint8_t header = data[0];
@@ -169,71 +258,88 @@ void espnow_recv_cb(const esp_now_recv_info_t *info, const uint8_t *data, int le
   // Last chunk received - the logical packet is complete, hand it to the
   // queue exactly as before. RSSI/SNR reflect this final chunk only.
   espnow_rx_seq = SEQ_UNSET;
-
-  espnow_packet_t *espnow_packet = (espnow_packet_t*)malloc(sizeof(espnow_packet_t) + espnow_rx_len);
-  if (!espnow_packet) { memory_low = true; espnow_rx_len = 0; return; }
-
-  espnow_packet->len = espnow_rx_len;
-  espnow_packet->rssi = info->rx_ctrl ? info->rx_ctrl->rssi : 0;
-
-  // ESP-NOW/WiFi has no native SNR register like LoRa, but ESP32-S3's
-  // wifi_pkt_rx_ctrl_t does expose a real noise_floor (dBm) - rssi minus
-  // that gives a genuine SNR estimate. Encoded in the same quarter-dB
-  // fixed-point units as LoRa's packetSnrRaw() so it decodes correctly
-  // on the host side (RNodeSubInterface: byte * 0.25).
-  int snr_db = 0;
-  if (info->rx_ctrl) { snr_db = info->rx_ctrl->rssi - info->rx_ctrl->noise_floor; }
-  int snr_quarter_db = snr_db * 4;
-  if (snr_quarter_db > 127) snr_quarter_db = 127;
-  if (snr_quarter_db < -128) snr_quarter_db = -128;
-  espnow_packet->snr_raw = snr_quarter_db;
-
-  memcpy(espnow_packet->mac, info->src_addr, 6);
-  memcpy(espnow_packet->data, espnow_rx_buf, espnow_rx_len);
+  espnow_rx_deliver(espnow_rx_buf, espnow_rx_len, info);
   espnow_rx_len = 0;
-
-  if (!espnow_packet_queue || xQueueSendFromISR(espnow_packet_queue, &espnow_packet, NULL) != pdPASS) {
-    free(espnow_packet);
-  }
 }
 
 // esp_now_send() is async: a successful return only means the packet was
 // queued with the WiFi driver, not that it was actually transmitted over
 // the air. Real TX outcome only arrives via this callback - without it we
-// have zero visibility into silent TX failures.
+// have zero visibility into silent TX failures. Also frees the pacing slot
+// (espnow_tx_busy) for update_espnow_tx() to send the next queued chunk -
+// on success or failure alike, since a dropped chunk is never retried.
 void espnow_send_cb(const esp_now_send_info_t *tx_info, esp_now_send_status_t status) {
   DEBUG_LOG("[ESP-NOW] TX result: %s\n", status == ESP_NOW_SEND_SUCCESS ? "OK" : "FAIL");
+  espnow_tx_busy = false;
 }
 
-bool espnow_send_chunk(const uint8_t *data, uint8_t len) {
-  if (!espnow_ready) return false;
-  esp_err_t err = esp_now_send(espnow_broadcast_mac, data, len);
-  if (err != ESP_OK) { DEBUG_LOG("[ESP-NOW] esp_now_send() queue failed: %d\n", err); }
-  return err == ESP_OK;
+// Enqueues one already-framed chunk for update_espnow_tx() to actually send
+// once the driver has cleared the previous one - never calls esp_now_send()
+// itself, so this never blocks its caller (espnow_send(), called directly
+// from serial_callback()). A full queue is a silent drop, same as
+// packet_starts/queued_bytes dropping an oversized LoRa TX burst
+// (RNode_Firmware.ino) - no backpressure signal beyond the returned bool.
+bool espnow_send_chunk(const uint8_t *data, uint16_t len) {
+  if (!espnow_ready || !espnow_tx_queue) return false;
+  espnow_tx_chunk_t chunk;
+  chunk.len = len;
+  memcpy(chunk.data, data, len);
+  return xQueueSend(espnow_tx_queue, &chunk, 0) == pdPASS;
 }
 
-// Fragmenting entry point - splits any logical payload up to the full
-// Reticulum MTU into <=ESPNOW_RAW_MTU raw frames (see espnow_recv_cb()
-// for the matching reassembly and why this exists). A single-chunk
-// packet still gets the 1-byte header (MORE clear), keeping the wire
-// format uniform regardless of size.
+// Drains espnow_tx_queue one chunk at a time, paced by espnow_send_cb()
+// clearing espnow_tx_busy on the previous chunk's real completion - instead
+// of firing every chunk back to back with no backpressure. Mirrors how
+// LoRa's tx_queue_handler()/flush_queue() (RNode_Firmware.ino) only ever
+// transmit from loop(), never from inside serial_callback()'s hot path.
+// Called from loop() next to update_espnow() (RX drain).
+void update_espnow_tx() {
+  if (espnow_tx_busy || !espnow_tx_queue) return;
+
+  espnow_tx_chunk_t chunk;
+  if (xQueueReceive(espnow_tx_queue, &chunk, 0) != pdTRUE) return;
+
+  espnow_tx_busy = true;
+  esp_err_t err = esp_now_send(espnow_broadcast_mac, chunk.data, chunk.len);
+  if (err != ESP_OK) {
+    // Synchronous failure - no send callback will ever fire for this
+    // attempt, so free the slot here instead of waiting on espnow_send_cb().
+    DEBUG_LOG("[ESP-NOW] esp_now_send() queue failed: %d\n", err);
+    espnow_tx_busy = false;
+  }
+}
+
+// Entry point for both modes. v1 fragments any logical payload up to
+// the full Reticulum MTU into <=ESPNOW_RAW_MTU raw frames (see
+// espnow_recv_cb() for the matching reassembly and why this exists) - a
+// single-chunk packet still gets the 1-byte header (MORE clear), keeping
+// the wire format uniform regardless of size. v2 sends the whole packet
+// as one unfragmented frame with no header byte at all - any header byte
+// would break interop with attermann/microReticulum's ESPNOWInterface,
+// which hands esp_now_send() the raw Reticulum packet with zero envelope.
 bool espnow_send(const uint8_t *data, uint16_t len) {
-  uint8_t header = random(256) & NIBBLE_SEQ;
-  uint8_t chunk_buf[ESPNOW_RAW_MTU];
-  uint16_t offset = 0;
-  bool all_ok = true;
+  bool all_ok;
 
-  do {
-    uint16_t remaining = len - offset;
-    uint16_t chunk_len = (remaining > ESPNOW_CHUNK_SIZE) ? ESPNOW_CHUNK_SIZE : remaining;
-    bool more = (offset + chunk_len) < len;
+  if (espnow_mode == ESPNOW_MODE_V2) {
+    all_ok = espnow_send_chunk(data, len);
+  } else {
+    uint8_t header = random(256) & NIBBLE_SEQ;
+    uint8_t chunk_buf[ESPNOW_RAW_MTU];
+    uint16_t offset = 0;
+    all_ok = true;
 
-    chunk_buf[0] = header | (more ? ESPNOW_FRAG_MORE : 0);
-    memcpy(chunk_buf+1, data+offset, chunk_len);
+    do {
+      uint16_t remaining = len - offset;
+      uint16_t chunk_len = (remaining > ESPNOW_CHUNK_SIZE) ? ESPNOW_CHUNK_SIZE : remaining;
+      bool more = (offset + chunk_len) < len;
 
-    all_ok = espnow_send_chunk(chunk_buf, chunk_len+1) && all_ok;
-    offset += chunk_len;
-  } while (offset < len);
+      chunk_buf[0] = header | (more ? ESPNOW_FRAG_MORE : 0);
+      memcpy(chunk_buf+1, data+offset, chunk_len);
+
+      all_ok = espnow_send_chunk(chunk_buf, chunk_len+1) && all_ok;
+      offset += chunk_len;
+    } while (offset < len);
+  }
 
   espnow_display_tx = true;
   #if HAS_NP == true
@@ -455,12 +561,25 @@ void kiss_write_espnow_packet(uint8_t *data, size_t len) {
 void espnow_init() {
   DEBUG_LOG("[ESP-NOW] init: start\n");
   espnow_packet_queue = xQueueCreate(ESPNOW_QUEUE_SIZE, sizeof(espnow_packet_t*));
-  DEBUG_LOG("[ESP-NOW] init: queue created\n");
+  espnow_tx_queue = xQueueCreate(ESPNOW_TX_QUEUE_SIZE, sizeof(espnow_tx_chunk_t));
+  DEBUG_LOG("[ESP-NOW] init: queues created\n");
 
   if (WiFi.getMode() == WIFI_MODE_NULL) {
     DEBUG_LOG("[ESP-NOW] init: setting WiFi.mode(WIFI_STA)\n");
     WiFi.mode(WIFI_STA);
     DEBUG_LOG("[ESP-NOW] init: WiFi.mode() returned\n");
+  }
+
+  if (espnow_lr_enabled) {
+    // Independent of espnow_mode (v1/v2 framing, above) - this is purely a
+    // PHY/rate choice. Matches attermann/microReticulum's exact bitmask
+    // (not LR-only) - an unassociated STA stays 11n/LR-mixed per
+    // Espressif's docs, though this firmware prevents any concurrent
+    // STA/AP association whenever LR mode is active anyway (see the
+    // wifi_remote_init() veto, RNode_Firmware.ino).
+    esp_err_t protoerr = esp_wifi_set_protocol(WIFI_IF_STA,
+      WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N | WIFI_PROTOCOL_LR);
+    DEBUG_LOG("[ESP-NOW] init: esp_wifi_set_protocol(LR) returned %d\n", protoerr);
   }
 
   // Default WiFi modem-sleep cycles the radio to sleep between the AP's

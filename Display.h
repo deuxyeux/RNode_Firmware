@@ -1613,9 +1613,22 @@ extern uint16_t eth_link_speed;
 extern bool eth_full_duplex;
 extern bool eth_disabled;
 #endif
+#if HAS_ESPNOW == true
+// espnow_wifi_disabled() (ESPNOW.h) isn't declared yet at this point -
+// Display.h is #include'd (Utilities.h) before ESPNOW.h - same reasoning
+// as the wifi_mode extern above. wifi_mode itself still reads STA/AP while
+// this is true (the EEPROM byte is untouched, only wifi_remote_init() was
+// skipped at boot - see that function's own comment), so draw_cable_icon()
+// below needs this separately, not just wifi_mode alone, or the icon would
+// keep showing WiFi even though no WiFi connection actually ever came up.
+extern bool espnow_wifi_disabled();
+#define ESPNOW_WIFI_DISABLED() espnow_wifi_disabled()
+#else
+#define ESPNOW_WIFI_DISABLED() false
+#endif
 void draw_cable_icon(int px, int py, Adafruit_GFX &gfx = stat_area) {
   #if HAS_WIFI
-    if (wifi_mode == WR_WIFI_OFF) {
+    if (wifi_mode == WR_WIFI_OFF || ESPNOW_WIFI_DISABLED()) {
       if      (rns_link_state == RNS_LINK_STATE_DISCONNECTED) { gfx.drawBitmap(px, py, bm_cable+0*32, 16, 16, SSD1306_WHITE, SSD1306_BLACK); }
       else if (rns_link_state == RNS_LINK_STATE_CONNECTED)    { gfx.drawBitmap(px, py, bm_cable+1*32, 16, 16, SSD1306_WHITE, SSD1306_BLACK); }
     } else {

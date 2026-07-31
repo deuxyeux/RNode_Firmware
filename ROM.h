@@ -81,8 +81,8 @@
   #define ESPNOW_DISABLE_BYTE 0x00
   #define WS_ENABLE_BYTE  0x01
   #define WS_DISABLE_BYTE 0x00
-  #define GNS_ENABLE_BYTE  0x01
-  #define GNS_DISABLE_BYTE 0x00
+  #define GNSS_ENABLE_BYTE  0x01
+  #define GNSS_DISABLE_BYTE 0x00
 
   #define EEPROM_RESERVED 200
 
@@ -98,14 +98,25 @@
   // producing exactly the "missing config" state this was tested against.
   // Instead, this uses a raw, non-offset physical byte, picked per-platform
   // since "genuinely free space" is a different address on each - see
-  // gns_conf_save() (Utilities.h) and its boot-time load
+  // gnss_conf_save() (Utilities.h) and its boot-time load
   // (RNode_Firmware.ino), both of which use this value directly rather than
   // through eeprom_addr()/config_addr().
+  //
+  // This #if requires MCU_VARIANT (Boards.h) to already be defined -
+  // Config.h includes Boards.h before this file specifically so that's
+  // true. Get that order backwards and both MCU_VARIANT and
+  // MCU_NRF52/MCU_ESP32 are undefined here, so the comparison below
+  // degenerates to "0 == 0" and silently always takes the nRF52 branch
+  // (0x00) regardless of the real target - confirmed empirically on real
+  // hardware, this was a live bug for a while (see project memory
+  // feedback_rom_h_include_order_undef_macro for the full writeup) that
+  // corrupted the first byte of ESP32's WiFi/Ethernet config storage
+  // whenever GNSS's enable byte was read or written.
   #if MCU_VARIANT == MCU_NRF52
     // The low "config" region (CONFIG_SIZE/CONFIG_OFFSET, only ever defined
     // in Boards.h's MCU_ESP32 scope) is genuinely dead space on every nRF52
     // board, since config_addr() never even compiles there.
-    #define ADDR_CONF_GNS 0x00
+    #define ADDR_CONF_GNSS 0x00
   #elif MCU_VARIANT == MCU_ESP32
     // CONFIG_SIZE (256, below) reserves 0x00-0xFF for WiFi/Ethernet config -
     // real usage there stops at ADDR_CONF_ETH_DNS+4=0x62, but the declared
@@ -113,9 +124,37 @@
     // free space. EEPROM_OFFSET is 824 on the default 1024-byte ESP32
     // EEPROM_SIZE (1024-200), so 256-823 is a genuinely unclaimed gap -
     // this just takes its first byte.
-    #define ADDR_CONF_GNS 256
+    #define ADDR_CONF_GNSS 256
   #endif
-  
+
+  // ESP-NOW's vport 1 (ESPNOW.h) has two independent axes, each its own raw
+  // physical byte in the same genuinely-unclaimed 256-823 gap as
+  // ADDR_CONF_GNSS just above - NOT through eeprom_addr()/config_addr().
+  // Deliberately unconditional, no MCU_VARIANT guard - HAS_ESPNOW is
+  // ESP32-only today, so there's nothing to branch on. (Boards.h is now
+  // included before this file, Config.h, so MCU_VARIANT would actually be
+  // reliable here if ever needed - see that include-order fix's own
+  // comment for why ADDR_CONF_GNSS's guard used to silently misresolve.)
+  //
+  // ADDR_CONF_ESPNOW_MODE: wire framing - v1 (classic, chunked with a
+  // 1-byte sequence header) or v2 (single unfragmented frame, no header -
+  // required for byte-for-byte interop with attermann/microReticulum's
+  // ESPNOWInterface). Purely a framing choice, independent of PHY rate.
+  #define ADDR_CONF_ESPNOW_MODE 257
+  #define ESPNOW_MODE_V1 0x00
+  #define ESPNOW_MODE_V2 0x01
+
+  // ADDR_CONF_ESPNOW_LR: whether 802.11 LR mode (WIFI_PROTOCOL_LR,
+  // ESPNOW.h) is active - a PHY/rate choice (range for throughput),
+  // independent of ADDR_CONF_ESPNOW_MODE above. "Interop mode" with the
+  // reticulum-espnow project specifically means v2 + LR together, but
+  // either axis can be set independently - e.g. v1 or v2 with LR off
+  // (normal WiFi range/rate), or v1 with LR on (extended range between two
+  // RNode_Firmware boards, keeping classic framing).
+  #define ADDR_CONF_ESPNOW_LR 258
+  #define ESPNOW_LR_ENABLE_BYTE  0x01
+  #define ESPNOW_LR_DISABLE_BYTE 0x00
+
   #define CONFIG_SIZE     256
   #define ADDR_CONF_SSID 0x00
   #define ADDR_CONF_PSK  0x21

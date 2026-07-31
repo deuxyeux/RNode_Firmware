@@ -13,8 +13,20 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-#include "ROM.h"
+// Boards.h must come first: ROM.h's ADDR_CONF_GNSS branches on MCU_VARIANT
+// (#if MCU_VARIANT == MCU_NRF52 ... #elif MCU_VARIANT == MCU_ESP32), which
+// Boards.h defines. Both MCU_VARIANT and MCU_NRF52/MCU_ESP32 are undefined
+// in a #if before Boards.h has run, and undefined identifiers become 0 in
+// #if expressions - so with ROM.h included first (the previous order
+// here), that comparison was always "0 == 0", always true, and
+// ADDR_CONF_GNSS silently always resolved to the nRF52 branch's value
+// (0x00) even on ESP32, where it's meant to be 256. Confirmed empirically
+// with cpp -P against the real files. Boards.h itself has no #if depending
+// on any ROM.h macro (its one reference, EEPROM_OFFSET's
+// EEPROM_SIZE-EEPROM_RESERVED, is a deferred token substitution that
+// resolves fine regardless of order), so this swap is safe.
 #include "Boards.h"
+#include "ROM.h"
 
 #ifndef CONFIG_H
 	#define CONFIG_H
@@ -120,6 +132,24 @@
     // turned on via the RNode Settings menu or CMD_ESPNOW_ENABLE
     // (espnow_conf_save(), Utilities.h).
     bool espnow_enabled = false;
+
+    // Which wire format vport 1 speaks when espnow_enabled - v1 (classic,
+    // chunked framing, default) or v2 (single unfragmented frame),
+    // interoperable with attermann/microReticulum's ESPNOWInterface.
+    // Persisted at ADDR_CONF_ESPNOW_MODE (ROM.h), loaded at boot
+    // (RNode_Firmware.ino), settable via the RNode Settings menu
+    // (espnow_mode_conf_save(), Utilities.h). Independent of
+    // espnow_lr_enabled below - framing vs PHY rate are separate axes.
+    uint8_t espnow_mode = ESPNOW_MODE_V1;
+
+    // Whether 802.11 LR mode (WIFI_PROTOCOL_LR, ESPNOW.h) is active -
+    // extends range at the cost of throughput (250-500kbps). Persisted at
+    // ADDR_CONF_ESPNOW_LR (ROM.h, a separate byte from espnow_mode above),
+    // settable via the same submenu (espnow_lr_conf_save(), Utilities.h).
+    // "Interop mode" with reticulum-espnow specifically means espnow_mode
+    // == ESPNOW_MODE_V2 with this also true - but either can be set
+    // independently for other use cases (see ROM.h's own comment).
+    bool espnow_lr_enabled = false;
 
     // Whether the WebSocket KISS listener (WebSocketRemote.h, port 7634) is
     // allowed to run at all. Defaults to off, same convention as

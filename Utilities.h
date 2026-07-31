@@ -140,13 +140,15 @@ void drot_conf_save(uint8_t val);
 #endif
 #if HAS_ESPNOW == true
   void espnow_conf_save(uint8_t val);
+  void espnow_mode_conf_save(uint8_t val);
+  void espnow_lr_conf_save(uint8_t val);
 #endif
 #if HAS_RTC == true
   void kiss_indicate_time();
   void tz_conf_save(uint8_t val);
 #endif
 #if HAS_GPS == true
-  void gns_conf_save(bool is_enabled);
+  void gnss_conf_save(bool is_enabled);
 #endif
 #if MCU_VARIANT == MCU_ESP32 && HAS_RTC == true && (HAS_WIFI == true || HAS_ETHERNET == true)
   void kiss_indicate_ntp_sync(uint8_t status);
@@ -2426,13 +2428,13 @@ void enc_conf_save(bool is_enabled) {
 #endif
 
 #if HAS_GPS == true
-// ADDR_CONF_GNS is a raw physical byte, not offset via eeprom_addr() - see
+// ADDR_CONF_GNSS is a raw physical byte, not offset via eeprom_addr() - see
 // its own comment, ROM.h.
-void gns_conf_save(bool is_enabled) {
+void gnss_conf_save(bool is_enabled) {
 	if (is_enabled) {
-		eeprom_update(ADDR_CONF_GNS, GNS_ENABLE_BYTE);
+		eeprom_update(ADDR_CONF_GNSS, GNSS_ENABLE_BYTE);
 	} else {
-		eeprom_update(ADDR_CONF_GNS, GNS_DISABLE_BYTE);
+		eeprom_update(ADDR_CONF_GNSS, GNSS_DISABLE_BYTE);
 	}
   #if !HAS_EEPROM && MCU_VARIANT == MCU_NRF52
     eeprom_flush();
@@ -2526,6 +2528,28 @@ void espnow_conf_save(uint8_t val) {
     eeprom_flush();
   #endif
 	if (stored != val) { hard_reset(); }
+}
+
+// Persists the ESP-NOW wire-format mode (ADDR_CONF_ESPNOW_MODE, ROM.h - a
+// raw physical byte, not through eeprom_addr(), same convention as
+// ADDR_CONF_GNSS). Deliberately has no self-reboot logic of its own, unlike
+// espnow_conf_save() above - it's only ever called from
+// menu_commit_and_exit() (Menu.h), which may also be committing the
+// Enabled/LR fields in the same SAVE & EXIT and needs a single combined
+// reboot after all raw bytes are safely written - see that call site's
+// own comment for why independently-self-rebooting savers here would be
+// unsafe.
+void espnow_mode_conf_save(uint8_t val) {
+  eeprom_update(ADDR_CONF_ESPNOW_MODE, val);
+}
+
+// Persists whether 802.11 LR mode is active (ADDR_CONF_ESPNOW_LR, ROM.h -
+// a separate raw physical byte from ADDR_CONF_ESPNOW_MODE above, since
+// wire framing and PHY rate are independent axes). Same no-self-reboot
+// reasoning as espnow_mode_conf_save() - only ever called from
+// menu_commit_and_exit().
+void espnow_lr_conf_save(uint8_t val) {
+  eeprom_update(ADDR_CONF_ESPNOW_LR, val);
 }
 #endif
 

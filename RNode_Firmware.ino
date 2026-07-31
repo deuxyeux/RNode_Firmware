@@ -314,21 +314,21 @@ void setup() {
   #endif
 
   #if HAS_GPS == true
-    // ADDR_CONF_GNS is a raw physical byte, not offset via eeprom_addr() -
+    // ADDR_CONF_GNSS is a raw physical byte, not offset via eeprom_addr() -
     // it resolves to a different (platform-appropriate) genuinely-free
     // address per MCU_VARIANT - see its own comment, ROM.h.
     #if HAS_EEPROM
-      uint8_t gns_raw = EEPROM.read(ADDR_CONF_GNS);
+      uint8_t gnss_raw = EEPROM.read(ADDR_CONF_GNSS);
     #elif MCU_VARIANT == MCU_NRF52
-      uint8_t gns_raw = eeprom_read(ADDR_CONF_GNS);
+      uint8_t gnss_raw = eeprom_read(ADDR_CONF_GNSS);
     #endif
-    // Explicit ON/OFF only ever get written as GNS_ENABLE_BYTE/
-    // GNS_DISABLE_BYTE (see gns_conf_save()) - any other value (erased
+    // Explicit ON/OFF only ever get written as GNSS_ENABLE_BYTE/
+    // GNSS_DISABLE_BYTE (see gnss_conf_save()) - any other value (erased
     // EEPROM reads 0xFF) means "never touched", so leave gnss_enabled at
     // its compiled default (GNSS.h, defaults true) instead of forcing it
     // either way.
-    if (gns_raw == GNS_ENABLE_BYTE) gnss_enabled = true;
-    else if (gns_raw == GNS_DISABLE_BYTE) gnss_enabled = false;
+    if (gnss_raw == GNSS_ENABLE_BYTE) gnss_enabled = true;
+    else if (gnss_raw == GNSS_DISABLE_BYTE) gnss_enabled = false;
     gnss_init();
   #endif
 
@@ -414,20 +414,12 @@ void setup() {
         kiss_indicate_reset();
       #endif
     } else {
-      #if HAS_WIFI
-        wifi_mode = EEPROM.read(eeprom_addr(ADDR_CONF_WIFI));
-        if (wifi_mode == WR_WIFI_STA || wifi_mode == WR_WIFI_AP) { wifi_remote_init(); }
-
-        uint8_t ws_en_raw = EEPROM.read(eeprom_addr(ADDR_CONF_WS));
-        // Same convention as espnow_en_raw below: only ever written as
-        // WS_ENABLE_BYTE/WS_DISABLE_BYTE (see the KISS handler and
-        // ws_conf_save()) - any other value (erased EEPROM reads 0xFF)
-        // means "never touched", so leave ws_enabled at its default (off).
-        if (ws_en_raw == WS_ENABLE_BYTE) ws_enabled = true;
-        else if (ws_en_raw == WS_DISABLE_BYTE) ws_enabled = false;
-        ws_remote_init();
-      #endif
       #if HAS_ESPNOW == true
+        // Read (not yet init) ahead of the HAS_WIFI block below - LR mode
+        // must veto wifi_remote_init() entirely this boot (see that gate's
+        // own comment for why WiFi-mode churn and ESP-NOW don't mix), so
+        // espnow_enabled/espnow_lr_enabled need to be known before that
+        // gate is evaluated, not after.
         uint8_t espnow_en_raw = EEPROM.read(eeprom_addr(ADDR_CONF_ESPNOW));
         // Explicit ON/OFF only ever get written as ESPNOW_ENABLE_BYTE/
         // ESPNOW_DISABLE_BYTE (see the KISS handler and espnow_conf_save())
@@ -437,6 +429,56 @@ void setup() {
         // sound_enabled above.
         if (espnow_en_raw == ESPNOW_ENABLE_BYTE) espnow_enabled = true;
         else if (espnow_en_raw == ESPNOW_DISABLE_BYTE) espnow_enabled = false;
+
+        // Raw physical byte, not through eeprom_addr() - see ADDR_CONF_ESPNOW_MODE
+        // (ROM.h). Any value other than ESPNOW_MODE_V2 (including erased
+        // EEPROM, 0xFF) means v1, matching ESPNOW_MODE_V1's 0x00 default.
+        uint8_t espnow_mode_raw = EEPROM.read(ADDR_CONF_ESPNOW_MODE);
+        espnow_mode = (espnow_mode_raw == ESPNOW_MODE_V2) ? ESPNOW_MODE_V2 : ESPNOW_MODE_V1;
+
+        // Independent axis, own raw byte - see ADDR_CONF_ESPNOW_LR (ROM.h).
+        // Any value other than ESPNOW_LR_ENABLE_BYTE (including erased
+        // EEPROM) means off, matching espnow_lr_enabled's false default.
+        uint8_t espnow_lr_raw = EEPROM.read(ADDR_CONF_ESPNOW_LR);
+        espnow_lr_enabled = (espnow_lr_raw == ESPNOW_LR_ENABLE_BYTE);
+      #endif
+
+      #if HAS_WIFI
+        wifi_mode = EEPROM.read(eeprom_addr(ADDR_CONF_WIFI));
+        #if HAS_ESPNOW == true
+          // LR mode needs the shared WiFi radio to itself (WIFI_PROTOCOL_LR,
+          // ESPNOW.h) - never let a normal STA/AP association come up
+          // alongside it. Independent of espnow_mode (v1/v2 framing) -
+          // v2 alone doesn't touch the WiFi protocol bitmask at all, only
+          // LR does. On WiFi-only boards (no HAS_ETHERNET) this means no
+          // WiFi-remote host connection and no OTA reachability while LR
+          // is active this boot - expected, not an error. espnow_wifi_disabled()
+          // (ESPNOW.h) is the single source of truth for this veto - also
+          // reused by Display.h's status icon so the two can't drift apart.
+          bool espnow_lr_active = espnow_wifi_disabled();
+        #else
+          bool espnow_lr_active = false;
+        #endif
+        // Loaded here unconditionally, not left to wifi_remote_init() below,
+        // because espnow_lr_active vetoes that call entirely - ESP-NOW still
+        // needs wr_channel (espnow_init() locks its own channel to it) even
+        // when WiFi's own STA/AP stack never comes up this boot. Without
+        // this, LR mode left wr_channel stuck at its compiled-in default
+        // (WR_CHANNEL_DEFAULT, Config.h) every boot, silently discarding
+        // whatever channel was saved to EEPROM.
+        wr_channel = EEPROM.read(eeprom_addr(ADDR_CONF_WCHN)); if (wr_channel < 1 || wr_channel > 14) { wr_channel = WR_CHANNEL_DEFAULT; }
+        if (!espnow_lr_active && (wifi_mode == WR_WIFI_STA || wifi_mode == WR_WIFI_AP)) { wifi_remote_init(); }
+
+        uint8_t ws_en_raw = EEPROM.read(eeprom_addr(ADDR_CONF_WS));
+        // Same convention as espnow_en_raw above: only ever written as
+        // WS_ENABLE_BYTE/WS_DISABLE_BYTE (see the KISS handler and
+        // ws_conf_save()) - any other value (erased EEPROM reads 0xFF)
+        // means "never touched", so leave ws_enabled at its default (off).
+        if (ws_en_raw == WS_ENABLE_BYTE) ws_enabled = true;
+        else if (ws_en_raw == WS_DISABLE_BYTE) ws_enabled = false;
+        ws_remote_init();
+      #endif
+      #if HAS_ESPNOW == true
         if (espnow_enabled) espnow_init();
       #endif
       #if HAS_ETHERNET == true
@@ -445,7 +487,24 @@ void setup() {
         init_ethernet();
       #endif
       #if HAS_OTA == true
-        ota_server_init();
+        // WebServer::begin() (called from ota_server_init()) needs the
+        // lwIP TCP/IP stack already brought up by something first -
+        // WiFi.mode() (called by wifi_remote_init() in STA/AP mode, or by
+        // espnow_init() regardless of wifi_mode) or Ethernet's own init
+        // (above). If none of those actually ran this boot (WiFi Mode OFF
+        // and ESP-NOW disabled/never initialized, and on HAS_ETHERNET
+        // boards, Ethernet Speed also OFF/eth_disabled), nothing ever
+        // brings up lwIP, and WebServer::begin() crashes hard instead of
+        // just not being reachable - confirmed on real MeshAdventurer-S3
+        // hardware: "assert failed: xQueueSemaphoreTake queue.c" inside
+        // NetworkServer::begin(), a hard bootloop, not a graceful failure.
+        // Skip OTA's web server entirely in that case - it wouldn't be
+        // reachable over the network anyway with no interface up.
+        #if HAS_ETHERNET == true
+          if (WiFi.getMode() != WIFI_MODE_NULL || !eth_disabled) { ota_server_init(); }
+        #else
+          if (WiFi.getMode() != WIFI_MODE_NULL) { ota_server_init(); }
+        #endif
       #endif
       kiss_indicate_reset();
     }
@@ -2229,7 +2288,7 @@ void loop() {
   #endif
 
   #if HAS_ESPNOW == true
-    if (espnow_enabled) update_espnow();
+    if (espnow_enabled) { update_espnow(); update_espnow_tx(); }
   #endif
 
   #if HAS_GPS == true
