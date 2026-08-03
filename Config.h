@@ -152,10 +152,14 @@
     bool espnow_lr_enabled = false;
 
     // Whether the WebSocket KISS listener (WebSocketRemote.h, port 7634) is
-    // allowed to run at all. Defaults to off, same convention as
-    // espnow_enabled above - only turned on via CMD_WS_ENABLE
-    // (ws_conf_save(), WebSocketRemote.h).
-    bool ws_enabled = false;
+    // allowed to run at all. Defaults to on - unlike espnow_enabled, an
+    // erased/never-touched EEPROM byte (ADDR_CONF_WS) should still let
+    // browser-based tools (which can only ever reach the device over
+    // WebSocket, never raw TCP - see WebSocketRemote.h's own comment) in
+    // on a factory-fresh or freshly-erased board. Explicitly turned off via
+    // CMD_WS_ENABLE/WS_DISABLE_BYTE (ws_conf_save(), WebSocketRemote.h) if
+    // ever needed.
+    bool ws_enabled = true;
 
 	#define eeprom_addr(a) (a+EEPROM_OFFSET)
 	#define config_addr(a) (a+CONFIG_OFFSET)

@@ -468,15 +468,6 @@ void setup() {
         // whatever channel was saved to EEPROM.
         wr_channel = EEPROM.read(eeprom_addr(ADDR_CONF_WCHN)); if (wr_channel < 1 || wr_channel > 14) { wr_channel = WR_CHANNEL_DEFAULT; }
         if (!espnow_lr_active && (wifi_mode == WR_WIFI_STA || wifi_mode == WR_WIFI_AP)) { wifi_remote_init(); }
-
-        uint8_t ws_en_raw = EEPROM.read(eeprom_addr(ADDR_CONF_WS));
-        // Same convention as espnow_en_raw above: only ever written as
-        // WS_ENABLE_BYTE/WS_DISABLE_BYTE (see the KISS handler and
-        // ws_conf_save()) - any other value (erased EEPROM reads 0xFF)
-        // means "never touched", so leave ws_enabled at its default (off).
-        if (ws_en_raw == WS_ENABLE_BYTE) ws_enabled = true;
-        else if (ws_en_raw == WS_DISABLE_BYTE) ws_enabled = false;
-        ws_remote_init();
       #endif
       #if HAS_ESPNOW == true
         if (espnow_enabled) espnow_init();
@@ -485,6 +476,28 @@ void setup() {
         eth_speed_mode = EEPROM.read(eeprom_addr(ADDR_CONF_ETHSPD));
         if (eth_speed_mode > ETH_SPEED_OFF) eth_speed_mode = ETH_SPEED_AUTO; // erased EEPROM (0xFF) => default
         init_ethernet();
+      #endif
+      #if HAS_WIFI
+        // Loaded/started here, after WiFi's own bring-up above and after
+        // init_ethernet() just above, not inside the HAS_WIFI block up
+        // there - ws_remote_init() (WebSocketRemote.h) needs lwIP's TCP/IP
+        // task already running (same requirement, and same crash if it
+        // isn't, as ota_server_init() below - see that call site's own
+        // comment), which on a WiFi-off, Ethernet-equipped board only
+        // happens once init_ethernet() has actually run. ws_remote_init()
+        // itself still checks readiness (WebSocketRemote.h) since a WiFi-
+        // only board reaches this same line with Ethernet never having
+        // existed at all - this ordering just makes sure that check sees
+        // accurate state instead of Ethernet's still-unset defaults.
+        uint8_t ws_en_raw = EEPROM.read(eeprom_addr(ADDR_CONF_WS));
+        // Only ever written as WS_ENABLE_BYTE/WS_DISABLE_BYTE (see the KISS
+        // handler and ws_conf_save()) - any other value (erased EEPROM
+        // reads 0xFF) means "never touched", so leave ws_enabled at its
+        // default (on, Config.h - unlike espnow_en_raw above, this listener
+        // needs to be reachable out of the box for browser-based tools).
+        if (ws_en_raw == WS_ENABLE_BYTE) ws_enabled = true;
+        else if (ws_en_raw == WS_DISABLE_BYTE) ws_enabled = false;
+        ws_remote_init();
       #endif
       #if HAS_OTA == true
         // WebServer::begin() (called from ota_server_init()) needs the

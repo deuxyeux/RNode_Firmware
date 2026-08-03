@@ -22,6 +22,14 @@
 
 #include <WebSocketsServer.h>
 
+// Forward declaration - Ethernet.h (which defines this) is #include'd after
+// this file (Utilities.h's include chain), same reason OTA.h forward-
+// declares menu_is_open(). Needed by ws_remote_init()'s network-readiness
+// check below.
+#if HAS_ETHERNET == true
+  extern bool eth_disabled;
+#endif
+
 #define WS_LISTEN_PORT 7634
 
 #define WS_STATE_NA        0xff
@@ -138,8 +146,25 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t length)
   }
 }
 
+// wsServer.begin() needs lwIP's TCP/IP task already running - it doesn't
+// gracefully fail if nothing's brought that up yet, it hard-asserts
+// ("assert failed: xQueueSemaphoreTake queue.c") deep inside NetworkServer::
+// begin(), a hard bootloop rather than just being unreachable. Same failure
+// class OTA.h's own ota_server_init() call site already guards against
+// (see its own comment) - WiFi.mode() (via wifi_remote_init()/espnow_init())
+// or Ethernet's ETH.begin() (init_ethernet(), Ethernet.h) are the only two
+// things that bring lwIP up. Checked here, not just at the boot call site,
+// so the same guard also covers ws_conf_save() below - CMD_WS_ENABLE can
+// arrive over USB serial with no network interface ever having come up at
+// all (WiFi-only boards with WiFi Mode off), independent of boot order.
+#if HAS_ETHERNET == true
+  bool ws_net_stack_ready() { return (WiFi.getMode() != WIFI_MODE_NULL || !eth_disabled); }
+#else
+  bool ws_net_stack_ready() { return (WiFi.getMode() != WIFI_MODE_NULL); }
+#endif
+
 void ws_remote_init() {
-  if (ws_enabled) {
+  if (ws_enabled && ws_net_stack_ready()) {
     wsServer.begin();
     wsServer.onEvent(webSocketEvent);
     // Without an active heartbeat, the library only detects a disconnect
