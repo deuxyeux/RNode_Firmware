@@ -473,7 +473,23 @@ int sx126x::beginPacket(int implicitHeader) {
     }
   #endif
 
+  // TXen and RXen must flip together: leaving RXen high while TXen is also
+  // high (as it would be if RXen only dropped in endPacket(), after the
+  // whole FIFO has been written byte-by-byte over SPI) asserts both switch
+  // legs of a 2-line TX/RX FEM switch at once for the entire packet-load
+  // duration, which is an invalid state for that style of switch.
+  //
+  // MeshPoE-S3's EBYTE E22P-868M30S is a different FEM topology: RXen is
+  // actually its merged RFEN (LNA+PA enable) pin, which per EBYTE's own
+  // reference design must stay high continuously whenever the radio is
+  // active (RX *and* TX) - dropping it on TX blacks out the PA, not just
+  // the LNA. Its TXen equivalent needs to be bridged to DIO2 on the module
+  // itself (see DIO2_AS_RF_SWITCH below), not driven by the MCU, hence
+  // pin_txen=-1 for this board (Boards.h) so this digitalWrite is skipped.
   if (_txen != -1) { digitalWrite(_txen, HIGH); } //Set TXen high when transmitting
+  #if BOARD_MODEL != BOARD_MESHPOE_S3
+    if (_rxen != -1) { digitalWrite(_rxen, LOW); } //Set RXen low at the same time
+  #endif
 
   standby();
   if (implicitHeader) { implicitHeaderMode(); }
@@ -489,7 +505,7 @@ int sx126x::beginPacket(int implicitHeader) {
 int sx126x::endPacket() {
   setPacketParams(_preambleLength, _implicitHeaderMode, _payloadLength, _crcMode);
 
-  if (_rxen != -1) { digitalWrite(_rxen, LOW); } //Set RXen low when transmitting
+  // RXen already dropped in beginPacket(), alongside TXen going high.
 
   uint8_t timeout[3] = {0}; // Put in single TX mode
   executeOpcode(OP_TX_6X, timeout, 3);

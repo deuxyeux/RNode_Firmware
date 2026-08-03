@@ -2277,7 +2277,7 @@ bool eeprom_model_valid() {
 	#elif BOARD_MODEL == BOARD_T3S3
 	if (model == MODEL_A1 || model == MODEL_A6 || model == MODEL_A5 || model == MODEL_AA || model == MODEL_AC) {
 	#elif BOARD_MODEL == BOARD_HMBRW
-	if (model == MODEL_FF || model == MODEL_FE || model = MODEL_FD) {
+	if (model == MODEL_FF || model == MODEL_FE || model == MODEL_FD) {
 	#elif BOARD_MODEL == BOARD_TBEAM
 	if (model == MODEL_E4 || model == MODEL_E9 || model == MODEL_E3 || model == MODEL_E8) {
 	#elif BOARD_MODEL == BOARD_TDECK

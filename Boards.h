@@ -318,7 +318,13 @@
       const int pin_reset = 3;
       const int pin_busy = 2;
       const int pin_dio = 1;
-      const int pin_txen = 40;
+      // GPIO40 is wired to the E22P-868M30S module's TXEN pin, but on this
+      // module TXEN must be bridged to DIO2 (on the module itself) to work -
+      // it's not meant to be MCU-driven like the older non-P E22's TXEN.
+      // Leaving it at -1 means sx126x.cpp never touches it. GPIO39 (RXEN
+      // below) is this module's merged RFEN (LNA+PA enable) and is handled
+      // as a special case in sx126x.cpp's beginPacket()/endPacket() instead.
+      const int pin_txen = -1;
       const int pin_rxen = 39;
       const int pin_tcxo_enable = -1;
 
