@@ -739,16 +739,22 @@ release-rak4631:
 	arduino-cli compile --fqbn rakwireless:nrf52:WisCoreRAK4631Board -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x51\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
 	cp build/rakwireless.nrf52.WisCoreRAK4631Board/RNode_Firmware.ino.hex build/rnode_firmware_rak4631.hex
 	adafruit-nrfutil dfu genpkg --dev-type 0x0052 --application build/rnode_firmware_rak4631.hex Release/rnode_firmware_rak4631.zip
+	echo "$(PROTO_VERSION).$(shell git rev-list --count HEAD)" > build/version.txt
+	zip --junk-paths Release/rnode_firmware_rak4631.zip build/version.txt
 
 release-heltec_t114:
 	arduino-cli compile --fqbn Heltec_nRF52:Heltec_nRF52:HT-n5262 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x3C\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
 	cp build/Heltec_nRF52.Heltec_nRF52.HT-n5262/RNode_Firmware.ino.hex build/rnode_firmware_heltec_t114.hex
 	adafruit-nrfutil dfu genpkg --dev-type 0x0052 --application build/rnode_firmware_heltec_t114.hex Release/rnode_firmware_heltec_t114.zip
+	echo "$(PROTO_VERSION).$(shell git rev-list --count HEAD)" > build/version.txt
+	zip --junk-paths Release/rnode_firmware_heltec_t114.zip build/version.txt
 
 release-heltec_t096:
 	arduino-cli compile --fqbn Heltec_nRF52:Heltec_nRF52:HT-n5262G -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xD2\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
 	cp build/Heltec_nRF52.Heltec_nRF52.HT-n5262G/RNode_Firmware.ino.hex build/rnode_firmware_heltec_t096.hex
 	adafruit-nrfutil dfu genpkg --dev-type 0x0052 --application build/rnode_firmware_heltec_t096.hex Release/rnode_firmware_heltec_t096.zip
+	echo "$(PROTO_VERSION).$(shell git rev-list --count HEAD)" > build/version.txt
+	zip --junk-paths Release/rnode_firmware_heltec_t096.zip build/version.txt
 
 release-promicro:
 	arduino-cli compile --log --fqbn promicro:nrf52:nicenanov2:softdevice=s140v6 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF5\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
@@ -761,6 +767,8 @@ release-techo:
 	arduino-cli compile --log --fqbn adafruit:nrf52:pca10056 -e --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x44\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
 	cp build/adafruit.nrf52.pca10056/RNode_Firmware.ino.hex build/rnode_firmware_techo.hex
 	adafruit-nrfutil dfu genpkg --dev-type 0x0052 --application build/rnode_firmware_techo.hex Release/rnode_firmware_techo.zip
+	echo "$(PROTO_VERSION).$(shell git rev-list --count HEAD)" > build/version.txt
+	zip --junk-paths Release/rnode_firmware_techo.zip build/version.txt
 
 release-xiao_s3:
 	arduino-cli compile --fqbn "esp32:esp32:XIAO_ESP32S3" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x3E\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
