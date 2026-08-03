@@ -800,8 +800,17 @@
     // to actually stay visible. No manual display.display() push needed
     // here (unlike menu_draw_popup()) - this runs as part of the normal
     // per-cycle pipeline, which already pushes once at the end.
+    // Tracks the last tier a beep was already played for, across this
+    // function's repeated per-cycle calls during a single hold - without
+    // this, the tick would replay every redraw for as long as a tier stays
+    // active instead of once when it's first reached. Reset to NONE
+    // whenever the hold isn't actively progressing through tiers (released,
+    // or the menu opened out from under it), so the next hold starts fresh.
+    uint8_t button_hold_beeped_tier = BUTTON_HOLD_TIER_NONE;
+
     void draw_button_hold_overlay() {
       if (menu_is_open() || !button_pressed()) {
+        button_hold_beeped_tier = BUTTON_HOLD_TIER_NONE;
         #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_T114
           // Neither board has a periodic full-screen clear to make a
           // leftover box disappear on its own (see
@@ -814,8 +823,16 @@
       }
       uint8_t tier = button_hold_tier(millis() - button_down_last);
       if (tier != BUTTON_HOLD_TIER_NONE) {
+        // One tick per newly-reached tier, not per redraw - buzzer_encoder_
+        // tick_melody() already no-ops with Sound off (sound_enabled) or on
+        // boards with no buzzer at all (HAS_BUZZER, Utilities.h).
+        if (tier != button_hold_beeped_tier) {
+          buzzer_encoder_tick_melody();
+          button_hold_beeped_tier = tier;
+        }
         draw_menu_status_rect(button_hold_tier_text(tier));
       } else {
+        button_hold_beeped_tier = BUTTON_HOLD_TIER_NONE;
         #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_T114
           menu_status_rect_clear();
         #endif

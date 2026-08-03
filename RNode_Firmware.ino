@@ -2407,7 +2407,30 @@ void sleep_now() {
         delay(100);
       #endif
       sd_power_gpregret_set(0, 0x6d);
-      nrf_gpio_cfg_sense_input(pin_btn_usr1, NRF_GPIO_PIN_PULLUP, NRF_GPIO_PIN_SENSE_LOW);
+      // This MCU's attachInterrupt() (WInterrupts.c) is pure GPIOTE - GPIOTE
+      // is unpowered in System OFF, so it can never be what wakes the chip,
+      // ruling out encoder_init()'s CHANGE interrupts on pin_encoder_up/down
+      // as the cause of encoder-rotation wake despite neither of them ever
+      // being explicitly SENSE-armed anywhere. The real explanation is the
+      // line below: it passes pin_btn_usr1's raw Arduino pin index straight
+      // into nrf_gpio_cfg_sense_input(), which expects the SoC's native flat
+      // P0.xx/P1.xx encoding instead (pinMode()/digitalWrite() translate
+      // this internally via g_ADigitalPinMap[]; this raw call doesn't - same
+      // gotcha as the buzzer's nrf_gpio_cfg() call, Utilities.h). So it
+      // doesn't arm SENSE on the real button pin at all (which is why
+      // pressing it never wakes the device) - it arms SENSE+pullup on
+      // whatever pin the untranslated index numerically collides with
+      // instead, on PROMICRO an unrelated, unintended pin - and rotating the
+      // encoder is apparently enough mechanical/electrical noise near that
+      // stray pin to trip it.
+      #if BOARD_MODEL == BOARD_PROMICRO
+        // Per explicit request: this board should wake only via physical
+        // RESET, so no pin gets armed as a SENSE wake source at all here,
+        // rather than fixing the translation above only to then have to
+        // re-disable a now-correctly-working button-wake.
+      #else
+        nrf_gpio_cfg_sense_input(pin_btn_usr1, NRF_GPIO_PIN_PULLUP, NRF_GPIO_PIN_SENSE_LOW);
+      #endif
       NRF_POWER->SYSTEMOFF = 1;
     #endif
   #endif

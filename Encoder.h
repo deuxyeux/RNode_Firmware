@@ -85,6 +85,14 @@
   const unsigned long ENC_BTN_DEBOUNCE_DELAY = 25;
   unsigned long enc_btn_down_last = 0;
 
+  // Set false on every new press, latched true once the hold's crossed
+  // menu_encoder_button()'s own long-press threshold (Menu.h) - gives a
+  // one-shot "you're past the threshold" tick while still held, matching
+  // the main button's per-tier ticks (draw_button_hold_overlay(), Menu.h),
+  // instead of only finding out what a hold was about to do after already
+  // releasing it.
+  bool enc_btn_hold_beeped = false;
+
   void encoder_init() {
     pinMode(pin_encoder_up, INPUT_PULLUP);
     pinMode(pin_encoder_down, INPUT_PULLUP);
@@ -119,10 +127,21 @@
         enc_btn_state = reading;
         if (enc_btn_state == ENC_PRESSED) {
           enc_btn_down_last = millis();
+          enc_btn_hold_beeped = false;
         } else if (encoder_enabled) {
           menu_encoder_button(millis() - enc_btn_down_last);
         }
       }
+    }
+
+    // Menu-closed only - this hold threshold only opens Settings from
+    // closed (menu_encoder_button()'s own duration>700 check, Menu.h); an
+    // already-open menu commits and exits on the same threshold instead,
+    // which isn't what this tick is meant to announce.
+    if (encoder_enabled && enc_btn_state == ENC_PRESSED && !enc_btn_hold_beeped &&
+        !menu_is_open() && (millis() - enc_btn_down_last) > 700) {
+      buzzer_encoder_tick_melody();
+      enc_btn_hold_beeped = true;
     }
   }
 

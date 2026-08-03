@@ -3153,19 +3153,18 @@ void draw_disp_area() {
             #if (BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_T114) && USE_COLOR_DISPLAY == true
               disp_banner_fg = COLOR_BANNER_OK;
             #endif
-            #if HAS_OTA == true
-              // MAJ.MIN plus a "-BBB" BUILD_NUMBER suffix needs more
-              // room than the stock MAJ.MIN-only layout leaves on this 64px
-              // canvas, so this board (only) shifts the whole line left and
-              // packs digits tighter (8px pitch = glyph width, i.e. no gap,
-              // vs. the stock 9px/1px-gap spacing) - confirmed against the
-              // real device.
-              int16_t vbase = DISP_BM_X+4;
-              uint8_t vpitch = 8; uint8_t vgap = 3;
-            #else
-              int16_t vbase = DISP_BM_X+20;
-              uint8_t vpitch = 9; uint8_t vgap = 4;
-            #endif
+            // MAJ.MIN plus a "-BBB" BUILD_NUMBER suffix needs more room than
+            // the old MAJ.MIN-only layout left on this 64px canvas, so every
+            // board shifts the whole line left and packs digits tighter
+            // (8px pitch = glyph width, i.e. no gap, vs. the old 9px/1px-gap
+            // spacing) - originally confirmed only against MeshPoE-S3's real
+            // hardware (the first HAS_OTA board), now applied everywhere
+            // since every board displays the suffix. Re-check on real
+            // hardware per board as they're tested - canvas width (DISP_BM_X/
+            // DISP_BM_W) varies enough between boards that this may still
+            // need small per-board nudges.
+            int16_t vbase = DISP_BM_X+4;
+            uint8_t vpitch = 8; uint8_t vgap = 3;
             char *v_str = (char*)malloc(3+1);
             sprintf(v_str, "%01d%02d", MAJ_VERS, MIN_VERS);
             for (int i = 0; i < 3; i++) {
@@ -3179,30 +3178,30 @@ void draw_disp_area() {
             disp_area.drawLine(vbase+7, 37+19, vbase+8, 37+19, SSD1306_BLACK);
             disp_area.drawLine(vbase+7, 37+20, vbase+8, 37+20, SSD1306_BLACK);
 
-            #if HAS_OTA == true
-              // "-BBB" suffix: last 3 digits of BUILD_NUMBER, same
-              // bm_n_uh digit font as MAJ.MIN above, right after MIN_VERS.
-              // Separator mark uses the same 2x2 dot technique as the
-              // MAJ/MIN decimal point above (a plain drawFastHLine wasn't
-              // visible here) rather than an actual "-" glyph.
-              int16_t min_end = vbase + vpitch*2+vgap + 8;
-              disp_area.drawLine(min_end-1, 37+19, min_end+0, 37+19, SSD1306_BLACK);
-              disp_area.drawLine(min_end-1, 37+20, min_end+0, 37+20, SSD1306_BLACK);
-              // Not tied to the dot's position above - there's a 3px gap to
-              // the dot now, comfortably clear of its solid-background
-              // bitmap overwriting the dot's right pixel (see prior note -
-              // that's what shaved it to 1px wide before a gap existed).
-              int16_t bbase = min_end+3;
-              long build_num = ((long)BUILD_NUMBER) % 1000;
-              char *b_str = (char*)malloc(3+1);
-              sprintf(b_str, "%03ld", build_num);
-              for (int i = 0; i < 3; i++) {
-                uint8_t numeric = b_str[i]-48; uint8_t bm_offset = numeric*5;
-                int16_t dxp = bbase+i*8;
-                disp_area.drawBitmap(dxp, 37+16, bm_n_uh+bm_offset, 8, 5, SSD1306_WHITE, SSD1306_BLACK);
-              }
-              free(b_str);
-            #endif
+            // "-BBB" suffix: last 3 digits of BUILD_NUMBER (0 on any board
+            // not built through the Makefile's git-commit-count injection,
+            // see BUILD_NUMBER's own fallback, Boards.h), same bm_n_uh digit
+            // font as MAJ.MIN above, right after MIN_VERS. Separator mark
+            // uses the same 2x2 dot technique as the MAJ/MIN decimal point
+            // above (a plain drawFastHLine wasn't visible here) rather than
+            // an actual "-" glyph.
+            int16_t min_end = vbase + vpitch*2+vgap + 8;
+            disp_area.drawLine(min_end-1, 37+19, min_end+0, 37+19, SSD1306_BLACK);
+            disp_area.drawLine(min_end-1, 37+20, min_end+0, 37+20, SSD1306_BLACK);
+            // Not tied to the dot's position above - there's a 3px gap to
+            // the dot now, comfortably clear of its solid-background
+            // bitmap overwriting the dot's right pixel (see prior note -
+            // that's what shaved it to 1px wide before a gap existed).
+            int16_t bbase = min_end+3;
+            long build_num = ((long)BUILD_NUMBER) % 1000;
+            char *b_str = (char*)malloc(3+1);
+            sprintf(b_str, "%03ld", build_num);
+            for (int i = 0; i < 3; i++) {
+              uint8_t numeric = b_str[i]-48; uint8_t bm_offset = numeric*5;
+              int16_t dxp = bbase+i*8;
+              disp_area.drawBitmap(dxp, 37+16, bm_n_uh+bm_offset, 8, 5, SSD1306_WHITE, SSD1306_BLACK);
+            }
+            free(b_str);
           } else if (disp_page == 3) {
             if (!console_active) {
               draw_disp_art(37, bm_hwok, 27);
