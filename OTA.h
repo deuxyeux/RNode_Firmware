@@ -42,6 +42,7 @@
 #include <esp_ota_ops.h>
 #include <esp_partition.h>
 #include <esp_heap_caps.h>
+#include <esp_attr.h>
 #include <WebServer.h>
 
 #if HAS_MENU == true
@@ -393,19 +394,57 @@ void ota_loop() {
   ota_server.handleClient();
 }
 
-// Field recovery path: hold pin_btn_usr1 down through power-on to force-
-// boot the *other* OTA partition. Called as the very first thing in setup()
-// (RNode_Firmware.ino), before radio/display/network init, so it still runs
-// even if a bad update breaks something later in boot - the one failure
-// mode this can't help with is an image that doesn't get far enough to
-// reach this line at all (see plan: no bootloader-level rollback is
-// available through arduino-cli's prebuilt bootloader).
+// RTC slow memory - not zero-initialized by the C runtime, but retained
+// across every reset that keeps VDD3P3_RTC powered (software reset, panic,
+// task-watchdog, deep sleep), and left holding stale/effectively-random
+// content after an actual power-on-reset or brownout (that domain loses
+// power too). Used purely as a "did we already switch partitions this
+// power cycle" latch below, via an exact-match magic value that a fresh
+// power-on essentially never happens to already contain.
+RTC_NOINIT_ATTR uint32_t recovery_switch_guard;
+#define RECOVERY_SWITCH_MAGIC 0x5AFEB007
+
+// Field recovery path: hold pin_btn_usr1 down through power-on (or through
+// an ongoing crash-bootloop - this runs before any of the code that might
+// be crashing) to force-boot the *other* OTA partition. Called as the very
+// first thing in setup() (RNode_Firmware.ino), before radio/display/network
+// init, so it still runs even if a bad update breaks something later in
+// boot - the one failure mode this can't help with is an image that doesn't
+// get far enough to reach this line at all (see plan: no bootloader-level
+// rollback is available through arduino-cli's prebuilt bootloader).
+//
+// recovery_switch_guard exists because this has no other debounce - if the
+// running image keeps crashing and rebooting on its own (the exact scenario
+// this exists to recover from), every one of those automatic reboots re-
+// runs this function too. Holding the button through more than one of them
+// used to flip the boot partition on *every* pass - good, bad, good, bad -
+// with whichever slot happened to be selected the instant the button was
+// physically released coming down to raw timing luck (confirmed on real
+// hardware: the display never even got a chance to turn on while held,
+// since each flip restarts before display init ever runs). The guard makes
+// this a one-shot action per power cycle instead: a single continuous hold,
+// however long, produces exactly one switch, and it stops mattering exactly
+// when it gets released.
 void ota_check_recovery_button() {
   pinMode(pin_btn_usr1, INPUT_PULLUP);
   delay(20);
-  if (digitalRead(pin_btn_usr1) == LOW) {
+  if (digitalRead(pin_btn_usr1) == LOW && recovery_switch_guard != RECOVERY_SWITCH_MAGIC) {
     const esp_partition_t *running = esp_ota_get_running_partition();
     const esp_partition_t *other = esp_ota_get_next_update_partition(running);
-    if (other != NULL) { esp_ota_set_boot_partition(other); esp_restart(); }
+    if (other != NULL) {
+      recovery_switch_guard = RECOVERY_SWITCH_MAGIC;
+      // Re-registers dev_firmware_hash_target against the partition we're
+      // switching to - the same call the normal OTA install path uses
+      // (ota_handle_upload_complete()/ota_do_pull_download() above) to
+      // satisfy Device.h's firmware-corrupt check. Without this, an
+      // emergency switch left dev_firmware_hash_target pointing at whatever
+      // was last installed via OTA - so the perfectly good partition being
+      // switched *to* would fail that check on its very next boot and read
+      // as "firmware corrupt" despite being the known-good image. This also
+      // refuses to switch onto a partition that fails its own hash
+      // verification (e.g. genuinely blank/never-flashed) rather than
+      // committing to boot something worse than what's already failing.
+      if (ota_verify_and_set_boot(other)) { esp_restart(); }
+    }
   }
 }
