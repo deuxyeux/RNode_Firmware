@@ -365,43 +365,43 @@ uint16_t espnow_tx_len = 0;
 // to claim one too (matching this board's real MODEM, KISS_SX1262) since
 // there's no non-LoRa vport concept on the host.
 //
-// The whole response is withheld - not just vport 1's frame - unless
-// espnow_ready is true (esp_now_init()/esp_now_add_peer() actually
-// succeeded, not just that the config option is turned on). Without this
-// gate, the config echo functions elsewhere in this file (kiss_indicate_v1_*)
-// happily accept and echo back whatever the host sends for vport 1
-// regardless of whether ESP-NOW ever actually initialized, so a host
-// connecting to a board with ESP-NOW disabled (or that failed to init)
-// would previously see vport 1 report as successfully "configured and
-// powered up" with no real hardware behind it.
+// vport 1's frame is withheld unless espnow_ready is true (esp_now_init()/
+// esp_now_add_peer() actually succeeded, not just that the config option is
+// turned on). Without this gate, the config echo functions elsewhere in
+// this file (kiss_indicate_v1_*) happily accept and echo back whatever the
+// host sends for vport 1 regardless of whether ESP-NOW ever actually
+// initialized, so a host connecting to a board with ESP-NOW disabled (or
+// that failed to init) would previously see vport 1 report as successfully
+// "configured and powered up" with no real hardware behind it.
 //
-// Withholding only vport 1's frame isn't enough either: RNodeMultiInterface.py
-// builds all of a connection's subinterfaces in one pass and aborts the
-// whole pass on the first missing vport, but vport 0 (the real LoRa radio)
-// would already have been spawned and registered with Transport by the time
-// that abort happens, since it's processed first - leaving it half-up, then
-// torn down, then endlessly reconnect-looped as part of a "failed" connect
-// rather than failing cleanly once. Sending no CMD_INTERFACES frames at all
-// means self.subinterface_types stays completely empty, so the host's
-// existing vport-count check fails immediately on vport 0 - before anything
-// is spawned - with a clear "Virtual port ... does not exist on RNode"
-// error. A host that wants just the real LoRa radio when ESP-NOW isn't
-// available should use RNodeInterface (single-radio) instead of
-// RNodeMultiInterface against this board.
+// vport 0's frame is NOT withheld, unlike vport 1's - this is the real,
+// always-present LoRa radio, unaffected by ESP-NOW's state, and a host
+// configured for just LoRa (RNodeMultiInterface with only its LoRa
+// subinterface enabled, ESP-NOW's left disabled) needs to see it regardless
+// of whether ESP-NOW is ready. This does reopen one specific edge case the
+// old all-or-nothing gate avoided: a host that has BOTH LoRa and ESP-NOW
+// enabled in its own config, on a board where ESP-NOW isn't ready, will
+// still see vport 0 spawn and register with RNS.Transport before
+// RNodeMultiInterface.py's per-connection loop hits the missing vport 1 and
+// aborts the rest of that pass - leaving that one connection attempt
+// half-up before it gets torn down and retried, same as any other failed
+// connect. Accepted: a host that only wants LoRa working, with ESP-NOW
+// deliberately disabled, is the common case this board needs to support
+// cleanly.
 void kiss_indicate_interfaces() {
-  if (!espnow_ready) return;
-
   serial_write(FEND);
   serial_write(CMD_INTERFACES);
   serial_write(0x00);
   serial_write(KISS_SX1262);
   serial_write(FEND);
 
-  serial_write(FEND);
-  serial_write(CMD_INTERFACES);
-  serial_write(0x01);
-  serial_write(KISS_SX1262);
-  serial_write(FEND);
+  if (espnow_ready) {
+    serial_write(FEND);
+    serial_write(CMD_INTERFACES);
+    serial_write(0x01);
+    serial_write(KISS_SX1262);
+    serial_write(FEND);
+  }
 }
 
 // vport 1's own "radio" indicate functions - mirror the shape of the
