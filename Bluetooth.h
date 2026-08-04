@@ -55,11 +55,29 @@ char bt_da[BT_DEV_ADDR_LEN];
 #if MCU_VARIANT == MCU_ESP32
   #if HAS_BLUETOOTH == true
 
+    // How long the passkey has to stay on screen before it's auto-accepted
+    // (see bt_confirm_pending below) - long enough for the user to actually
+    // read and compare it against their phone's own prompt.
+    #define BT_CONFIRM_DISPLAY_MS 2500
+    bool bt_confirm_pending = false;
+    uint32_t bt_confirm_pending_since = 0;
+
     void bt_confirm_pairing(uint32_t numVal) {
       bt_ssp_pin = numVal;
       kiss_indicate_btpin();
       if (bt_allow_pairing) {
-        SerialBT.confirmReply(true);
+        // Deferred to update_bt() rather than calling confirmReply(true)
+        // right here - esp_bt_gap_ssp_confirm_reply() (which this wraps)
+        // doesn't have to be called synchronously from within this GAP
+        // callback, and Bluedroid just leaves the negotiation paused until
+        // it is. Confirming immediately let auth complete (and
+        // bt_pairing_complete()/bt_disable_pairing() zero bt_ssp_pin again)
+        // before the display's own ~7fps update_display() cadence
+        // necessarily landed a redraw in between - the passkey only ever
+        // reliably made it on screen if that race happened to go its way,
+        // otherwise it flashed for well under a second or not at all.
+        bt_confirm_pending = true;
+        bt_confirm_pending_since = millis();
       } else {
         SerialBT.confirmReply(false);
       }
@@ -70,6 +88,7 @@ char bt_da[BT_DEV_ADDR_LEN];
       if (bt_state != BT_STATE_OFF) {
         SerialBT.end();
         bt_allow_pairing = false;
+        bt_confirm_pending = false;
         // Otherwise a pairing interrupted after the confirmation PIN is set
         // (bt_confirm_pairing()) but before bt_disable_pairing()/
         // bt_pairing_complete() runs leaves bt_ssp_pin stuck non-zero forever -
@@ -99,6 +118,7 @@ char bt_da[BT_DEV_ADDR_LEN];
     void bt_disable_pairing() {
       display_unblank();
       bt_allow_pairing = false;
+      bt_confirm_pending = false;
       bt_ssp_pin = 0;
       bt_state = BT_STATE_ON;
     }
@@ -162,6 +182,15 @@ char bt_da[BT_DEV_ADDR_LEN];
     }
 
     void update_bt() {
+      if (bt_confirm_pending && millis()-bt_confirm_pending_since >= BT_CONFIRM_DISPLAY_MS) {
+        bt_confirm_pending = false;
+        // bt_allow_pairing may have gone false since the request came in
+        // (e.g. BT_PAIRING_TIMEOUT firing mid-delay, bt_disable_pairing()
+        // above already clears bt_confirm_pending too, but re-check here
+        // in case of any other path that flips it) - honor that instead of
+        // blindly accepting.
+        SerialBT.confirmReply(bt_allow_pairing);
+      }
       if (bt_allow_pairing && millis()-bt_pairing_started >= BT_PAIRING_TIMEOUT) {
         bt_disable_pairing();
       }

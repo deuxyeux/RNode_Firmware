@@ -473,6 +473,13 @@
       #define LORA_LNA_GAIN  30
       #define LORA_LNA_GVT   14
 
+      // RNode Settings menu (Menu.h), button-only navigation (tap = next,
+      // double-tap = back, hold = select/open - see menu_button_press()).
+      // No encoder, buzzer, or voltage divider on this board, so
+      // HAS_ENCODER/HAS_BUZZER/HAS_VSENSE/HAS_BATTERY_DIVIDER all stay at
+      // their default false (Boards.h fallback block below).
+      #define HAS_MENU true
+
       const int pin_cs = 18;
       const int pin_sclk = 5;
       const int pin_miso = 19;
@@ -503,6 +510,13 @@
       #define HAS_LORA_LNA true
       #define LORA_LNA_GAIN  17
       #define LORA_LNA_GVT   12
+
+      // RNode Settings menu (Menu.h), button-only navigation (tap = next,
+      // double-tap = back, hold = select/open - see menu_button_press()).
+      // No encoder, buzzer, or voltage divider on this board, so
+      // HAS_ENCODER/HAS_BUZZER/HAS_VSENSE/HAS_BATTERY_DIVIDER all stay at
+      // their default false (Boards.h fallback block below).
+      #define HAS_MENU true
 
       const int pin_cs = 18;
       const int pin_sclk = 5;
