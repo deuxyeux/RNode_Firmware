@@ -472,13 +472,33 @@
       #define HAS_LORA_LNA true
       #define LORA_LNA_GAIN  30
       #define LORA_LNA_GVT   14
+      #define HAS_BUZZER true
+      #define HAS_ENCODER true
 
       // RNode Settings menu (Menu.h), button-only navigation (tap = next,
       // double-tap = back, hold = select/open - see menu_button_press()).
-      // No encoder, buzzer, or voltage divider on this board, so
-      // HAS_ENCODER/HAS_BUZZER/HAS_VSENSE/HAS_BATTERY_DIVIDER all stay at
-      // their default false (Boards.h fallback block below).
+      // No voltage divider on this board, so HAS_VSENSE/HAS_BATTERY_DIVIDER
+      // stay at their default false (Boards.h fallback block below).
       #define HAS_MENU true
+
+      // Optional ATGM336H GNSS module (AT6558 chipset), same as
+      // MeshAdventurer-S3's - no enable/power-control pin, so neither
+      // PIN_GPS_EN nor PIN_GPS_STANDBY apply here - the Settings menu's
+      // Enabled toggle (GNSS.h) only starts/stops GPS_SERIAL on this board.
+      // This board's KISS serial link runs over UART0 (Serial, native
+      // USB-serial bridge, not native USB CDC like the S3), so Serial1 is
+      // free for GPS_SERIAL with its rx/tx pins passed explicitly - see
+      // gnss_set_enabled(), GNSS.h.
+      #define HAS_GPS true
+      #define GPS_MODEL GPS_MODEL_AT6558
+      #define GPS_SERIAL Serial1
+      #define GPS_BAUD_RATE 9600 // AT6558's factory-default NMEA baud
+      #define PIN_GPS_RX 12 // MCU RX - wired to GPS TX-out
+      #define PIN_GPS_TX 15 // MCU TX - wired to GPS RX-in
+      // This is an optional, not-always-populated add-on - defaults off so
+      // a board without the module installed doesn't sit there listening
+      // to an unconnected UART by default.
+      #define GNSS_ENABLED_DEFAULT false
 
       const int pin_cs = 18;
       const int pin_sclk = 5;
@@ -494,6 +514,11 @@
       const int pin_btn_usr1 = 39;
       const int pin_led_rx = 2;
       const int pin_led_tx = 2;
+
+      #define PIN_BUZZER 26
+      #define PIN_ENCODER_UP 16
+      #define PIN_ENCODER_DOWN 17
+      #define PIN_ENCODER_PRESS 4
 
     #elif BOARD_MODEL == BOARD_DIY_V1
       #define HAS_DISPLAY true
