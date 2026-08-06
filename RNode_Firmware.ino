@@ -2256,6 +2256,17 @@ void loop() {
             led_indicate_standby();
           #endif
         }
+        #if HAS_NP == true
+          else {
+            // led_indicate_standby() stops being called once the display
+            // blanks, which would otherwise freeze its breathing pulse at
+            // whatever brightness it last had instead of turning off -
+            // draining the battery on nodes where LED_DISPLAY_BLANKED
+            // tracks display_blanked. npset() no-ops once the pixel is
+            // already off, so this is cheap to call every loop tick.
+            npset(0x00, 0x00, 0x00);
+          }
+        #endif
       }
     } else {
 
