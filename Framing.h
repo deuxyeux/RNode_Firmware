@@ -91,8 +91,16 @@
   #define CMD_SENSOR      0x76
   #define CMD_WIFI_IP     0x84
   #define CMD_WIFI_NM     0x85
-  #define CMD_SND         0x86
-  #define CMD_VSENSE_DIV  0x87
+  // CMD_SND/CMD_VSENSE_DIV used to live at 0x86/0x87 - moved here to free
+  // those values for CMD_PROVISION_REQ/RSP below (matching
+  // microReticulum_Firmware's wire opcodes exactly, so its web console
+  // and RNode_Flasher's other config commands can talk to this firmware
+  // unmodified). RNode_Flasher's setSound()/setVsenseDivider()
+  // (htdocs/index.html) were updated to match - any already-deployed
+  // device running older firmware needs reflashing before RNode_Flasher
+  // can configure its buzzer/vsense-divider again.
+  #define CMD_SND         0x91
+  #define CMD_VSENSE_DIV  0x92
   // Wired Ethernet's own static IP/netmask (MeshPoE-S3 only, HAS_ETHERNET) -
   // same wire format as CMD_WIFI_IP/NM above, just a separate address pair
   // (ADDR_CONF_ETH_IP/NM, ROM.h) so WiFi and Ethernet can each have their
@@ -159,6 +167,16 @@
   #define SEQ_UNSET       0xFF
 
   #define CMD_ERROR           0x90
+  // Provisioning wire protocol (Provisioning.h/RNS::Provisioning::Provisioner,
+  // HAS_URNS boards only) - request/response pair, framed like any other
+  // multi-byte KISS command (FEND CMD <escaped payload> FEND). Ported from
+  // and wire-compatible with microReticulum_Firmware's CMD_PROVISION_REQ/RSP
+  // - same 0x86/0x87 values, so its web console (and any other client built
+  // against upstream's opcodes) talks to this firmware unmodified.
+  // CMD_SND/CMD_VSENSE_DIV used to live at these two values; they moved to
+  // 0x91/0x92 (just above CMD_ERROR) to make room - see their own comment.
+  #define CMD_PROVISION_REQ   0x86
+  #define CMD_PROVISION_RSP   0x87
   #define ERROR_INITRADIO     0x01
   #define ERROR_TXFAILED      0x02
   #define ERROR_EEPROM_LOCKED 0x03

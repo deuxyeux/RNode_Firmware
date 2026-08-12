@@ -75,6 +75,7 @@ public:
   void enableTCXO();
   void disableTCXO();
   void setDCDCRegulator();
+  void clearDeviceErrors();
 
   void rxAntEnable();
   void loraMode();
@@ -99,6 +100,13 @@ public:
   void dumpRegisters(Stream& out);
 
   bool isKCT8103L() { return _kct8103l; }
+
+  // See sx126x.cpp's own comment (near beginPacket()) for the full story -
+  // any task-context SPI access to the radio needs these bracketing it,
+  // not just the TX path. Public so update_modem_status() (RNode_Firmware.
+  // ino)'s dcd()/currentRssi() calls can use them too.
+  void maskDio0();
+  void unmaskDio0();
 
 private:
   void explicitHeaderMode();

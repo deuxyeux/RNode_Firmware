@@ -30,6 +30,13 @@
   // wrap=true.
   void menu_encoder_rotate(int8_t dir, bool wrap = false);
   void menu_encoder_button(unsigned long duration);
+  // Dispatched instead of menu_encoder_rotate() when a rotation tick
+  // arrives while the push-button is physically held down (see
+  // encoder_process() below) - only MENU_STATE_MSNGR_TEXT_ENTRY gives the
+  // resulting chord any meaning, everywhere else it just falls through to
+  // the normal rotate.
+  void menu_encoder_chord_rotate(int8_t dir);
+  extern bool msngr_kb_chord_used;
 
   // Classic 4-state Gray-code quadrature transition table, indexed by
   // (prev_AB<<2)|curr_AB. Illegal transitions (both channels changed
@@ -114,7 +121,16 @@
     // left half-updated if this gets re-enabled later), but only actually
     // reaches the menu if the board's encoder is flagged as populated -
     // see encoder_enabled, MENU_ITEM_ENCODER.
-    if (d != 0 && encoder_enabled) menu_encoder_rotate(d);
+    //
+    // Holding the button down while turning is a chord (capital letters on
+    // MENU_STATE_MSNGR_TEXT_ENTRY, see menu_encoder_chord_rotate()) rather
+    // than a plain rotate - checked against the debounced button state
+    // (enc_btn_state), not a raw pin read, so it can't flicker mid-turn on
+    // contact bounce.
+    if (d != 0 && encoder_enabled) {
+      if (enc_btn_state == ENC_PRESSED) menu_encoder_chord_rotate(d);
+      else menu_encoder_rotate(d);
+    }
 
     int reading = digitalRead(pin_encoder_press);
     if (reading != enc_btn_debounce_state) {
@@ -128,6 +144,7 @@
         if (enc_btn_state == ENC_PRESSED) {
           enc_btn_down_last = millis();
           enc_btn_hold_beeped = false;
+          msngr_kb_chord_used = false; // fresh press - no chord performed with it yet
         } else if (encoder_enabled) {
           menu_encoder_button(millis() - enc_btn_down_last);
         }

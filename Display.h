@@ -1681,7 +1681,28 @@ void draw_bt_icon(int px, int py, Adafruit_GFX &gfx = stat_area) {
   #endif
 }
 
+#if HAS_URNS == true
+// messenger_has_unread() (Messenger.h) isn't declared yet at this point -
+// Display.h is #include'd (Utilities.h) before Messenger.h - same
+// reasoning as the wifi_mode/eth_link_up/espnow_ui_active externs above.
+extern bool messenger_has_unread();
+#define MSNGR_ENVELOPE_BLINK_MS 500
+#endif
+
 void draw_lora_icon(int px, int py, Adafruit_GFX &gfx = stat_area) {
+  #if HAS_URNS == true
+    if (messenger_has_unread()) {
+      static bool envelope_frame = false;
+      static unsigned long envelope_last_ms = 0;
+      unsigned long now = millis();
+      if (now - envelope_last_ms >= MSNGR_ENVELOPE_BLINK_MS) {
+        envelope_last_ms = now;
+        envelope_frame = !envelope_frame;
+      }
+      gfx.drawBitmap(px, py, bm_envelope+(envelope_frame ? 1 : 0)*34, 16, 17, SSD1306_WHITE, SSD1306_BLACK);
+      return;
+    }
+  #endif
   if (radio_online) {
     gfx.drawBitmap(px, py, bm_rf+1*32, 16, 16, SSD1306_WHITE, SSD1306_BLACK);
   } else {
@@ -2819,6 +2840,39 @@ void draw_disp_area() {
     // framebuffer feature no longer depends on Bluetooth's internal pairing
     // bookkeeping being flawless.
     if (!disp_ext_fb or bt_state == BT_STATE_PAIRING) {
+      #if BOARD_MODEL != BOARD_HELTEC_T096 && BOARD_MODEL != BOARD_HELTEC_T114
+        // The "unsigned.io" branding strip (bm_def/bm_def_lc's top 8 rows -
+        // matches the airtime/channel-load panel's own fillRect(0,8,...)
+        // boundary a few lines down, which was already deliberately
+        // leaving this exact band untouched) used to only get drawn by the
+        // header-art branch further below (the "else" of the very next
+        // if). That was fine as long as that branch ran at least once
+        // before radio_online first went true, since disp_area is a
+        // persistent canvas - nothing clears it between frames (no
+        // fillScreen() call anywhere), so whatever's drawn here just sits
+        // until something overwrites it.
+        //
+        // URNS (project_microreticulum_onboard_node memory) broke that
+        // assumption: device_init_done only flips true inside
+        // device_init() (Device.h, called from validate_status()'s
+        // success path), which doesn't itself call update_display() - the
+        // first real redraw with device_init_done true happens on loop()'s
+        // first iteration, by which point urns_radio_bringup() (also in
+        // setup(), right after validate_status()) has already set
+        // radio_online=true. So the header branch - and this strip - never
+        // ran even once, leaving these rows in disp_area's untouched
+        // (blank) initial state permanently. The same root cause would
+        // affect any host-driven config that auto-starts the radio at
+        // boot too (op_mode restored from EEPROM, validate_status()'s own
+        // startRadio() call) - just far rarer to hit before URNS started
+        // keeping the radio on by default every boot with no host at all.
+        //
+        // Drawing it here, unconditionally, every frame, removes the
+        // ordering dependency entirely instead of chasing it further -
+        // matches the fillRect(0,8,...) boundary below exactly, so
+        // there's no double-draw seam where the two meet.
+        draw_disp_art(0, device_signatures_ok() ? bm_def_lc : bm_def, 8);
+      #endif
       if (radio_online && display_diagnostics) {
         // Alternates this whole airtime/channel-load panel with a GNSS
         // info page every RADIO_PARAMS_PAGE_MS while the receiver is

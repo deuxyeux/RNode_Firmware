@@ -230,7 +230,23 @@ char bt_da[BT_DEV_ADDR_LEN];
       // Serial.println("BT init");
       bt_state = BT_STATE_OFF;
       if (bt_setup_hw()) {
-        if (bt_enabled && !console_active) bt_start();
+        // Deliberately NOT calling bt_start() here anymore - measured
+        // live (HEAP_TRACE, RNode_Firmware.ino) that it alone accounts
+        // for ~82KB of the ~137KB BLE+ESP-NOW together were consuming
+        // out of ~185KB available after display init, leaving only
+        // ~30KB for everything else (LXMF/RNS processing, crypto, etc.)
+        // - the direct cause of this session's whole crash investigation
+        // (heap exhaustion, confirmed via mbedTLS/esp-aes allocation
+        // failures under load). bt_setup_hw() above (MAC/name/security
+        // config) is cheap and still runs unconditionally so the device
+        // is ready to pair the moment it's asked to - bt_start() (the
+        // actual SerialBT.begin(), which is what allocates the BLE
+        // stack) now only happens on-demand, the same way it already
+        // does when re-enabling via bt_enable_pairing() (the button-hold
+        // gesture) after an explicit bt_stop(). bt_enabled (EEPROM
+        // preference) still gates whether pairing is allowed at all, via
+        // bt_enable_pairing()'s own check - it just no longer means
+        // "start BLE automatically at every boot".
         return true;
       } else {
         return false;

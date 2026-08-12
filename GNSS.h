@@ -73,19 +73,6 @@ uint16_t gnss_date_year()  { return gps_parser.date.year(); }
 uint8_t  gnss_date_month() { return gps_parser.date.month(); }
 uint8_t  gnss_date_day()   { return gps_parser.date.day(); }
 
-// Raw link-health counters, straight from TinyGPSPlus - not otherwise
-// exposed anywhere. Genuinely useful diagnostics for bringing up any
-// future GNSS board (not a one-off debug hack): 0 chars ever processed
-// means the MCU isn't receiving anything at all from the module (wrong
-// pins/baud/power/reset - a firmware or wiring problem); chars processed
-// but checksum_passed stuck at 0 means garbage is arriving (near-certainly
-// a baud mismatch); passing sentences but satellites still always 0 with a
-// clear sky view points at the antenna/module itself rather than the MCU
-// side.
-uint32_t gnss_chars_processed()  { return gps_parser.charsProcessed(); }
-uint32_t gnss_checksum_passed()  { return gps_parser.passedChecksum(); }
-uint32_t gnss_checksum_failed()  { return gps_parser.failedChecksum(); }
-
 // Module presence auto-detection - relevant on any HAS_GPS board, but
 // especially MeshAdventurer-S3's ATGM336H, an optional add-on most builds
 // don't have installed (GNSS_ENABLED_DEFAULT false there, Boards.h): a user
@@ -94,15 +81,16 @@ uint32_t gnss_checksum_failed()  { return gps_parser.failedChecksum(); }
 // view yet". NMEA is a one-way broadcast (no ping/ack to probe with), so
 // presence can only be inferred from what's actually arriving on the UART -
 // specifically, at least one *complete, checksum-valid* NMEA sentence
-// (gnss_checksum_passed()) since detection last (re)started, not merely any
-// raw byte (gnss_chars_processed()). Confirmed on real hardware that raw
-// bytes alone are far too weak a signal: a floating/unconnected RX pin with
-// no module wired at all still picks up stray electrical noise and racks up
-// a nonzero char count with zero valid sentences ever assembled - a real
-// module reliably produces complete sentences within a second or two of
-// power-up, noise essentially never does. gnss_checksum_passed() is (like
-// charsProcessed()) a monotonic since-boot counter TinyGPSPlus never
-// resets, so a plain "is it > 0" check would wrongly stay PRESENT forever
+// (gps_parser.passedChecksum()) since detection last (re)started, not
+// merely any raw byte (gps_parser.charsProcessed()). Confirmed on real
+// hardware that raw bytes alone are far too weak a signal: a floating/
+// unconnected RX pin with no module wired at all still picks up stray
+// electrical noise and racks up a nonzero char count with zero valid
+// sentences ever assembled - a real module reliably produces complete
+// sentences within a second or two of power-up, noise essentially never
+// does. passedChecksum() is (like charsProcessed()) a monotonic
+// since-boot counter TinyGPSPlus never resets, so a plain "is it > 0"
+// check would wrongly stay PRESENT forever
 // after a module that was once seen gets unplugged and GPS is toggled
 // off/on again; a baseline snapshot at the start of each detection run
 // avoids that.
@@ -134,9 +122,9 @@ void gnss_detect_reset() {
 // name (Boards.h's GPS_MODEL) is just a compile-time label for whichever
 // chip this board is wired for, not proof it's actually there.
 const char *gnss_module_status_text() {
-  if (!gnss_enabled)                            return "OFF";
+  if (!gnss_enabled)                            return "N/A";
   if (gnss_detect_state == GNSS_DETECT_PRESENT)  return gnss_chip_name();
-  if (gnss_detect_state == GNSS_DETECT_ABSENT)   return "NOT DETECTED";
+  if (gnss_detect_state == GNSS_DETECT_ABSENT)   return "N/A";
   return "DETECTING...";
 }
 

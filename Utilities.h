@@ -14,6 +14,7 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "Config.h"
+#include <stdarg.h>
 
 // DEBUG_UART_BEGIN()/DEBUG_LOG() - general-purpose debug logging over
 // whichever free UART a board declares via HAS_DEBUG_UART (Boards.h) -
@@ -25,7 +26,50 @@
 
 #if defined(DEBUG_UART_ENABLED) && HAS_DEBUG_UART == true
   #define DEBUG_UART_BEGIN() Serial0.begin(115200)
-  #define DEBUG_LOG(...) Serial0.printf(__VA_ARGS__)
+  #if MCU_VARIANT == MCU_ESP32
+    // Every DEBUG_LOG(...) call in the firmware used to be a plain
+    // Serial0.printf() - fine as long as only one FreeRTOS task ever
+    // called it at a time, which isn't true here (loopTask and
+    // LXStamper's own core-0 proof-of-work task both log through the RNS
+    // log callback, see Messenger.h). A first attempt at fixing this
+    // wrapped every call in a bounded (50ms) mutex - real improvement,
+    // but not sufficient: confirmed live that the actual Serial0.print()
+    // call *inside* that guard can itself hang indefinitely (same class
+    // of bug as kiss_stats_task's Serial.write() hang, RNode_Firmware.ino
+    // - a different UART peripheral, same symptom). When that happens,
+    // whoever holds the mutex at that moment never reaches
+    // xSemaphoreGive(), and loopTask itself can be that holder - exactly
+    // what kiss_stats_task was built to prevent for the *other* UART, and
+    // the mutex approach didn't actually prevent it here.
+    //
+    // Fixed the same way as kiss_stats_task: nobody calls Serial0.print()
+    // directly from their own task anymore. DEBUG_LOG() formats the line
+    // (cheap, can't hang) and drops it on a queue; a single dedicated
+    // low-priority task (debug_log_task, RNode_Firmware.ino) is the only
+    // thing that ever touches Serial0, so if *that* write hangs, only
+    // that one task blocks - loopTask (and everything else) keeps going
+    // regardless. The queue itself is what serializes access now, so no
+    // mutex is needed at all. Fail-open by design: xQueueSend with a 0
+    // wait just drops the line if the queue's full (e.g. the consumer
+    // task is currently stuck on a hung write) rather than ever blocking
+    // the caller - a missed debug line is harmless, an indefinite hang
+    // isn't.
+    #define DEBUG_LOG_MSG_LEN 200
+    #define DEBUG_LOG_QUEUE_DEPTH 16
+    QueueHandle_t g_debug_log_queue = NULL;
+    inline void debug_log_guarded(const char* fmt, ...) {
+      if (!g_debug_log_queue) return;
+      char buf[DEBUG_LOG_MSG_LEN];
+      va_list args;
+      va_start(args, fmt);
+      vsnprintf(buf, sizeof(buf), fmt, args);
+      va_end(args);
+      xQueueSend(g_debug_log_queue, buf, 0);
+    }
+    #define DEBUG_LOG(...) debug_log_guarded(__VA_ARGS__)
+  #else
+    #define DEBUG_LOG(...) Serial0.printf(__VA_ARGS__)
+  #endif
 #else
   #define DEBUG_UART_BEGIN()
   #define DEBUG_LOG(...)
@@ -156,6 +200,8 @@ void drot_conf_save(uint8_t val);
 void eeprom_update(int mapped_addr, uint8_t byte);
 void buzzer_encoder_tick_melody();
 void buzzer_encoder_click_melody();
+void buzzer_lxmf_rx_melody();
+void buzzer_wait_for_melody();
 
 #if HAS_GPS == true
   // Must come before Display.h below - the T114 branch of draw_disp_area()
@@ -186,6 +232,22 @@ void buzzer_encoder_click_melody();
 #if HAS_SENSORS == true
   #include "Sensors.h"
   void kiss_indicate_sensor();
+#endif
+
+#if HAS_URNS == true
+  // Forward-declared for Provisioning.h - defined later in this file
+  // (hard_reset/serial_write/escaped_serial_write) or in Utilities.h's
+  // #if HAS_ESPNOW block (kiss_select_interface), same pattern as
+  // kiss_indicate_sensor() above.
+  void hard_reset(void);
+  void serial_write(uint8_t byte);
+  void escaped_serial_write(uint8_t byte);
+  #if HAS_ESPNOW == true
+    void kiss_select_interface(uint8_t vport);
+  #endif
+  #include "URNS.h"
+  #include "Messenger.h"
+  #include "Provisioning.h"
 #endif
 
 #if HAS_BLUETOOTH == true || HAS_BLE == true
@@ -412,8 +474,29 @@ uint8_t boot_vector = 0x00;
       tone(buzzer_pin, notes[i]);
       delay(note_ms);
       noTone(buzzer_pin);
+      // noTone() only queues a TONE_END message for Tone.cpp's own async
+      // tone_task (ESP32 Arduino core, a separate higher-priority
+      // FreeRTOS task) to process - the actual ledcDetach() doesn't run
+      // synchronously here. Touching the pin ourselves before that
+      // finishes used to race it: pinMode() calling its own
+      // perimanClearPinBus() while the tone_task's detach was still in
+      // flight could both end up calling LEDC's detach callback on the
+      // same heap-allocated channel handle, double-freeing it (confirmed
+      // real crash: heap poisoning "head != NULL", multi_heap_free ->
+      // ledcDetachBus -> free()). A couple of ms here is enough for that
+      // higher-priority task to actually finish first, which is what
+      // makes the pinMode() below safe again.
+      delay(2);
+      // pinMode() (not just digitalWrite()) is required, not optional -
+      // once LEDC releases the pin, the peripheral manager no longer
+      // considers it a GPIO at all, and __digitalWrite() (esp32-hal-
+      // gpio.c) silently no-ops instead of driving the pin when that's
+      // true. Dropping this call for the log-spam workaround it looked
+      // like it was fixing didn't just mask a warning - it meant the LOW
+      // below was silently never actually landing.
+      pinMode(buzzer_pin, OUTPUT);
       digitalWrite(buzzer_pin, LOW); // see buzzer_init()
-      delay(10);
+      delay(8);
     }
   }
 
@@ -439,6 +522,14 @@ uint8_t boot_vector = 0x00;
   unsigned long buzzer_async_phase_started = 0;
   const uint16_t BUZZER_ASYNC_GAP_MS = 10;
 
+  // Set when noTone() has been called but the pin hasn't been reclaimed as
+  // GPIO yet - see buzzer_update()'s own use, and buzzer_play_notes()'s
+  // comment (same underlying race, blocking delay() there instead since
+  // that path isn't in a hot loop).
+  bool buzzer_async_pin_settling = false;
+  unsigned long buzzer_async_notone_at = 0;
+  const uint16_t BUZZER_ASYNC_SETTLE_MS = 2;
+
   void buzzer_start_async_melody(const uint16_t *notes, uint8_t count, uint16_t note_ms) {
     if (!sound_enabled) return;
     buzzer_async_notes = notes;
@@ -447,17 +538,32 @@ uint8_t boot_vector = 0x00;
     buzzer_async_index = 0;
     buzzer_async_in_gap = false;
     buzzer_async_playing = true;
+    buzzer_async_pin_settling = false;
     tone(buzzer_pin, notes[0]);
     buzzer_async_phase_started = millis();
   }
 
   void buzzer_update() {
-    if (!buzzer_async_playing) return;
     unsigned long now = millis();
+    // Non-blocking equivalent of buzzer_play_notes()'s delay(2) - the
+    // async tone_task (ESP32 Arduino core) needs a couple of ms after
+    // noTone() to actually finish detaching the pin from LEDC before
+    // pinMode()/digitalWrite() are safe to call (see that function's own
+    // comment for what races if this isn't respected). Checked before the
+    // early-return below so it still gets a chance to fire on the tick a
+    // melody's last note ends and buzzer_async_playing has already gone
+    // false.
+    if (buzzer_async_pin_settling && now - buzzer_async_notone_at >= BUZZER_ASYNC_SETTLE_MS) {
+      pinMode(buzzer_pin, OUTPUT);
+      digitalWrite(buzzer_pin, LOW);
+      buzzer_async_pin_settling = false;
+    }
+    if (!buzzer_async_playing) return;
     if (!buzzer_async_in_gap) {
       if (now - buzzer_async_phase_started >= buzzer_async_note_ms) {
         noTone(buzzer_pin);
-        digitalWrite(buzzer_pin, LOW); // see buzzer_init()
+        buzzer_async_pin_settling = true;
+        buzzer_async_notone_at = now;
         buzzer_async_in_gap = true;
         buzzer_async_phase_started = now;
       }
@@ -506,6 +612,42 @@ uint8_t boot_vector = 0x00;
     static const uint16_t notes[] = { 1200 };
     buzzer_start_async_melody(notes, 1, 12);
   }
+
+  // Three-note alert for an inbound Messenger LXMF message (Messenger.h) -
+  // deliberately distinct from every other cue here so it reads as "look
+  // at the screen now", matching the app's emergency-messenger purpose.
+  // Was 4 notes at 90ms (2 distinct tones, repeated once); shortened to 3
+  // *different* tones at ~55ms each (~185ms total, same ballpark as the
+  // old melody's first half) because the delivery proof this firmware
+  // auto-sends back on receipt starts transmitting - and blocks the main
+  // loop, freezing whatever note is mid-flight - shortly after this
+  // starts playing. With the old repeated-pair shape, a mid-melody split
+  // was audible as "the same two-note phrase, twice" rather than one
+  // interrupted chirp; three non-repeating notes can't produce that
+  // illusion even if a split still happens, and finishing sooner makes a
+  // split less likely to begin with.
+  void buzzer_lxmf_rx_melody() {
+    static const uint16_t notes[] = { 1568, 1976, 2093 };
+    buzzer_start_async_melody(notes, sizeof(notes)/sizeof(notes[0]), 55);
+  }
+
+  // Lets whichever melody the encoder/button confirm-click already
+  // started (menu_encoder_button()/menu_button_press(), Menu.h - fires
+  // unconditionally on every confirm, before the specific action itself
+  // runs) finish naturally before a caller goes on to do something
+  // blocking of its own (a LoRa TX, a flash read) - without this, the
+  // click gets audibly frozen mid-note for however long that blocking
+  // call takes, same "loop() not spinning means buzzer_update() never
+  // gets polled" mechanism as the TX-vs-buzzer issue this firmware has
+  // already run into elsewhere. Bounded and short - the confirm click is
+  // only a couple of ~12ms ticks (buzzer_encoder_click_melody()) - not
+  // the kind of open-ended hot-path delay() this codebase otherwise
+  // avoids (see feedback_no_blocking_delay_in_hot_paths memory); this
+  // only ever runs once, right as a deliberate user action is confirmed,
+  // not from a continuously-polled path.
+  void buzzer_wait_for_melody() {
+    while (buzzer_async_playing) { buzzer_update(); delay(1); }
+  }
 #else
   void buzzer_init() { }
   void buzzer_update() { }
@@ -516,6 +658,8 @@ uint8_t boot_vector = 0x00;
   void buzzer_rns_disconnect_melody() { }
   void buzzer_encoder_tick_melody() { }
   void buzzer_encoder_click_melody() { }
+  void buzzer_lxmf_rx_melody() { }
+  void buzzer_wait_for_melody() { }
 #endif
 
 // Centralises rns_link_state transitions so the RNS connect/disconnect chirp
@@ -1512,6 +1656,13 @@ void kiss_indicate_lt_alock() {
 	serial_write(FEND);
 }
 
+#if MCU_VARIANT == MCU_ESP32
+  // set_checkpoint (RNode_Firmware.ino) isn't declared yet at this point -
+  // Utilities.h is #include'd near the top of RNode_Firmware.ino, before
+  // that function is defined further down in the same translation unit.
+  extern void set_checkpoint_kissstats(const char* s);
+#endif
+
 void kiss_indicate_channel_stats() {
 	#if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
 		uint16_t ats = (uint16_t)(airtime*100*100);
@@ -1521,20 +1672,40 @@ void kiss_indicate_channel_stats() {
 		uint8_t  crs = (uint8_t)(current_rssi+rssi_offset);
 		uint8_t  nfl = (uint8_t)(noise_floor+rssi_offset);
 		uint8_t  ntf = 0xFF; if (interference_detected) { ntf = (uint8_t)(current_rssi+rssi_offset); }
-		serial_write(FEND);
-		serial_write(CMD_STAT_CHTM);
-		escaped_serial_write(ats>>8);
-		escaped_serial_write(ats);
-		escaped_serial_write(atl>>8);
-		escaped_serial_write(atl);
-		escaped_serial_write(cls>>8);
-		escaped_serial_write(cls);
-		escaped_serial_write(cll>>8);
-		escaped_serial_write(cll);
-		escaped_serial_write(crs);
-		escaped_serial_write(nfl);
-		escaped_serial_write(ntf);
-		serial_write(FEND);
+		// Byte-level checkpoint counter - this function's own checkpoint
+		// ("update_airtime:kiss_stats") kept showing up as the last
+		// position before a crash even with heap healthy, meaning
+		// something inside here genuinely hangs, not just "eventually
+		// fails" the way a bounded-timeout write would. Narrowing to
+		// exactly which of the 13 individual serial_write()/escaped_
+		// serial_write() calls is the one that never returns.
+		#if MCU_VARIANT == MCU_ESP32
+			// 48 matches CHECKPOINT_BUF_LEN (RNode_Firmware.ino) - can't
+			// reference that macro directly, it's #define'd later in the
+			// same translation unit than this file's own #include point.
+			#define KISS_STATS_CP(n) do { \
+				char cpbuf[48]; \
+				snprintf(cpbuf, sizeof(cpbuf), "kiss_stats:byte%d", n); \
+				set_checkpoint_kissstats(cpbuf); \
+			} while (0)
+		#else
+			#define KISS_STATS_CP(n)
+		#endif
+		KISS_STATS_CP(0);  serial_write(FEND);
+		KISS_STATS_CP(1);  serial_write(CMD_STAT_CHTM);
+		KISS_STATS_CP(2);  escaped_serial_write(ats>>8);
+		KISS_STATS_CP(3);  escaped_serial_write(ats);
+		KISS_STATS_CP(4);  escaped_serial_write(atl>>8);
+		KISS_STATS_CP(5);  escaped_serial_write(atl);
+		KISS_STATS_CP(6);  escaped_serial_write(cls>>8);
+		KISS_STATS_CP(7);  escaped_serial_write(cls);
+		KISS_STATS_CP(8);  escaped_serial_write(cll>>8);
+		KISS_STATS_CP(9);  escaped_serial_write(cll);
+		KISS_STATS_CP(10); escaped_serial_write(crs);
+		KISS_STATS_CP(11); escaped_serial_write(nfl);
+		KISS_STATS_CP(12); escaped_serial_write(ntf);
+		KISS_STATS_CP(13); serial_write(FEND);
+		#undef KISS_STATS_CP
 	#endif
 }
 

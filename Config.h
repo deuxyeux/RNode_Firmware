@@ -278,6 +278,17 @@
 	// KISS command buffer
 	uint8_t cmdbuf[CMD_L];
 
+	#if HAS_URNS == true
+	// CMD_PROVISION_REQ payload buffer (Provisioning.h) - separate from the
+	// small cmdbuf above since MessagePack-encoded provisioning requests
+	// (field reads/writes, schema queries) can run well past CMD_L's 64
+	// bytes. Sized to MTU since that's already the hard ceiling every KISS
+	// frame is capped to in serial_callback()'s outer "frame_len < MTU"
+	// gate - a bigger buffer here couldn't accept more than MTU bytes
+	// anyway.
+	uint8_t prov_req_buf[MTU];
+	#endif
+
 	// LoRa transmit buffer
 	uint8_t tbuf[MTU];
 

@@ -12,6 +12,36 @@
   #define ISR_VECT
 #endif
 
+// See RNode_Firmware.ino's own comment (top of file, near g_loop_checkpoint)
+// for the full story - temporary breadcrumb instrumentation for the
+// ongoing lockup investigation, since this file is the leading suspect.
+// Two separate breadcrumb trails (see RNode_Firmware.ino's own comment,
+// near g_checkpoint_snapshot, for why) - CHECKPOINT() for beginPacket()/
+// endPacket(), which only ever run in task context (called from
+// tx_queue_handler() via loopTask), and CHECKPOINT_ISR() for
+// handleDio0Rise(), which is true interrupt context (or the manual
+// "missed event" call from endPacket() - same code path either way).
+#if MCU_VARIANT == MCU_ESP32
+  extern void set_checkpoint(const char* s);
+  extern void set_checkpoint_isr(const char* s);
+  #define CHECKPOINT(s) set_checkpoint(s)
+  #define CHECKPOINT_ISR(s) set_checkpoint_isr(s)
+#else
+  #define CHECKPOINT(s)
+  #define CHECKPOINT_ISR(s)
+#endif
+
+// REVERTED - see feedback_buzzer_update_in_tx_wait_hang memory. Calling
+// Utilities.h's buzzer_update() from inside endPacket()'s busy-wait loop
+// (to keep the buzzer's note timing advancing during a blocking TX) was
+// immediately followed by the node hanging for extended periods - a
+// worse, different symptom (a real hang, not a quick crash+reboot or a
+// note simply stretching until TX ends) with strong enough time
+// correlation to treat as caused by this change. Reverted without fully
+// root-causing why tone()/noTone(), safe when called from loop() at their
+// normal cadence, misbehave when called from deep inside this specific
+// polling loop.
+
 #define OP_RF_FREQ_6X               0x86
 #define OP_SLEEP_6X                 0x84
 #define OP_STANDBY_6X               0x80
@@ -42,6 +72,10 @@
 #define OP_RX_TX_FALLBACK_MODE_6X   0x93
 #define OP_REGULATOR_MODE_6X        0x96
 #define OP_CALIBRATE_IMAGE_6X       0x98
+// Ported from microReticulum_Firmware's unmerged origin/rak4631 branch,
+// commit 1926f15 "Fix SX1262 init order, OCP, and regulator mode" - see
+// clearDeviceErrors()/begin()'s own comments below.
+#define OP_CLR_ERROR_6X             0x07
 
 #define MASK_CALIBRATE_ALL          0x7f
 
@@ -187,8 +221,13 @@ uint8_t ISR_VECT sx126x::singleTransfer(uint8_t opcode, uint16_t address, uint8_
 }
 
 void sx126x::rxAntEnable() {
+  // See begin()'s own comment - _rxen always drives a real external LNA
+  // enable, _txen is skipped on DIO2_AS_RF_SWITCH boards where it's
+  // bridged to DIO2 instead.
   if (_rxen != -1) { digitalWrite(_rxen, HIGH); }
-  if (_txen != -1) { digitalWrite(_txen, LOW); }
+  #if DIO2_AS_RF_SWITCH != true
+    if (_txen != -1) { digitalWrite(_txen, LOW); }
+  #endif
 }
 
 void sx126x::loraMode() {
@@ -322,6 +361,16 @@ void sx126x::setDCDCRegulator(void) {
   waitOnBusy();
 }
 
+// Ported from microReticulum_Firmware's unmerged origin/rak4631 branch,
+// commit 1926f15 "Fix SX1262 init order, OCP, and regulator mode" -
+// flushes XOSC_START_ERROR after the TCXO ramp (enableTCXO(), called
+// just before this in begin()) so a stale start-up error doesn't linger
+// into calibration.
+void sx126x::clearDeviceErrors() {
+  uint8_t buf[2] = {0x00, 0x00};
+  executeOpcode(OP_CLR_ERROR_6X, buf, 2);
+}
+
 void sx126x::calibrate(void) {
   // Put in STDBY_RC mode before calibration
   uint8_t mode_byte = MODE_STDBY_RC_6X;
@@ -351,22 +400,49 @@ int sx126x::begin(long frequency) {
   
   if (_busy != -1) { pinMode(_busy, INPUT); }
   if (!_preinit_done) { if (!preInit()) { return false; } }
+  // _rxen drives a real, separate external LNA-enable line on every board
+  // that has one - always configured/driven regardless of DIO2_AS_RF_SWITCH.
+  // _txen is different: on at least one MeshAdventurer-S3 PCB revision it's
+  // physically bridged directly to DIO2, so when DIO2_AS_RF_SWITCH is on,
+  // the SX1262 already drives that net itself - the MCU also configuring
+  // _txen as a GPIO output would be a real bus-contention hazard, not just
+  // redundant logic (see rxAntEnable()/beginPacket() for the same split).
+  // pin_txen (Boards.h) deliberately stays defined as a real pin number
+  // rather than -1 even on DIO2_AS_RF_SWITCH boards, purely so a board that
+  // wants to fall back to discrete TX-pin switching just needs
+  // DIO2_AS_RF_SWITCH flipped to false at compile time - no pin
+  // renumbering required.
   if (_rxen != -1) { pinMode(_rxen, OUTPUT); }
-  if (_txen != -1) { pinMode(_txen, OUTPUT); }
+  #if DIO2_AS_RF_SWITCH != true
+    if (_txen != -1) { pinMode(_txen, OUTPUT); }
+  #endif
 
   //TODO: if it works, make it optional
   //#ifdef SX1262_USE_DCDC_REGULATOR
     setDCDCRegulator();
   //#endif
 
-  calibrate();
-  calibrate_image(frequency);
+  // FIXED (ported from microReticulum_Firmware's unmerged origin/rak4631
+  // branch, commit 1926f15 "Fix SX1262 init order, OCP, and regulator
+  // mode"): enableTCXO() used to run *after* calibrate()/calibrate_image()
+  // below. On boards with no crystal - RAK4631, Heltec T114, both built
+  // by this fork - the TCXO is the only main clock, so calibrating before
+  // it's powered runs the PLL/image calibration against an absent or
+  // unstable clock, baking bad trim values into the chip on every single
+  // boot. Moved before calibration so it runs against a stable clock;
+  // clearDeviceErrors() flushes the XOSC_START_ERROR the TCXO ramp itself
+  // raises, so it doesn't linger into (or get misread as caused by)
+  // calibration.
   #if HAS_TCXO
     enableTCXO();
     //13.1.15 SetRxTxFallbackMode to STDBY_XOSC
     uint8_t fallback_mode = 0x30; // STDBY_XOSC after TX/RX
     executeOpcode(OP_RX_TX_FALLBACK_MODE_6X, &fallback_mode, 1);
+    clearDeviceErrors();
   #endif
+
+  calibrate();
+  calibrate_image(frequency);
   loraMode();
   standby();
 
@@ -460,7 +536,57 @@ int sx126x::begin(long frequency) {
 
 void sx126x::end() { sleep(); SPI.end(); _preinit_done = false; }
 
+// Any task-context caller doing raw SPI against the radio needs to
+// bracket it with these - not just the TX path. If a packet arrives (DIO0
+// RX interrupt) mid-transaction, the ISR (handleDio0Rise()) and the
+// caller both do SPI against the same radio, and both go through Arduino-
+// ESP32's SPI bus mutex, which is an unconditional
+// xSemaphoreTake(...,portMAX_DELAY) with no ISR-safety. Confirmed live
+// (loopTask blocked forever - the ESP32 task watchdog fires with the CPU
+// sitting idle, not spinning, exactly what a task stuck on that kind of
+// unbounded wait looks like) to originate from multiple call sites, not
+// just beginPacket()/endPacket() - update_modem_status() (RNode_Firmware.
+// ino)'s dcd()/currentRssi() calls do their own unprotected SPI too, and
+// that call site had its own portENTER_CRITICAL() wrapper already, which
+// turned out not to be sufficient - it only blocks a *new* interrupt from
+// firing during the critical section, not one already mid-flight (and
+// already holding the SPI mutex) when the section is entered. Plain
+// detachInterrupt()/attachInterrupt() (not portENTER_CRITICAL, which
+// would be wrong here anyway - it disables all interrupts globally for
+// its duration, fine for the brief dcd()/currentRssi() reads but
+// catastrophic if held across endPacket()'s TX-done poll, which can
+// legitimately run for the full LORA_MODEM_TIMEOUT_MS, 20 seconds)
+// removes the DIO0 ISR from the picture entirely for the window, so
+// there's nothing left to race.
+void sx126x::maskDio0() {
+  if (_dio0 != -1) { detachInterrupt(digitalPinToInterrupt(_dio0)); }
+}
+
+void sx126x::unmaskDio0() {
+  if (_dio0 != -1) {
+    attachInterrupt(digitalPinToInterrupt(_dio0), sx126x::onDio0Rise, RISING);
+    // A packet may have finished arriving while the interrupt was masked
+    // above - since it's edge-triggered (RISING), re-attaching after the
+    // edge already happened won't retrigger it on its own, so check for
+    // and service a still-pending event explicitly rather than silently
+    // dropping it.
+    if (digitalRead(_dio0) == HIGH) {
+      CHECKPOINT_ISR("radio:unmask:missed_event_handleDio0Rise");
+      handleDio0Rise();
+    }
+  }
+}
+
 int sx126x::beginPacket(int implicitHeader) {
+  // Masked for the entire TX transaction (this call through endPacket()),
+  // not just endPacket()'s done-poll - beginPacket(), the FIFO write in
+  // between, and endPacket() all do raw SPI. Every beginPacket() call in
+  // this codebase is unconditionally followed by an endPacket() (no early
+  // returns skip it), so this always gets unmasked there.
+  CHECKPOINT("radio:begin_packet:detach_dio0");
+  maskDio0();
+  CHECKPOINT("radio:begin_packet:after_detach");
+
   #if HAS_LORA_PA
     if (lora_pa_model == LORA_PA_GC1109) {
       // Enable PA CPS for transmit
@@ -483,47 +609,67 @@ int sx126x::beginPacket(int implicitHeader) {
   // actually its merged RFEN (LNA+PA enable) pin, which per EBYTE's own
   // reference design must stay high continuously whenever the radio is
   // active (RX *and* TX) - dropping it on TX blacks out the PA, not just
-  // the LNA. Its TXen equivalent needs to be bridged to DIO2 on the module
-  // itself (see DIO2_AS_RF_SWITCH below), not driven by the MCU, hence
-  // pin_txen=-1 for this board (Boards.h) so this digitalWrite is skipped.
-  if (_txen != -1) { digitalWrite(_txen, HIGH); } //Set TXen high when transmitting
+  // the LNA. Unrelated to DIO2_AS_RF_SWITCH/TXen below - this is a real,
+  // separate LNA-enable line on that board, same as _rxen is on every
+  // other board (see begin()'s own comment), just one that happens to need
+  // a different toggle policy than the generic "low during TX" rule.
+  if (_txen != -1) {
+    // TXen: skipped when DIO2_AS_RF_SWITCH is on (see begin()'s own
+    // comment for why - bridged to DIO2 on at least one MeshAdventurer-S3
+    // PCB revision, so driving it as a GPIO too would contend with DIO2).
+    #if DIO2_AS_RF_SWITCH != true
+      digitalWrite(_txen, HIGH); //Set TXen high when transmitting
+    #endif
+  }
   #if BOARD_MODEL != BOARD_MESHPOE_S3
     if (_rxen != -1) { digitalWrite(_rxen, LOW); } //Set RXen low at the same time
   #endif
 
+  CHECKPOINT("radio:begin_packet:standby");
   standby();
+  CHECKPOINT("radio:begin_packet:header_mode");
   if (implicitHeader) { implicitHeaderMode(); }
   else { explicitHeaderMode(); }
 
   _payloadLength = 0;
   _fifo_tx_addr_ptr = 0;
+  CHECKPOINT("radio:begin_packet:set_packet_params");
   setPacketParams(_preambleLength, _implicitHeaderMode, _payloadLength, _crcMode);
+  CHECKPOINT("radio:begin_packet:return");
 
   return 1;
 }
 
 int sx126x::endPacket() {
+  CHECKPOINT("radio:end_packet:set_packet_params");
   setPacketParams(_preambleLength, _implicitHeaderMode, _payloadLength, _crcMode);
 
   // RXen already dropped in beginPacket(), alongside TXen going high.
 
   uint8_t timeout[3] = {0}; // Put in single TX mode
+  CHECKPOINT("radio:end_packet:op_tx");
   executeOpcode(OP_TX_6X, timeout, 3);
+
+  // DIO0 already masked - see beginPacket()'s own comment. Re-attached
+  // (with missed-event handling) at the end of this function.
 
   uint8_t buf[2];
   buf[0] = 0x00;
   buf[1] = 0x00;
+  CHECKPOINT("radio:end_packet:first_irq_status_read");
   executeOpcodeRead(OP_GET_IRQ_STATUS_6X, buf, 2);
 
   // Wait for TX done
   bool timed_out = false;
   uint32_t w_timeout = millis()+LORA_MODEM_TIMEOUT_MS;
+  CHECKPOINT("radio:end_packet:tx_poll_loop");
   while ((millis() < w_timeout) && ((buf[1] & IRQ_TX_DONE_MASK_6X) == 0)) {
     buf[0] = 0x00;
     buf[1] = 0x00;
     executeOpcodeRead(OP_GET_IRQ_STATUS_6X, buf, 2);
     yield();
   }
+  CHECKPOINT("radio:end_packet:tx_poll_done");
 
   if (!(millis() < w_timeout)) { timed_out = true; }
 
@@ -531,7 +677,13 @@ int sx126x::endPacket() {
   uint8_t mask[2];
   mask[0] = 0x00;
   mask[1] = IRQ_TX_DONE_MASK_6X;
+  CHECKPOINT("radio:end_packet:clear_irq");
   executeOpcode(OP_CLEAR_IRQ_STATUS_6X, mask, 2);
+
+  CHECKPOINT("radio:end_packet:attach_dio0");
+  unmaskDio0();
+  CHECKPOINT("radio:end_packet:return");
+
   if (timed_out) { return 0; } else { return 1; }
 }
 
@@ -947,19 +1099,24 @@ void sx126x::dumpRegisters(Stream& out) {
 }
 
 void ISR_VECT sx126x::handleDio0Rise() {
+  CHECKPOINT_ISR("radio:isr:irq_status_read");
   uint8_t buf[2];
   buf[0] = 0x00;
   buf[1] = 0x00;
   executeOpcodeRead(OP_GET_IRQ_STATUS_6X, buf, 2);
+  CHECKPOINT_ISR("radio:isr:clear_irq");
   executeOpcode(OP_CLEAR_IRQ_STATUS_6X, buf, 2);
 
   if ((buf[1] & IRQ_PAYLOAD_CRC_ERROR_MASK_6X) == 0) {
     _packetIndex = 0;
     uint8_t rxbuf[2] = {0}; // Read packet length
+    CHECKPOINT_ISR("radio:isr:rx_buffer_status");
     executeOpcodeRead(OP_RX_BUFFER_STATUS_6X, rxbuf, 2);
     int packetLength = rxbuf[0];
+    CHECKPOINT_ISR("radio:isr:onReceive_callback");
     if (_onReceive) { _onReceive(packetLength); }
   }
+  CHECKPOINT_ISR("radio:isr:done");
 }
 
 void ISR_VECT sx126x::onDio0Rise() { sx126x_modem.handleDio0Rise(); }

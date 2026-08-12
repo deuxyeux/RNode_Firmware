@@ -300,8 +300,8 @@
       #define DIO2_AS_RF_SWITCH true
       #define HAS_RF_SWITCH_RX_TX false
       #define HAS_LORA_LNA true
-      #define LORA_LNA_GAIN  30
-      #define LORA_LNA_GVT   14
+      #define LORA_LNA_GAIN  17
+      #define LORA_LNA_GVT   12
 
       // RNode Settings menu (Menu.h), button-only navigation (tap = next,
       // double-tap = back, hold = select/open - see menu_button_press()).
@@ -359,13 +359,23 @@
 
     #elif BOARD_MODEL == BOARD_MESHADVENTURER_S3
       #define IS_ESP32S3 true
+      // See global-defaults block below for what this is - only defined
+      // true here since this is currently the sole HAS_URNS board.
+      #define HAS_URNS true
       #define HAS_DISPLAY true
       #define HAS_NP true
       #define HAS_BLUETOOTH false
       #define HAS_BLE true
       #define HAS_WIFI true
       #define HAS_ESPNOW true
-      #define HAS_CONSOLE true
+      // Disabled - the button-hold-triggered web console (Console.h) calls
+      // bt_stop() before starting on HAS_BLUETOOTH||HAS_BLE boards, and on
+      // this board (HAS_BLUETOOTH false, HAS_BLE true) that reliably
+      // crashes NimBLE on reinit (assert failed: ble_hs_init, ble_hs.c:1001)
+      // and reboots the device - which then corrupts the LittleFS partition
+      // URNS.h's onboard node keeps its identity in, silently discarding it.
+      // Not needed for this variant anyway.
+      #define HAS_CONSOLE false
       // Network OTA firmware updates (OTA.h) - see BUILD_NUMBER's own
       // comment (Boards.h global-defaults block) for why that fallback
       // isn't duplicated per board. WiFi-only here (no HAS_ETHERNET on this
@@ -379,8 +389,8 @@
       #define DIO2_AS_RF_SWITCH true
       #define HAS_RF_SWITCH_RX_TX false
       #define HAS_LORA_LNA true
-      #define LORA_LNA_GAIN  30
-      #define LORA_LNA_GVT   14
+      #define LORA_LNA_GAIN  17
+      #define LORA_LNA_GVT   12
       #define HAS_BUZZER true
       #define HAS_ENCODER true
       #define HAS_VSENSE true
@@ -470,8 +480,8 @@
       #define DIO2_AS_RF_SWITCH false
       #define HAS_RF_SWITCH_RX_TX true
       #define HAS_LORA_LNA true
-      #define LORA_LNA_GAIN  30
-      #define LORA_LNA_GVT   14
+      #define LORA_LNA_GAIN  17
+      #define LORA_LNA_GVT   12
       #define HAS_BUZZER true
       #define HAS_ENCODER true
 
@@ -601,8 +611,8 @@
       #define DIO2_AS_RF_SWITCH true
       #define HAS_RF_SWITCH_RX_TX false
       #define HAS_LORA_LNA true
-      #define LORA_LNA_GAIN  30
-      #define LORA_LNA_GVT   14
+      #define LORA_LNA_GAIN  17
+      #define LORA_LNA_GVT   12
 
       const int pin_cs = 10;
       const int pin_sclk = 13;
@@ -652,7 +662,17 @@
         #define HAS_TCXO true
         #define HAS_BUSY true
         #define DIO2_AS_RF_SWITCH true
-        #define OCP_TUNED 0x28
+        // FIXED (ported from microReticulum_Firmware's unmerged
+        // origin/rak4631 branch, commit 1926f15 "Fix SX1262 init order,
+        // OCP, and regulator mode"): 0x28 (80mA) trips the SX1262's own
+        // overcurrent limiter on every transmit - the chip draws ~118mA
+        // at +14dBm and ~158mA at +22dBm per the Semtech datasheet
+        // (confirmed against RadioLib and Meshtastic's SX126xInterface,
+        // which both use 0x38/140mA). Applied uniformly across every
+        // SX1262 board in this firmware, not just this one - see
+        // sx126x.cpp's enableTCXO()/begin() ordering fix, same commit,
+        // for the sibling issue this branch was investigating.
+        #define OCP_TUNED 0x38
         const int pin_busy = 32;
         const int pin_dio = 33;
         const int pin_tcxo_enable = -1;
@@ -761,7 +781,7 @@
       #define HAS_SLEEP true
       #define PIN_WAKEUP GPIO_NUM_0
       #define WAKEUP_LEVEL 0
-      #define OCP_TUNED 0x28
+      #define OCP_TUNED 0x38
 
       const int pin_btn_usr1 = 0;
 
@@ -803,7 +823,7 @@
       #define HAS_LORA_LNA true
       #define PIN_WAKEUP GPIO_NUM_0
       #define WAKEUP_LEVEL 0
-      #define OCP_TUNED 0x28
+      #define OCP_TUNED 0x38
       #define Vext GPIO_NUM_36
       #define LORA_PA_MODEL LORA_PA_UNKNOWN
 
@@ -1061,7 +1081,7 @@
       #define DIO2_AS_RF_SWITCH true
       #define HAS_BUSY true
       #define HAS_TCXO true
-      #define OCP_TUNED 0x28
+      #define OCP_TUNED 0x38
 
       #define HAS_DISPLAY true
       #define HAS_CONSOLE true
@@ -1114,7 +1134,7 @@
       #define DIO2_AS_RF_SWITCH true
       #define HAS_BUSY true
       #define HAS_TCXO true
-      #define OCP_TUNED 0x18
+      #define OCP_TUNED 0x38
 
       #define HAS_DISPLAY true
       #define HAS_CONSOLE true
@@ -1462,7 +1482,7 @@
 
       #define HAS_LORA_PA true
       #define HAS_LORA_LNA true
-      #define OCP_TUNED 0x28
+      #define OCP_TUNED 0x38
       #define LORA_PA_MODEL LORA_PA_KCT8103L
       #define LNA_GD_THRSHLD (-109)
       #define LNA_GD_LIMIT   (-89)
@@ -1765,6 +1785,17 @@
     #define HAS_GPS false
   #endif
 
+  // Whether an onboard microReticulum node (URNS.h) runs alongside the
+  // normal KISS/host modem path, giving the device its own Identity that
+  // can originate/receive Reticulum packets directly (sensor telemetry,
+  // GNSS wardrive beacons) over the same shared radio. Experimental,
+  // branch-only (microreticulum-onboard-node) - not wired into the
+  // arduino-cli/Makefile toolchain, only the platformio.ini env at the
+  // repo root. MeshAdventurer-S3 only for now.
+  #ifndef HAS_URNS
+    #define HAS_URNS false
+  #endif
+
   // Whether this board has a free UART broken out to a header/pins that
   // isn't used for anything else (Serial/KISS included) - see
   // BOARD_MESHPOE_S3's block above for the pattern (Serial0/GPIO43-44).
@@ -1815,10 +1846,16 @@
     #define DIO2_AS_RF_SWITCH false
   #endif
 
-  // Default OCP value if not specified
-  // in board configuration
+  // Default OCP value if not specified in board configuration - 0x38
+  // (140mA) matches the SX1262's real current draw (~118mA at +14dBm,
+  // ~158mA at +22dBm per the Semtech datasheet, confirmed against
+  // RadioLib/Meshtastic), not just this board's tuning - see the
+  // per-board #define OCP_TUNED sites for the full "ported from
+  // microReticulum_Firmware" explanation. sx127x-based boards never
+  // reference OCP_TUNED at all in this fork, so this default is
+  // effectively SX1262-only regardless of which boards fall through to it.
   #ifndef OCP_TUNED
-    #define OCP_TUNED 0x28
+    #define OCP_TUNED 0x38
   #endif
 
   #ifndef NP_M

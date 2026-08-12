@@ -155,6 +155,28 @@
   #define ESPNOW_LR_ENABLE_BYTE  0x01
   #define ESPNOW_LR_DISABLE_BYTE 0x00
 
+  // Master switch for the onboard microReticulum node (URNS.h) - same
+  // unclaimed 256-823 gap as ADDR_CONF_GNSS/ESPNOW_MODE/LR above, raw
+  // physical byte, not through eeprom_addr(). Deliberately unconditional,
+  // no MCU_VARIANT guard - HAS_URNS is ESP32-only (MeshAdventurer-S3 only)
+  // today, same reasoning as ESPNOW_MODE/LR.
+  #define ADDR_CONF_URNS 259
+  #define URNS_ENABLE_BYTE  0x01
+  #define URNS_DISABLE_BYTE 0x00
+
+  // Whether the onboard node participates in RNS transport (relays other
+  // nodes' traffic, stores/forwards paths, etc. - RNS::Reticulum::
+  // transport_enabled(), same flag ~/Development/microReticulum_Firmware
+  // sets unconditionally true as a provisioning default). Ours defaults
+  // OFF - this board is deliberately a leaf/client node (see
+  // project_microreticulum_onboard_node memory), so relaying is an
+  // explicit opt-in via RNode Settings > URNS > Transport Mode, not the
+  // out-of-the-box behavior. Same unclaimed 256-823 gap as ADDR_CONF_URNS
+  // above.
+  #define ADDR_CONF_URNS_TRANSPORT 260
+  #define URNS_TRANSPORT_ENABLE_BYTE  0x01
+  #define URNS_TRANSPORT_DISABLE_BYTE 0x00
+
   #define CONFIG_SIZE     256
   #define ADDR_CONF_SSID 0x00
   #define ADDR_CONF_PSK  0x21

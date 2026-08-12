@@ -45,7 +45,7 @@ const char *sensor_chip_name() {
   switch (sensor_model) {
     case SENSOR_MODEL_BME280: return "BME280";
     case SENSOR_MODEL_BMP280: return "BMP280";
-    default:                  return "NONE";
+    default:                  return "N/A";
   }
 }
 

@@ -9,3 +9,7 @@ Release/*.uf2
 Release/*.bin
 Console/build
 build/*
+.pio/
+.pio_build/
+compile_commands.json
+Release/*.version

@@ -159,6 +159,24 @@
   #define MENU_STATE_ESPNOW_LIST    26  // ESP-NOW submenu list (HAS_ESPNOW boards) - Enabled/Mode/Back
   #define MENU_STATE_ESPNOW_EDIT    27  // editing whichever of Enabled/Mode/LR was selected
   #define MENU_STATE_ESPNOW_LR_CONFIRM 28 // info row + ENABLE/CANCEL list, shown only when LR is being turned on - same pattern as MENU_STATE_FWUPD_CONFIRM
+  #define MENU_STATE_URNS_LIST      29  // URNS submenu list (HAS_URNS boards) - Enabled/Transport Mode/Path Table/Free/Back
+  #define MENU_STATE_URNS_EDIT      30  // editing whichever of Enabled/Transport Mode was selected
+  #define MENU_STATE_URNS_PATHS     31  // Path Table submenu (HAS_URNS boards) - read-only, no edit state
+  #define MENU_STATE_URNS_PATH_DETAIL 32 // one path entry's hash (enterable, opens MENU_STATE_URNS_PATH_HASH_VIEW) + expiry (HAS_URNS boards) - read-only
+  #define MENU_STATE_MSNGR_LIST     33 // Messenger app top screen (HAS_URNS boards) - Inbox/Bookmarks/Announces/Announce Node/Back
+  #define MENU_STATE_MSNGR_INBOX    34 // list of conversations (peers who've messaged us), recent-first
+  #define MENU_STATE_MSNGR_BOOKMARKS 35 // list of saved bookmark addresses
+  #define MENU_STATE_MSNGR_ANNOUNCES 36 // list of 1-hop LXMF announces heard on-air since boot
+  #define MENU_STATE_MSNGR_PEER     37 // unified per-peer screen - recent messages + Send Hi/Bye/SOS + Bookmark toggle
+  #define MENU_STATE_MSNGR_MSG_DETAIL 38 // one message's full text, opened from MENU_STATE_MSNGR_PEER
+  #define MENU_STATE_MSNGR_DELETE_CONFIRM 39 // DELETE/CANCEL list before a single message is actually deleted - same pattern as MENU_STATE_FWUPD_CONFIRM
+  #define MENU_STATE_MSNGR_CLEAR_CONFIRM  40 // CLEAR/CANCEL list before a whole conversation is actually cleared - same pattern as MENU_STATE_FWUPD_CONFIRM
+  #define MENU_STATE_MSNGR_TEXT_ENTRY     41 // on-screen keyboard for composing a free-text message, opened from MSNGR_PEER_ACTION_SEND_CUSTOM
+  #define MENU_STATE_MSNGR_DISCARD_CONFIRM 42 // DISCARD/CANCEL list before leaving MENU_STATE_MSNGR_TEXT_ENTRY with unsent text - same pattern as MENU_STATE_FWUPD_CONFIRM
+  #define MENU_STATE_MSNGR_PING_RESULT 43 // live status + BACK, opened from MSNGR_PEER_ACTION_PING (Messenger.h's messenger_ping_start())
+  #define MENU_STATE_URNS_PATH_HASH_VIEW 44 // full path hash, two plain lines, no captions - opened from MENU_STATE_URNS_PATH_DETAIL's Hash row, dismissed by any input
+  #define MENU_STATE_URNS_FREE_DETAIL 45 // urns partition usage broken down by data type (HAS_URNS boards), opened from MENU_STATE_URNS_LIST's Free row - read-only, computed once on entry (never in a draw path - see project_urns_partition_growth memory)
+  #define MENU_STATE_MSNGR_SEND_RESULT 46 // live status (Sending.../Delivered/No Confirmation) + BACK, opened from MENU_STATE_MSNGR_PEER's Send Hi/Bye/SOS and MENU_STATE_MSNGR_TEXT_ENTRY's Send key - same "live status + BACK" shape as MENU_STATE_MSNGR_PING_RESULT, auto-dismisses on Delivered/No Confirmation (msngr_send_result_process(), polled from loop()) unlike Ping's manual-only dismiss
 
   // The Hardware page used to only exist when there was board-level info
   // worth showing (battery/voltage sensing via HAS_PMU, or an ESP32-S3's
@@ -271,7 +289,30 @@
     #define MENU_NEXT_IDX_C MENU_NEXT_IDX_B
   #endif
 
-  #define MENU_ITEM_SAVE_EXIT MENU_NEXT_IDX_C
+  #if HAS_URNS == true
+    // Opens the Messenger app's top screen (MENU_STATE_MSNGR_LIST) - the
+    // same screen a long main-button hold jumps to directly
+    // (BUTTON_HOLD_TIER_MESSENGER below). Sits right above the URNS
+    // diagnostics submenu, since both depend on the same onboard node.
+    #define MENU_ITEM_MESSENGER MENU_NEXT_IDX_C
+    #define MENU_NEXT_IDX_C2 (MENU_NEXT_IDX_C + 1)
+  #else
+    #define MENU_NEXT_IDX_C2 MENU_NEXT_IDX_C
+  #endif
+
+  #if HAS_URNS == true
+    // Opens the URNS submenu (Enabled + Path Table, URNS_ITEM_*,
+    // MENU_STATE_URNS_LIST/EDIT) - same shape as ESP-NOW above. Enabled
+    // reboots on change (urns_init()/urns_radio_bringup() are boot-only,
+    // no live start/stop path) - staged here, actually written by
+    // menu_commit_and_exit(), same as ESP-NOW's own Enabled field.
+    #define MENU_ITEM_URNS MENU_NEXT_IDX_C2
+    #define MENU_NEXT_IDX_D (MENU_NEXT_IDX_C2 + 1)
+  #else
+    #define MENU_NEXT_IDX_D MENU_NEXT_IDX_C2
+  #endif
+
+  #define MENU_ITEM_SAVE_EXIT MENU_NEXT_IDX_D
   #define MENU_ITEM_COUNT     (MENU_ITEM_SAVE_EXIT + 1)
 
   #if HAS_WIFI == true
@@ -389,16 +430,8 @@
     // valid but Fix/Satellites still 0 confirms sentence parsing works
     // end-to-end and it's an antenna/sky-visibility issue, not firmware.
     #define GNSS_ITEM_TIME       7   // read-only
-    // Raw link-health counters (gnss_chars_processed()/checksum_passed()/
-    // failed(), GNSS.h) - genuine bring-up diagnostics for any HAS_GPS
-    // board, not a one-off debug hack: distinguishes "MCU never receives
-    // anything" (wrong pins/baud/power) from "receiving garbage" (baud
-    // mismatch) from "valid data, chip just isn't getting a fix" (antenna/
-    // hardware, not firmware).
-    #define GNSS_ITEM_NMEA_CHARS 8   // read-only
-    #define GNSS_ITEM_NMEA_CKSUM 9   // read-only - "passed/failed"
-    #define GNSS_ITEM_BACK       10
-    #define GNSS_ITEM_COUNT      11
+    #define GNSS_ITEM_BACK       8
+    #define GNSS_ITEM_COUNT      9
   #endif
 
   #if HAS_ESPNOW == true
@@ -414,6 +447,165 @@
     #define ESPNOW_ITEM_CHANNEL 3
     #define ESPNOW_ITEM_BACK    4
     #define ESPNOW_ITEM_COUNT   5
+  #endif
+
+  #if HAS_URNS == true
+    #define URNS_ITEM_ENABLED   0   // editable - staged only, no self-reboot until SAVE & EXIT
+    // Editable - RNS::Reticulum::transport_enabled() (urns_init(), URNS.h;
+    // ADDR_CONF_URNS_TRANSPORT, ROM.h). Same "staged, no self-reboot until
+    // SAVE & EXIT" shape as Enabled just above - both are boot-only
+    // settings with no live start/stop path. Defaults OFF: this board is
+    // deliberately a leaf/client node, not a relay - see
+    // project_microreticulum_onboard_node memory.
+    #define URNS_ITEM_TRANSPORT 1
+    // Opens MENU_STATE_URNS_PATHS - a read-only, scrollable dump of
+    // RNS::Transport's live path table (destination hash + hop count),
+    // same "own submenu, only BACK does anything" shape as SENSORS_LIST.
+    #define URNS_ITEM_PATHS     2
+    // Read-only info row - remaining free space on the "urns" LittleFS
+    // partition (identity/path-table persistence + the LXMF MessageStore,
+    // see MessageStore.h). LittleFS.usedBytes()/totalBytes() report for
+    // whatever partition LittleFS is currently mounted to, which is
+    // always "urns" on this board (urns_init(), URNS.h) since HAS_CONSOLE
+    // is false here and Console.h's separate SPIFFS instance is never
+    // begin()'d. Clicking it opens MENU_STATE_URNS_FREE_DETAIL - a
+    // breakdown of that usage by data type, same "own submenu, only BACK
+    // does anything" shape as URNS_PATH_DETAIL/SENSORS_LIST. Computed
+    // once on entry (urns_free_detail_refresh(), Menu.h) rather than in
+    // the draw path - see the row's own draw-code comment for why.
+    #define URNS_ITEM_FREE      3
+    #define URNS_ITEM_BACK      4
+    #define URNS_ITEM_COUNT     5
+
+    // MENU_STATE_URNS_FREE_DETAIL rows - each is one data-type bucket on
+    // the urns partition (see urns_free_detail_refresh()):
+    //   Identity - /urns/identity, the node's own key file
+    //   Announce - RNS::Identity's known-destinations cache
+    //     (URNS_KNOWN_STORE_PATH, URNS.h) - what lets Identity::recall()
+    //     find a peer's public key without a fresh announce every time
+    //   Paths    - RNS::Transport's persisted path table
+    //     (URNS_PATH_STORE_PATH)
+    //   Messages - the LXMF MessageStore (URNS_MESSAGES_PATH) - payloads,
+    //     conversation index, per-peer metadata
+    //   Other    - remainder (total_used minus the four buckets above) -
+    //     bookmarks.json, display_name, and LittleFS's own metadata
+    //     overhead, not worth walking individually
+    #define URNS_FREE_DETAIL_ITEM_IDENTITY 0
+    #define URNS_FREE_DETAIL_ITEM_ANNOUNCE 1
+    #define URNS_FREE_DETAIL_ITEM_PATHS    2
+    #define URNS_FREE_DETAIL_ITEM_MESSAGES 3
+    #define URNS_FREE_DETAIL_ITEM_OTHER    4
+    #define URNS_FREE_DETAIL_ITEM_BACK     5
+    #define URNS_FREE_DETAIL_ITEM_COUNT    6
+
+    // Path table rows are runtime-sized (RNS_PATH_TABLE_MAX is 100,
+    // Transport.cpp) - this caps how many get built into on-screen rows
+    // per draw call. draw_menu_list_disp() already scrolls to keep the
+    // cursor visible past MENU_LIST_VISIBLE_ROWS, so this only bounds
+    // stack usage / iteration cost, not what's reachable by scrolling.
+    #define MENU_URNS_PATH_MAX_ROWS 24
+
+    // MENU_STATE_URNS_PATH_DETAIL - opened by clicking a real path row
+    // (not BACK, not the "No Paths" placeholder) in MENU_STATE_URNS_PATHS.
+    // The list row only shows the destination hash's first 8 hex chars;
+    // Hash here shows a longer preview and is itself enterable, opening
+    // MENU_STATE_URNS_PATH_HASH_VIEW for the full 32 hex chars with
+    // nothing else on screen. Expiry shows time remaining until
+    // RNS::Persistence::DestinationEntry's own _expires timestamp.
+    #define URNS_PATH_DETAIL_ITEM_HASH   0
+    #define URNS_PATH_DETAIL_ITEM_EXPIRY 1
+    #define URNS_PATH_DETAIL_ITEM_BACK   2
+    #define URNS_PATH_DETAIL_ITEM_COUNT  3
+
+    // Messenger app (Messenger.h) - MENU_STATE_MSNGR_LIST's own item rows.
+    #define MSNGR_TOP_ITEM_INBOX         0
+    #define MSNGR_TOP_ITEM_BOOKMARKS     1
+    #define MSNGR_TOP_ITEM_ANNOUNCES     2
+    #define MSNGR_TOP_ITEM_ANNOUNCE_NODE 3 // sends our own LXMF delivery destination announce
+    #define MSNGR_TOP_ITEM_BACK          4
+    #define MSNGR_TOP_ITEM_COUNT         5
+
+    // "ANNOUNCED" has nothing to acknowledge (unlike "NOT READY", which
+    // stays up until dismissed - same success/error asymmetry as NTP sync's
+    // own popup, see NTP_SYNC_SUCCESS_POPUP_MS), so it auto-dismisses on
+    // its own after this long.
+    #define MSNGR_ANNOUNCE_POPUP_MS 10000
+
+    // Caps on-screen rows for the Inbox/Bookmarks/Announces lists, same
+    // "bound iteration/stack, scrolling still reaches everything past this"
+    // shape as MENU_URNS_PATH_MAX_ROWS above. Bookmarks/announces are
+    // already hard-capped at MSNGR_MAX_BOOKMARKS/MSNGR_MAX_ANNOUNCES
+    // (Messenger.h), well under this; Inbox (MessageStore conversations)
+    // can have up to LXMF::MAX_CONVERSATIONS (32), so this is the one that
+    // actually bites.
+    #define MENU_MSNGR_LIST_MAX_ROWS 16
+
+    // MENU_STATE_MSNGR_PEER - trailing action rows appended after however
+    // many message-snippet rows the current peer's thread contributes
+    // (messenger_peer_msg_row_count()). Indices are relative offsets added
+    // to that row count, not absolute - see draw/confirm handling.
+    #define MSNGR_PEER_ACTION_SEND_HI       0
+    #define MSNGR_PEER_ACTION_SEND_BYE      1
+    #define MSNGR_PEER_ACTION_SEND_SOS      2
+    #define MSNGR_PEER_ACTION_SEND_CUSTOM   3 // opens MENU_STATE_MSNGR_TEXT_ENTRY
+    #define MSNGR_PEER_ACTION_PING          4 // opens MENU_STATE_MSNGR_PING_RESULT
+    #define MSNGR_PEER_ACTION_BOOKMARK      5 // label switches Add/Remove Bookmark
+    #define MSNGR_PEER_ACTION_CLEAR         6 // opens MENU_STATE_MSNGR_CLEAR_CONFIRM
+    #define MSNGR_PEER_ACTION_BACK          7
+    #define MSNGR_PEER_ACTION_COUNT         8
+
+    // MENU_STATE_MSNGR_MSG_DETAIL - a message's content, word-wrapped
+    // across up to this many rows, plus one DELETE row (opens
+    // MENU_STATE_MSNGR_DELETE_CONFIRM) and one BACK row, same "split across
+    // several label rows" shape as URNS_PATH_DETAIL's two-row hash above.
+    #define MSNGR_MSG_DETAIL_MAX_LINES 7
+
+    // MENU_STATE_MSNGR_TEXT_ENTRY - on-screen keyboard for composing a
+    // free-text message, ported from meshtastic_firmware's
+    // graphics/VirtualKeyboard (a 4-row/11-col grid designed for real
+    // up/down/left/right navigation). RNode boards only ever expose a
+    // single rotate-or-tap + press axis (same as every other menu screen
+    // in this file), so instead of porting the 2D nav this flattens the
+    // grid into one linear cursor, row-major, wrapping key-to-key exactly
+    // like menu_clamp_cursor() already does for every list here - rotate/
+    // tap steps one key at a time, confirm_select() (encoder click /
+    // button long-press, same as everywhere else) presses whichever key
+    // is currently highlighted.
+    #define MSNGR_KB_ROWS 4
+    #define MSNGR_KB_COLS 11
+    #define MSNGR_KB_KEY_COUNT (MSNGR_KB_ROWS * MSNGR_KB_COLS)
+    // Matches MSNGR_MSG_DETAIL's own display cap (7 lines * 20 chars/line) -
+    // no point composing a message longer than what the detail screen can
+    // ever show back.
+    #define MSNGR_TEXT_ENTRY_MAX_LEN 140
+
+    // Sentinel chars double as both the grid's stored key and the dispatch
+    // tag msngr_kb_key_type() below switches on - same trick meshtastic's
+    // own LAYOUT uses for \b/\n/space. \x02/\x1b are added for Shift/Back,
+    // which meshtastic doesn't need (it uses long-press for case, and a
+    // real ESC key instead of a menu to back out of).
+    static const char MSNGR_KB_LAYOUT[MSNGR_KB_ROWS][MSNGR_KB_COLS] = {
+      {'1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '\b'},
+      {'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', '\n'},
+      {'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', '\x02', ' '},
+      {'z', 'x', 'c', 'v', 'b', 'n', 'm', '.', ',', '?', '\x1b'},
+    };
+
+    #define MSNGR_KB_CHAR      0
+    #define MSNGR_KB_BACKSPACE 1
+    #define MSNGR_KB_SEND      2
+    #define MSNGR_KB_SPACE     3
+    #define MSNGR_KB_SHIFT     4
+    #define MSNGR_KB_BACK      5
+
+    uint8_t msngr_kb_key_type(char ch) {
+      if (ch == '\b') return MSNGR_KB_BACKSPACE;
+      if (ch == '\n') return MSNGR_KB_SEND;
+      if (ch == ' ')  return MSNGR_KB_SPACE;
+      if (ch == '\x02') return MSNGR_KB_SHIFT;
+      if (ch == '\x1b') return MSNGR_KB_BACK;
+      return MSNGR_KB_CHAR;
+    }
   #endif
 
   #if HAS_SENSORS == true
@@ -754,6 +946,7 @@
     #define BUTTON_HOLD_TIER_SETTINGS   2
     #define BUTTON_HOLD_TIER_BT_PAIRING 3
     #define BUTTON_HOLD_TIER_CONSOLE    4
+    #define BUTTON_HOLD_TIER_MESSENGER  5
 
     // Mirrors button_event()'s own duration thresholds exactly - keep the
     // two in sync if those ever change.
@@ -778,6 +971,14 @@
       // HAS_MENU is implicitly true here - this whole file only compiles
       // when it is.
       if (held_ms > 3000) return BUTTON_HOLD_TIER_SETTINGS;
+      #if HAS_URNS == true
+        // A shorter, dedicated tier for the emergency Messenger app
+        // (Messenger.h) - sits below Settings' own 3s threshold so it
+        // doesn't steal that gesture, but above every board's existing
+        // "any duration up to 3s" short-click action (BLE toggle etc.,
+        // button_event()) so it's still a deliberate hold, not a tap.
+        if (held_ms > 1500) return BUTTON_HOLD_TIER_MESSENGER;
+      #endif
       return BUTTON_HOLD_TIER_NONE;
     }
 
@@ -786,6 +987,7 @@
       else if (tier == BUTTON_HOLD_TIER_SETTINGS)   return "SETTINGS";
       else if (tier == BUTTON_HOLD_TIER_BT_PAIRING) return "BT PAIRING";
       else if (tier == BUTTON_HOLD_TIER_CONSOLE)    return "CONSOLE";
+      else if (tier == BUTTON_HOLD_TIER_MESSENGER)  return "MESSENGER";
       return "";
     }
 
@@ -934,6 +1136,198 @@
     // same reason (this is the consequential choice, not the primary/
     // expected one).
     uint8_t espnow_lr_confirm_cursor = 2;
+  #endif
+  #if HAS_URNS == true
+    uint8_t urns_menu_cursor = 0;
+    bool staged_urns_enabled = true;
+    bool staged_urns_transport_enabled = false;
+    uint8_t urns_paths_menu_cursor = 0;
+    uint8_t urns_path_detail_cursor = 0;
+    uint8_t urns_free_detail_cursor = URNS_FREE_DETAIL_ITEM_BACK;
+    // Cached breakdown, computed once by urns_free_detail_refresh() when
+    // MENU_STATE_URNS_FREE_DETAIL is entered - see URNS_ITEM_FREE's own
+    // comment for why this can't be recomputed on every draw call.
+    size_t urns_free_detail_identity = 0;
+    size_t urns_free_detail_announce = 0;
+    size_t urns_free_detail_paths    = 0;
+    size_t urns_free_detail_messages = 0;
+    size_t urns_free_detail_other    = 0;
+
+    void urns_free_detail_refresh() {
+      size_t used_b = (size_t)LittleFS.usedBytes();
+      urns_free_detail_identity = urns_dir_size_recursive(URNS_IDENTITY_PATH);
+      urns_free_detail_announce = urns_dir_size_recursive(URNS_KNOWN_STORE_PATH);
+      urns_free_detail_paths    = urns_dir_size_recursive(URNS_PATH_STORE_PATH);
+      urns_free_detail_messages = urns_dir_size_recursive(URNS_MESSAGES_PATH);
+      size_t accounted = urns_free_detail_identity + urns_free_detail_announce
+                        + urns_free_detail_paths + urns_free_detail_messages;
+      urns_free_detail_other = (used_b > accounted) ? (used_b - accounted) : 0;
+    }
+    // Captured (full 16-byte hash, not the 8-hex-char truncated label) when
+    // a path row is clicked in MENU_STATE_URNS_PATHS - MENU_STATE_URNS_PATH_
+    // DETAIL looks this back up via new_path_table().get() on every draw
+    // call rather than caching the DestinationEntry itself, same "always
+    // show live state" convention as the list it was opened from.
+    RNS::Bytes urns_path_detail_hash;
+
+    // Row count for MENU_STATE_URNS_PATHS: path entries (capped at
+    // MENU_URNS_PATH_MAX_ROWS) plus one BACK row, or a single inert
+    // "No Paths" row plus BACK when the table's empty - same "always at
+    // least one selectable/inert row" shape as ESP-NOW LR's info row.
+    // Used identically by both the turn-handler (cursor clamping) and the
+    // draw function (row building), so it's one shared source of truth.
+    // RNS::Transport::path_table() (a plain std::map, Persistence::PathTable)
+    // reads its own local insert call commented out in microReticulum's
+    // Transport.cpp - real announce processing inserts into
+    // RNS::Transport::new_path_table() instead (a microStore-backed
+    // TypedStore, Persistence::NewPathTable), which is the one that's
+    // actually live. See project_microreticulum_onboard_node memory - this
+    // is what "Path Table reads 0" traced back to, alongside a second real
+    // bug in the same store's own init() (fixed in Transport.cpp, same
+    // transport_enabled-gate/relative-path pattern already fixed for
+    // Identity::_known_store).
+    uint8_t urns_path_display_row_count() {
+      size_t n = RNS::Transport::new_path_table().size();
+      if (n > MENU_URNS_PATH_MAX_ROWS) n = MENU_URNS_PATH_MAX_ROWS;
+      if (n == 0) return 2; // "No Paths" + BACK
+      return (uint8_t)(n + 1); // paths + BACK
+    }
+
+    // Messenger app (Messenger.h) - MENU_STATE_MSNGR_* cursor/context state.
+    uint8_t msngr_menu_cursor = 0;
+    uint8_t msngr_inbox_cursor = 0;
+    uint8_t msngr_bookmarks_cursor = 0;
+    uint8_t msngr_announces_cursor = 0;
+    uint8_t msngr_peer_cursor = 0;
+    uint8_t msngr_msg_detail_cursor = 0;
+
+    // Which peer MENU_STATE_MSNGR_PEER/MSG_DETAIL are currently showing -
+    // set whenever a row is confirmed in Inbox/Bookmarks/Announces (or a
+    // message row within MSNGR_PEER itself). Which of those three lists
+    // to return to on MSNGR_PEER's own BACK is tracked separately, since
+    // all three can lead here.
+    RNS::Bytes msngr_active_peer_hash;
+    uint8_t msngr_peer_return_state = MENU_STATE_MSNGR_LIST;
+    RNS::Bytes msngr_active_message_hash;
+    uint8_t msngr_last_send_result = 0xFF; // 0xFF = nothing sent this visit to MSNGR_PEER
+
+    // MENU_STATE_MSNGR_DELETE_CONFIRM / MENU_STATE_MSNGR_CLEAR_CONFIRM -
+    // same "default to CANCEL" pattern as fwupd_confirm_cursor above (0 =
+    // DELETE/CLEAR, 1 = CANCEL).
+    uint8_t msngr_delete_confirm_cursor = 1;
+    uint8_t msngr_clear_confirm_cursor = 1;
+
+    // MENU_STATE_MSNGR_TEXT_ENTRY - linear (row-major) cursor into
+    // MSNGR_KB_LAYOUT, a persistent Shift toggle (caps-lock style, not
+    // meshtastic's one-shot long-press), and the message being composed.
+    // Reset (cursor to 0, shift off, buffer cleared) every time the screen
+    // is opened fresh from MSNGR_PEER_ACTION_SEND_CUSTOM.
+    uint8_t msngr_kb_cursor = 0;
+    bool msngr_kb_shift_on = false;
+    char msngr_text_entry_buf[MSNGR_TEXT_ENTRY_MAX_LEN + 1] = {0};
+
+    // MENU_STATE_MSNGR_DISCARD_CONFIRM - same "default to CANCEL" pattern
+    // as msngr_delete_confirm_cursor/msngr_clear_confirm_cursor above
+    // (0 = DISCARD, 1 = CANCEL).
+    uint8_t msngr_discard_confirm_cursor = 1;
+
+    // Shared exit path for leaving MENU_STATE_MSNGR_TEXT_ENTRY without
+    // sending - both the on-grid BACK key (msngr_kb_key_type() dispatch,
+    // menu_confirm_select()) and the encoder's own long-press-to-leave
+    // (menu_encoder_button(), 3s threshold there instead of the usual
+    // 700ms) route through this, so an accidental hold and a deliberate
+    // BACK press protect a half-typed message the same way. Skips
+    // straight back to the peer screen if nothing's been typed; otherwise
+    // opens a DISCARD/CANCEL confirmation instead of silently losing it.
+    void menu_msngr_text_entry_leave() {
+      if (strlen(msngr_text_entry_buf) == 0) {
+        menu_state = MENU_STATE_MSNGR_PEER;
+      } else {
+        msngr_discard_confirm_cursor = 1; // default CANCEL
+        menu_state = MENU_STATE_MSNGR_DISCARD_CONFIRM;
+      }
+    }
+
+    // MENU_STATE_MSNGR_PING_RESULT - fixed 2-row screen (status + BACK),
+    // default cursor on BACK so a quick click dismisses either a result or
+    // an in-flight ping. Row 0 is read-only info, same "selecting it does
+    // nothing" shape as MSNGR_MSG_DETAIL's own content lines.
+    uint8_t msngr_ping_result_cursor = 1;
+
+    // MENU_STATE_MSNGR_SEND_RESULT - same fixed 2-row shape as
+    // MSNGR_PING_RESULT above, default cursor on BACK.
+    uint8_t msngr_send_result_cursor = 1;
+
+    // Polled from loop() (RNode_Firmware.ino, alongside messenger_send_
+    // process() itself) - auto-returns to MENU_STATE_MSNGR_PEER once a
+    // terminal Delivered/No Confirmation result has been shown for
+    // MSNGR_SEND_RESULT_POPUP_MS, no input needed. Lives here rather than
+    // in Messenger.h's messenger_send_process() because menu_state/
+    // MENU_STATE_MSNGR_PEER aren't visible yet at that file's point in the
+    // include chain (Menu.h is #include'd after it) - see messenger_send_
+    // process()'s own comment.
+    void msngr_send_result_process() {
+      if ((msngr_send_state == MSNGR_SEND_DELIVERED || msngr_send_state == MSNGR_SEND_TIMEOUT) &&
+          menu_state == MENU_STATE_MSNGR_SEND_RESULT &&
+          millis() - msngr_send_result_at_ms > MSNGR_SEND_RESULT_POPUP_MS) {
+        menu_state = MENU_STATE_MSNGR_PEER;
+        msngr_send_state = MSNGR_SEND_IDLE;
+      }
+    }
+
+    uint8_t msngr_inbox_row_count() {
+      size_t n = urns_message_store ? urns_message_store->get_conversation_count() : 0;
+      if (n > MENU_MSNGR_LIST_MAX_ROWS) n = MENU_MSNGR_LIST_MAX_ROWS;
+      if (n == 0) return 2; // "No Messages" + BACK
+      return (uint8_t)(n + 1);
+    }
+
+    uint8_t msngr_bookmarks_row_count() {
+      uint8_t n = msngr_bookmark_count;
+      if (n == 0) return 2; // "No Bookmarks" + BACK
+      return (uint8_t)(n + 1);
+    }
+
+    uint8_t msngr_announces_row_count() {
+      uint8_t n = 0;
+      for (uint8_t i = 0; i < MSNGR_MAX_ANNOUNCES; i++) if (msngr_announces[i].in_use) n++;
+      if (n == 0) return 2; // "No Announces" + BACK
+      return (uint8_t)(n + 1);
+    }
+
+    // How many message-snippet rows MENU_STATE_MSNGR_PEER shows -
+    // the shared source of truth both the rotate-clamp and draw/confirm
+    // handlers use, same convention as urns_path_display_row_count()
+    // above. Reads msngr_peer_cache_count (Messenger.h), populated once
+    // per screen-entry, rather than querying MessageStore directly here -
+    // see that cache's own comment for why (this used to read flash on
+    // every single call, including from the rotate handler on every
+    // encoder detent, which is what actually caused the flash-cache-vs-
+    // radio-ISR crash this was rewritten to fix).
+    uint8_t msngr_peer_msg_row_count() {
+      return msngr_peer_cache_count;
+    }
+
+    uint8_t msngr_peer_row_count() {
+      return (uint8_t)(msngr_peer_msg_row_count() + MSNGR_PEER_ACTION_COUNT);
+    }
+
+    // Chars-per-row for MENU_STATE_MSNGR_MSG_DETAIL's word-wrap - tuned for
+    // MENU_CONTENT_W/MENU_FONT's generic (non-T096/T114) 120px/Org_01
+    // combination, same font every HAS_URNS board uses today.
+    #define MSNGR_MSG_DETAIL_CHARS_PER_LINE 20
+
+    // Reads msngr_msg_detail_cache_content (Messenger.h) - same "cache
+    // once per screen-entry, don't re-read flash per call" reasoning as
+    // msngr_peer_msg_row_count() above.
+    uint8_t msngr_msg_detail_row_count() {
+      if (!msngr_msg_detail_cache_valid) return 2;
+      size_t len = msngr_msg_detail_cache_content.size();
+      size_t lines = (len + MSNGR_MSG_DETAIL_CHARS_PER_LINE - 1) / MSNGR_MSG_DETAIL_CHARS_PER_LINE;
+      if (lines == 0) lines = 1;
+      if (lines > MSNGR_MSG_DETAIL_MAX_LINES) lines = MSNGR_MSG_DETAIL_MAX_LINES;
+      return (uint8_t)(lines + 2); // content lines + DELETE + BACK
+    }
   #endif
   #if HAS_ENCODER == true
     bool staged_encoder_enabled = false;
@@ -1571,6 +1965,10 @@
       staged_espnow_mode_v2 = (espnow_mode == ESPNOW_MODE_V2);
       staged_espnow_lr_enabled = espnow_lr_enabled;
     #endif
+    #if HAS_URNS == true
+      staged_urns_enabled = urns_enabled;
+      staged_urns_transport_enabled = urns_transport_enabled;
+    #endif
     #if HAS_ENCODER == true
       staged_encoder_enabled = encoder_enabled;
     #endif
@@ -1637,6 +2035,14 @@
   // Single write site: only fields that actually changed get persisted,
   // and only once per menu session - never per detent.
   void menu_commit_and_exit() {
+    #if HAS_URNS == true
+      // Leaving the whole menu (not just backing out of the ping-result
+      // screen, which already calls this itself) would otherwise abandon
+      // a still-PENDING/HANDSHAKE link with nothing left to ever tear it
+      // down - see messenger_ping_process()'s own comment on why the
+      // vendored Link has no working timeout watchdog of its own.
+      messenger_ping_cancel();
+    #endif
     uint8_t live_timeout = display_blanking_enabled ? (uint8_t)(display_blanking_timeout / 1000) : 0;
     if (staged_display_timeout != live_timeout) {
       db_conf_save(staged_display_timeout);
@@ -1702,6 +2108,23 @@
           espnow_enabled = staged_espnow_enabled;
         }
         if (espnow_mode_changed || espnow_lr_changed || espnow_enable_changed) { hard_reset(); }
+      }
+    #endif
+    #if HAS_URNS == true
+      {
+        bool urns_enable_changed = (staged_urns_enabled != urns_enabled);
+        bool urns_transport_changed = (staged_urns_transport_enabled != urns_transport_enabled);
+        if (urns_enable_changed) {
+          // Raw physical byte, not through eeprom_addr() - same convention
+          // as ADDR_CONF_ESPNOW_MODE/LR above (ADDR_CONF_URNS, ROM.h).
+          eeprom_update(ADDR_CONF_URNS, staged_urns_enabled ? URNS_ENABLE_BYTE : URNS_DISABLE_BYTE);
+          urns_enabled = staged_urns_enabled;
+        }
+        if (urns_transport_changed) {
+          eeprom_update(ADDR_CONF_URNS_TRANSPORT, staged_urns_transport_enabled ? URNS_TRANSPORT_ENABLE_BYTE : URNS_TRANSPORT_DISABLE_BYTE);
+          urns_transport_enabled = staged_urns_transport_enabled;
+        }
+        if (urns_enable_changed || urns_transport_changed) { hard_reset(); }
       }
     #endif
     #if HAS_ENCODER == true
@@ -1878,6 +2301,13 @@
   // Speed) already wrote to EEPROM the moment they were confirmed, so
   // there's nothing to discard for those either way.
   void menu_close_without_saving() {
+    #if HAS_URNS == true
+      // Same "don't abandon an in-flight ping" reasoning as
+      // menu_commit_and_exit() above - this is the inactivity-timeout exit
+      // path, so it's the one most likely to actually catch a ping mid-
+      // flight (the user walked away instead of pressing BACK).
+      messenger_ping_cancel();
+    #endif
     // Brightness gets a live preview the instant it's confirmed (see
     // menu_confirm_select()), unlike every other field - undo that here so
     // an unsaved preview doesn't linger after the menu gives up on it.
@@ -2010,6 +2440,72 @@
         espnow_lr_confirm_cursor = menu_clamp_cursor(espnow_lr_confirm_cursor, dir, 3, wrap);
       }
     #endif
+    #if HAS_URNS == true
+      else if (menu_state == MENU_STATE_URNS_LIST) {
+        buzzer_encoder_tick_melody();
+        urns_menu_cursor = menu_clamp_cursor(urns_menu_cursor, dir, URNS_ITEM_COUNT, wrap);
+      } else if (menu_state == MENU_STATE_URNS_EDIT) {
+        buzzer_encoder_tick_melody();
+        // Cursor-dispatched toggle, same shape as ESP-NOW's MENU_STATE_
+        // ESPNOW_EDIT - urns_menu_cursor still points at whichever field
+        // was open when this state was entered.
+        if (urns_menu_cursor == URNS_ITEM_ENABLED) staged_urns_enabled = !staged_urns_enabled;
+        else                                       staged_urns_transport_enabled = !staged_urns_transport_enabled;
+      } else if (menu_state == MENU_STATE_URNS_PATHS) {
+        buzzer_encoder_tick_melody();
+        urns_paths_menu_cursor = menu_clamp_cursor(urns_paths_menu_cursor, dir, urns_path_display_row_count(), wrap);
+      } else if (menu_state == MENU_STATE_URNS_PATH_DETAIL) {
+        buzzer_encoder_tick_melody();
+        urns_path_detail_cursor = menu_clamp_cursor(urns_path_detail_cursor, dir, URNS_PATH_DETAIL_ITEM_COUNT, wrap);
+      } else if (menu_state == MENU_STATE_URNS_FREE_DETAIL) {
+        buzzer_encoder_tick_melody();
+        urns_free_detail_cursor = menu_clamp_cursor(urns_free_detail_cursor, dir, URNS_FREE_DETAIL_ITEM_COUNT, wrap);
+      } else if (menu_state == MENU_STATE_URNS_PATH_HASH_VIEW) {
+        // Nothing to move a cursor across - any rotation just dismisses
+        // it too, same as a confirm (see menu_confirm_select()).
+        buzzer_encoder_tick_melody();
+        menu_state = MENU_STATE_URNS_PATH_DETAIL;
+      } else if (menu_state == MENU_STATE_MSNGR_LIST) {
+        buzzer_encoder_tick_melody();
+        msngr_menu_cursor = menu_clamp_cursor(msngr_menu_cursor, dir, MSNGR_TOP_ITEM_COUNT, wrap);
+      } else if (menu_state == MENU_STATE_MSNGR_INBOX) {
+        buzzer_encoder_tick_melody();
+        msngr_inbox_cursor = menu_clamp_cursor(msngr_inbox_cursor, dir, msngr_inbox_row_count(), wrap);
+      } else if (menu_state == MENU_STATE_MSNGR_BOOKMARKS) {
+        buzzer_encoder_tick_melody();
+        msngr_bookmarks_cursor = menu_clamp_cursor(msngr_bookmarks_cursor, dir, msngr_bookmarks_row_count(), wrap);
+      } else if (menu_state == MENU_STATE_MSNGR_ANNOUNCES) {
+        buzzer_encoder_tick_melody();
+        msngr_announces_cursor = menu_clamp_cursor(msngr_announces_cursor, dir, msngr_announces_row_count(), wrap);
+      } else if (menu_state == MENU_STATE_MSNGR_PEER) {
+        buzzer_encoder_tick_melody();
+        msngr_peer_cursor = menu_clamp_cursor(msngr_peer_cursor, dir, msngr_peer_row_count(), wrap);
+      } else if (menu_state == MENU_STATE_MSNGR_MSG_DETAIL) {
+        buzzer_encoder_tick_melody();
+        msngr_msg_detail_cursor = menu_clamp_cursor(msngr_msg_detail_cursor, dir, msngr_msg_detail_row_count(), wrap);
+      } else if (menu_state == MENU_STATE_MSNGR_DELETE_CONFIRM) {
+        buzzer_encoder_tick_melody();
+        msngr_delete_confirm_cursor = menu_clamp_cursor(msngr_delete_confirm_cursor, dir, 2, wrap);
+      } else if (menu_state == MENU_STATE_MSNGR_CLEAR_CONFIRM) {
+        buzzer_encoder_tick_melody();
+        msngr_clear_confirm_cursor = menu_clamp_cursor(msngr_clear_confirm_cursor, dir, 2, wrap);
+      } else if (menu_state == MENU_STATE_MSNGR_TEXT_ENTRY) {
+        // Steps one key at a time through the flattened MSNGR_KB_LAYOUT
+        // grid, row-major, wrapping at both ends - see its own declaration
+        // for why this is a single linear cursor rather than real 2D nav.
+        buzzer_encoder_tick_melody();
+        msngr_kb_cursor = menu_clamp_cursor(msngr_kb_cursor, dir, MSNGR_KB_KEY_COUNT, wrap);
+      } else if (menu_state == MENU_STATE_MSNGR_DISCARD_CONFIRM) {
+        buzzer_encoder_tick_melody();
+        msngr_discard_confirm_cursor = menu_clamp_cursor(msngr_discard_confirm_cursor, dir, 2, wrap);
+      } else if (menu_state == MENU_STATE_MSNGR_PING_RESULT) {
+        buzzer_encoder_tick_melody();
+        msngr_ping_result_cursor = menu_clamp_cursor(msngr_ping_result_cursor, dir, 2, wrap);
+      } else if (menu_state == MENU_STATE_MSNGR_SEND_RESULT) {
+        buzzer_encoder_tick_melody();
+        msngr_send_result_cursor = menu_clamp_cursor(msngr_send_result_cursor, dir, 2, wrap);
+      }
+    #endif
     #if HAS_SENSORS == true
       else if (menu_state == MENU_STATE_SENSORS_LIST) {
         buzzer_encoder_tick_melody();
@@ -2065,6 +2561,46 @@
     #endif
   }
 
+  // Set whenever a rotation tick arrives while the encoder's push-button
+  // is physically held down and actually does something with it (see
+  // menu_encoder_chord_rotate() below) - declared unconditionally (not
+  // gated on HAS_URNS) so Encoder.h can reset it on every new press
+  // without needing its own #if. Consumed by menu_encoder_button() to
+  // suppress that press's eventual release action (a plain select or the
+  // long-press-leave path) once a chord's already been performed with it.
+  bool msngr_kb_chord_used = false;
+
+  // Called instead of menu_encoder_rotate() when a rotation tick arrives
+  // while the button is held (Encoder.h's encoder_process()). Only
+  // MENU_STATE_MSNGR_TEXT_ENTRY gives the chord any meaning - press-and-
+  // turn inserts the highlighted key's uppercase form without moving the
+  // cursor, the same "shifted" gesture meshtastic's own VirtualKeyboard
+  // gets from a long-press (not reusable here, since a long hold on this
+  // screen already means "leave the keyboard" - see menu_encoder_button()
+  // and menu_msngr_text_entry_leave()). Every other screen falls straight
+  // through to the normal rotate handling - so holding the button while
+  // turning anywhere else keeps behaving exactly as it already did.
+  void menu_encoder_chord_rotate(int8_t dir) {
+    #if HAS_URNS == true
+      if (menu_state == MENU_STATE_MSNGR_TEXT_ENTRY) {
+        msngr_kb_chord_used = true;
+        uint8_t kb_row = msngr_kb_cursor / MSNGR_KB_COLS;
+        uint8_t kb_col = msngr_kb_cursor % MSNGR_KB_COLS;
+        char key_ch = MSNGR_KB_LAYOUT[kb_row][kb_col];
+        if (msngr_kb_key_type(key_ch) == MSNGR_KB_CHAR) {
+          size_t text_len = strlen(msngr_text_entry_buf);
+          if (text_len < MSNGR_TEXT_ENTRY_MAX_LEN && key_ch >= 'a' && key_ch <= 'z') {
+            msngr_text_entry_buf[text_len] = key_ch - 'a' + 'A';
+            msngr_text_entry_buf[text_len + 1] = 0;
+            buzzer_encoder_tick_melody();
+          }
+        }
+        return;
+      }
+    #endif
+    menu_encoder_rotate(dir, false);
+  }
+
   void menu_confirm_select();
 
   // Shared by the encoder's long-press-from-closed and the main button's
@@ -2085,6 +2621,27 @@
     }
   }
 
+  #if HAS_URNS == true
+    // Reached from button_event()'s own dedicated BUTTON_HOLD_TIER_MESSENGER
+    // hold duration - lands directly on the Messenger app's top screen
+    // rather than the settings top list, same "no-op if console/firmware-
+    // update active or device not ready" guard as menu_open_from_closed()
+    // above. menu_stage_from_live() is still called (harmless - Messenger
+    // has no staged EEPROM fields of its own) so that if the user
+    // subsequently backs out into the rest of the settings menu, every
+    // other submenu's staged values are already primed same as any other
+    // menu entry point.
+    void messenger_open_from_closed() {
+      if (!console_active && !firmware_update_mode && device_init_done) {
+        buzzer_encoder_click_melody();
+        menu_stage_from_live();
+        menu_state = MENU_STATE_MSNGR_LIST;
+        msngr_menu_cursor = 0;
+        menu_last_activity_ms = millis();
+      }
+    }
+  #endif
+
   void menu_encoder_button(unsigned long duration) {
     menu_last_activity_ms = millis();
     display_unblank();
@@ -2101,7 +2658,35 @@
       }
     #endif
 
-    if (duration > 700) {
+    #if HAS_URNS == true
+      if (menu_state == MENU_STATE_MSNGR_TEXT_ENTRY && msngr_kb_chord_used) {
+        // The hold that's ending just chorded in one or more capital
+        // letters (menu_encoder_chord_rotate()) - this release is the
+        // tail end of that gesture, not a fresh click, so it shouldn't
+        // also select/insert or fall into the long-press-leave path below.
+        msngr_kb_chord_used = false;
+        return;
+      }
+    #endif
+
+    unsigned long long_press_threshold = 700;
+    #if HAS_URNS == true
+      // Chording needs the button held down while rotating, which can
+      // easily run past the normal 700ms threshold on a slow or deliberate
+      // turn - a much longer threshold here means an ordinary chord
+      // attempt doesn't also risk throwing away a half-typed message via
+      // the long-press-leave path below.
+      if (menu_state == MENU_STATE_MSNGR_TEXT_ENTRY) long_press_threshold = 3000;
+    #endif
+
+    if (duration > long_press_threshold) {
+      #if HAS_URNS == true
+        if (menu_state == MENU_STATE_MSNGR_TEXT_ENTRY) {
+          buzzer_encoder_click_melody();
+          menu_msngr_text_entry_leave();
+          return;
+        }
+      #endif
       // Long-press: identical from anywhere inside the menu - commit & exit.
       // Text entry no longer needs an exception here - SAVE is a wheel
       // position now (see WHEEL_QUICKSAVE_IDX), reached with the exact same
@@ -2157,6 +2742,16 @@
         else if (menu_cursor == MENU_ITEM_ESPNOW) {
           menu_state = MENU_STATE_ESPNOW_LIST;
           espnow_menu_cursor = 0;
+        }
+      #endif
+      #if HAS_URNS == true
+        else if (menu_cursor == MENU_ITEM_MESSENGER) {
+          menu_state = MENU_STATE_MSNGR_LIST;
+          msngr_menu_cursor = 0;
+        }
+        else if (menu_cursor == MENU_ITEM_URNS) {
+          menu_state = MENU_STATE_URNS_LIST;
+          urns_menu_cursor = 0;
         }
       #endif
       #if HAS_SENSORS == true
@@ -2332,7 +2927,7 @@
           menu_state = MENU_STATE_ETH_ADDR_EDIT;
         } else if (eth_menu_cursor == ETH_ITEM_CLEAR) {
           // Single-confirm action (same as SAVE & EXIT above), not a field -
-          // stays on ETH_LIST, which redraws showing "DHCP"/"NONE" for all
+          // stays on ETH_LIST, which redraws showing "DHCP"/"N/A" for all
           // four rows.
           uint8_t tmp[4];
           bool any_set = addr4_read(ADDR_CONF_ETH_IP, tmp) || addr4_read(ADDR_CONF_ETH_NM, tmp) ||
@@ -2552,6 +3147,322 @@
           // either way, nothing is written yet, same deferred-commit
           // reasoning above.
           menu_state = MENU_STATE_ESPNOW_LIST;
+        }
+      }
+    #endif
+    #if HAS_URNS == true
+      else if (menu_state == MENU_STATE_URNS_LIST) {
+        if (urns_menu_cursor == URNS_ITEM_BACK) {
+          menu_state = MENU_STATE_LIST;
+        } else if (urns_menu_cursor == URNS_ITEM_ENABLED || urns_menu_cursor == URNS_ITEM_TRANSPORT) {
+          menu_state = MENU_STATE_URNS_EDIT;
+        } else if (urns_menu_cursor == URNS_ITEM_PATHS) {
+          menu_state = MENU_STATE_URNS_PATHS;
+          urns_paths_menu_cursor = 0;
+        } else if (urns_menu_cursor == URNS_ITEM_FREE) {
+          urns_free_detail_refresh();
+          urns_free_detail_cursor = URNS_FREE_DETAIL_ITEM_BACK;
+          menu_state = MENU_STATE_URNS_FREE_DETAIL;
+        }
+      } else if (menu_state == MENU_STATE_URNS_FREE_DETAIL) {
+        // All rows read-only info except BACK - same shape as
+        // MENU_STATE_URNS_PATH_DETAIL's Expiry/Hash split above.
+        if (urns_free_detail_cursor == URNS_FREE_DETAIL_ITEM_BACK) {
+          menu_state = MENU_STATE_URNS_LIST;
+        }
+      } else if (menu_state == MENU_STATE_URNS_EDIT) {
+        // Same deferred-commit reasoning as ESP-NOW's own Enabled field -
+        // urns_init()/urns_radio_bringup() are boot-only, so nothing is
+        // written here, only staged.
+        menu_state = MENU_STATE_URNS_LIST;
+      } else if (menu_state == MENU_STATE_URNS_PATHS) {
+        uint8_t row_count = urns_path_display_row_count();
+        if (urns_paths_menu_cursor == row_count - 1) {
+          menu_state = MENU_STATE_URNS_LIST;
+        } else if (RNS::Transport::new_path_table().size() > 0) {
+          // A real path row, not the inert "No Paths" placeholder (which
+          // only ever sits at index 0 when the table's empty - cursor==0
+          // falls through to here doing nothing in that case since this
+          // whole branch is skipped when size()==0). The list only shows
+          // the first 8 hex chars, so re-walk the store up to the
+          // selected index to capture its full hash - MENU_STATE_URNS_
+          // PATH_DETAIL looks it back up by key on every draw call rather
+          // than being handed a copy here.
+          RNS::Persistence::NewPathTable& pt = const_cast<RNS::Persistence::NewPathTable&>(RNS::Transport::new_path_table());
+          uint8_t i = 0;
+          for (auto it = pt.begin(); it != pt.end(); ++it, i++) {
+            if (i == urns_paths_menu_cursor) {
+              urns_path_detail_hash = (*it).key;
+              break;
+            }
+          }
+          urns_path_detail_cursor = 0;
+          menu_state = MENU_STATE_URNS_PATH_DETAIL;
+        }
+      } else if (menu_state == MENU_STATE_URNS_PATH_DETAIL) {
+        // Expiry is read-only info - only Hash (opens the full-hash view)
+        // and BACK do anything.
+        if (urns_path_detail_cursor == URNS_PATH_DETAIL_ITEM_BACK) {
+          menu_state = MENU_STATE_URNS_PATHS;
+        } else if (urns_path_detail_cursor == URNS_PATH_DETAIL_ITEM_HASH) {
+          menu_state = MENU_STATE_URNS_PATH_HASH_VIEW;
+        }
+      } else if (menu_state == MENU_STATE_URNS_PATH_HASH_VIEW) {
+        // A single fixed view, nothing to select - any confirm just
+        // dismisses it, same as MENU_STATE_STATUS_POPUP.
+        menu_state = MENU_STATE_URNS_PATH_DETAIL;
+      } else if (menu_state == MENU_STATE_MSNGR_LIST) {
+        if (msngr_menu_cursor == MSNGR_TOP_ITEM_BACK) {
+          menu_state = MENU_STATE_LIST;
+        } else if (msngr_menu_cursor == MSNGR_TOP_ITEM_INBOX) {
+          menu_state = MENU_STATE_MSNGR_INBOX;
+          msngr_inbox_cursor = 0;
+        } else if (msngr_menu_cursor == MSNGR_TOP_ITEM_BOOKMARKS) {
+          menu_state = MENU_STATE_MSNGR_BOOKMARKS;
+          msngr_bookmarks_cursor = 0;
+        } else if (msngr_menu_cursor == MSNGR_TOP_ITEM_ANNOUNCES) {
+          menu_state = MENU_STATE_MSNGR_ANNOUNCES;
+          msngr_announces_cursor = 0;
+        } else if (msngr_menu_cursor == MSNGR_TOP_ITEM_ANNOUNCE_NODE) {
+          // Announces our own LXMF delivery destination (display name +
+          // stamp cost via LXMRouter::announce()'s own app_data build),
+          // not urns_destination's separate Phase 1 test destination -
+          // see urns_announce()'s own two-part comment (URNS.h) for why
+          // those are kept distinct.
+          if (urns_ready && urns_lxmf_router) {
+            urns_lxmf_router->announce();
+            menu_open_popup("ANNOUNCED", MENU_STATE_MSNGR_LIST);
+            menu_popup_auto_dismiss_at = millis() + MSNGR_ANNOUNCE_POPUP_MS;
+          } else {
+            menu_open_popup("NOT READY", MENU_STATE_MSNGR_LIST);
+          }
+        }
+      } else if (menu_state == MENU_STATE_MSNGR_INBOX) {
+        uint8_t row_count = msngr_inbox_row_count();
+        if (msngr_inbox_cursor == row_count - 1) {
+          menu_state = MENU_STATE_MSNGR_LIST;
+        } else if (urns_message_store && urns_message_store->get_conversation_count() > 0) {
+          std::vector<RNS::Bytes> convs = urns_message_store->get_conversations();
+          if (msngr_inbox_cursor < convs.size()) {
+            msngr_active_peer_hash = convs[msngr_inbox_cursor];
+            urns_message_store->mark_conversation_read(msngr_active_peer_hash);
+            msngr_peer_return_state = MENU_STATE_MSNGR_INBOX;
+            msngr_peer_cursor = 0;
+            msngr_last_send_result = 0xFF;
+            messenger_refresh_peer_cache(msngr_active_peer_hash);
+            menu_state = MENU_STATE_MSNGR_PEER;
+          }
+        }
+      } else if (menu_state == MENU_STATE_MSNGR_BOOKMARKS) {
+        uint8_t row_count = msngr_bookmarks_row_count();
+        if (msngr_bookmarks_cursor == row_count - 1) {
+          menu_state = MENU_STATE_MSNGR_LIST;
+        } else if (msngr_bookmark_count > 0) {
+          uint8_t vis = 0;
+          for (uint8_t i = 0; i < MSNGR_MAX_BOOKMARKS; i++) {
+            if (!msngr_bookmarks[i].in_use) continue;
+            if (vis == msngr_bookmarks_cursor) {
+              msngr_active_peer_hash = RNS::Bytes(msngr_bookmarks[i].hash, LXMF::PEER_HASH_SIZE);
+              msngr_peer_return_state = MENU_STATE_MSNGR_BOOKMARKS;
+              msngr_peer_cursor = 0;
+              msngr_last_send_result = 0xFF;
+              messenger_refresh_peer_cache(msngr_active_peer_hash);
+              menu_state = MENU_STATE_MSNGR_PEER;
+              break;
+            }
+            vis++;
+          }
+        }
+      } else if (menu_state == MENU_STATE_MSNGR_ANNOUNCES) {
+        uint8_t row_count = msngr_announces_row_count();
+        if (msngr_announces_cursor == row_count - 1) {
+          menu_state = MENU_STATE_MSNGR_LIST;
+        } else {
+          uint8_t vis = 0;
+          for (uint8_t i = 0; i < MSNGR_MAX_ANNOUNCES; i++) {
+            if (!msngr_announces[i].in_use) continue;
+            if (vis == msngr_announces_cursor) {
+              msngr_active_peer_hash = RNS::Bytes(msngr_announces[i].hash, LXMF::PEER_HASH_SIZE);
+              msngr_peer_return_state = MENU_STATE_MSNGR_ANNOUNCES;
+              msngr_peer_cursor = 0;
+              msngr_last_send_result = 0xFF;
+              messenger_refresh_peer_cache(msngr_active_peer_hash);
+              menu_state = MENU_STATE_MSNGR_PEER;
+              break;
+            }
+            vis++;
+          }
+        }
+      } else if (menu_state == MENU_STATE_MSNGR_PEER) {
+        uint8_t msg_rows = msngr_peer_msg_row_count();
+        if (msngr_peer_cursor < msg_rows) {
+          // Reads msngr_peer_cache (Messenger.h), not MessageStore
+          // directly - see that cache's own comment for why.
+          RNS::Bytes msg_hash(msngr_peer_cache[msngr_peer_cursor].hash, LXMF::MESSAGE_HASH_SIZE);
+          messenger_refresh_msg_detail_cache(msg_hash);
+          msngr_active_message_hash = msg_hash;
+          msngr_msg_detail_cursor = 0;
+          menu_state = MENU_STATE_MSNGR_MSG_DETAIL;
+        } else {
+          uint8_t action = msngr_peer_cursor - msg_rows;
+          if (action == MSNGR_PEER_ACTION_BACK) {
+            menu_state = msngr_peer_return_state;
+          } else if (action == MSNGR_PEER_ACTION_BOOKMARK) {
+            if (messenger_bookmark_find(msngr_active_peer_hash) >= 0) {
+              messenger_bookmark_remove(msngr_active_peer_hash);
+            } else {
+              messenger_bookmark_add(msngr_active_peer_hash, messenger_peer_display_name(msngr_active_peer_hash));
+            }
+          } else if (action == MSNGR_PEER_ACTION_CLEAR) {
+            msngr_clear_confirm_cursor = 1; // default CANCEL - see its own declaration
+            menu_state = MENU_STATE_MSNGR_CLEAR_CONFIRM;
+          } else if (action == MSNGR_PEER_ACTION_PING) {
+            messenger_ping_start(msngr_active_peer_hash);
+            msngr_ping_result_cursor = 1; // default BACK - see its own declaration
+            menu_state = MENU_STATE_MSNGR_PING_RESULT;
+          } else if (action == MSNGR_PEER_ACTION_SEND_CUSTOM) {
+            msngr_kb_cursor = 0;
+            msngr_kb_shift_on = false;
+            msngr_text_entry_buf[0] = 0;
+            menu_state = MENU_STATE_MSNGR_TEXT_ENTRY;
+          } else if (action == MSNGR_PEER_ACTION_SEND_HI || action == MSNGR_PEER_ACTION_SEND_BYE || action == MSNGR_PEER_ACTION_SEND_SOS) {
+            // MSNGR_PEER_ACTION_SEND_HI/BYE/SOS are 0/1/2, same order as
+            // MSNGR_PRESETS (Messenger.h) - index straight through.
+            msngr_last_send_result = messenger_send_lxmf(msngr_active_peer_hash, MSNGR_PRESETS[action]);
+            if (msngr_last_send_result == URNS_LXMF_SEND_OK) {
+              // A new (outgoing) message was just saved - refresh the
+              // cache so it shows up without having to leave and re-enter
+              // this screen. Actual delivery is still pending at this
+              // point (messenger_send_lxmf() only enqueued/transmitted it) -
+              // MENU_STATE_MSNGR_SEND_RESULT's own draw code reads
+              // msngr_send_state live and shows "Sending..." until
+              // messenger_on_delivered()/messenger_send_process() (Messenger.h)
+              // resolve it to Delivered or No Confirmation.
+              messenger_refresh_peer_cache(msngr_active_peer_hash);
+              msngr_send_result_cursor = 1; // default BACK - see its own declaration
+              menu_state = MENU_STATE_MSNGR_SEND_RESULT;
+            } else {
+              menu_open_popup(urns_lxmf_send_result_text(msngr_last_send_result), MENU_STATE_MSNGR_PEER);
+            }
+          }
+        }
+      } else if (menu_state == MENU_STATE_MSNGR_MSG_DETAIL) {
+        // Content lines are read-only - only the trailing DELETE/BACK rows
+        // do anything.
+        uint8_t row_count = msngr_msg_detail_row_count();
+        if (msngr_msg_detail_cursor == row_count - 1) {
+          menu_state = MENU_STATE_MSNGR_PEER;
+        } else if (msngr_msg_detail_cursor == row_count - 2) {
+          msngr_delete_confirm_cursor = 1; // default CANCEL - see its own declaration
+          menu_state = MENU_STATE_MSNGR_DELETE_CONFIRM;
+        }
+      } else if (menu_state == MENU_STATE_MSNGR_DELETE_CONFIRM) {
+        if (msngr_delete_confirm_cursor == 0) { // DELETE
+          // Masked for the whole delete+cache-refresh sequence - both do
+          // LittleFS I/O (MessageStore/microStore), and a real crash was
+          // confirmed live where the DIO0 RX interrupt fired mid-flash-op
+          // (ESP-IDF suspends the scheduler and disables interrupts/cache
+          // briefly during any flash read/write) and tried to do SPI from
+          // true ISR context, hitting FreeRTOS's own hard assert on taking
+          // a blocking semaphore with the scheduler suspended - not a hang,
+          // an immediate abort(). See feedback_dio0_isr_does_spi_work /
+          // feedback_sx126x_tx_rx_spi_mutex_race memory - same root class
+          // of hazard (handleDio0Rise() does blocking SPI in real ISR
+          // context), a new trigger (flash I/O, not just TX).
+          LoRa->maskDio0();
+          if (urns_message_store) urns_message_store->delete_message(msngr_active_message_hash);
+          // The message list this peer's screen shows just shrank by one -
+          // refresh the cache and land the cursor back at the top of it
+          // rather than risking a stale index into a now-shorter list.
+          messenger_refresh_peer_cache(msngr_active_peer_hash);
+          LoRa->unmaskDio0();
+          msngr_peer_cursor = 0;
+          menu_open_popup("DELETED", MENU_STATE_MSNGR_PEER);
+        } else { // CANCEL
+          menu_state = MENU_STATE_MSNGR_MSG_DETAIL;
+        }
+      } else if (menu_state == MENU_STATE_MSNGR_CLEAR_CONFIRM) {
+        if (msngr_clear_confirm_cursor == 0) { // CLEAR
+          // See the DELETE branch's own comment just above - same hazard,
+          // and the one actually confirmed to crash live (delete_conversation
+          // does much more LittleFS I/O per call than delete_message, so it
+          // was far more likely to hit the race).
+          LoRa->maskDio0();
+          if (urns_message_store) urns_message_store->delete_conversation(msngr_active_peer_hash);
+          messenger_refresh_peer_cache(msngr_active_peer_hash);
+          LoRa->unmaskDio0();
+          msngr_peer_cursor = 0;
+          menu_open_popup("CLEARED", MENU_STATE_MSNGR_PEER);
+        } else { // CANCEL
+          menu_state = MENU_STATE_MSNGR_PEER;
+        }
+      } else if (menu_state == MENU_STATE_MSNGR_TEXT_ENTRY) {
+        // "Presses" whichever key msngr_kb_cursor is currently highlighting -
+        // insert/space/backspace mutate msngr_text_entry_buf in place (always
+        // appending/trimming at the end, no mid-string edit point, same
+        // simplification meshtastic's own VirtualKeyboard makes). Shift is a
+        // persistent toggle here rather than meshtastic's one-shot long-press,
+        // since confirm_select() is already spoken for as "press this key".
+        uint8_t kb_row = msngr_kb_cursor / MSNGR_KB_COLS;
+        uint8_t kb_col = msngr_kb_cursor % MSNGR_KB_COLS;
+        char key_ch = MSNGR_KB_LAYOUT[kb_row][kb_col];
+        uint8_t key_type = msngr_kb_key_type(key_ch);
+        size_t text_len = strlen(msngr_text_entry_buf);
+
+        if (key_type == MSNGR_KB_CHAR || key_type == MSNGR_KB_SPACE) {
+          if (text_len < MSNGR_TEXT_ENTRY_MAX_LEN) {
+            char c = (key_type == MSNGR_KB_SPACE) ? ' ' : key_ch;
+            if (msngr_kb_shift_on && c >= 'a' && c <= 'z') c = c - 'a' + 'A';
+            msngr_text_entry_buf[text_len] = c;
+            msngr_text_entry_buf[text_len + 1] = 0;
+          }
+        } else if (key_type == MSNGR_KB_BACKSPACE) {
+          if (text_len > 0) msngr_text_entry_buf[text_len - 1] = 0;
+        } else if (key_type == MSNGR_KB_SHIFT) {
+          msngr_kb_shift_on = !msngr_kb_shift_on;
+        } else if (key_type == MSNGR_KB_BACK) {
+          menu_msngr_text_entry_leave();
+        } else if (key_type == MSNGR_KB_SEND) {
+          if (text_len > 0) {
+            // Only actually clear the composed text on a confirmed send -
+            // a failure leaves it in place so the user can retry instead
+            // of having to retype it. Same MENU_STATE_MSNGR_SEND_RESULT
+            // hand-off as the preset Send: Hi/Bye/SOS actions - see that
+            // branch's own comment.
+            msngr_last_send_result = messenger_send_lxmf(msngr_active_peer_hash, msngr_text_entry_buf);
+            if (msngr_last_send_result == URNS_LXMF_SEND_OK) {
+              messenger_refresh_peer_cache(msngr_active_peer_hash);
+              msngr_text_entry_buf[0] = 0;
+              msngr_send_result_cursor = 1; // default BACK - see its own declaration
+              menu_state = MENU_STATE_MSNGR_SEND_RESULT;
+            } else {
+              menu_open_popup(urns_lxmf_send_result_text(msngr_last_send_result), MENU_STATE_MSNGR_TEXT_ENTRY);
+            }
+          }
+        }
+      } else if (menu_state == MENU_STATE_MSNGR_DISCARD_CONFIRM) {
+        if (msngr_discard_confirm_cursor == 0) { // DISCARD
+          msngr_text_entry_buf[0] = 0;
+          menu_state = MENU_STATE_MSNGR_PEER;
+        } else { // CANCEL - resume typing, buffer/cursor/shift untouched
+          menu_state = MENU_STATE_MSNGR_TEXT_ENTRY;
+        }
+      } else if (menu_state == MENU_STATE_MSNGR_PING_RESULT) {
+        // Row 0 (status) is read-only - only BACK does anything, and it
+        // doubles as Cancel while a ping's still in flight.
+        if (msngr_ping_result_cursor == 1) {
+          messenger_ping_cancel();
+          menu_state = MENU_STATE_MSNGR_PEER;
+        }
+      } else if (menu_state == MENU_STATE_MSNGR_SEND_RESULT) {
+        // Row 0 (status) is read-only - only BACK does anything. Unlike
+        // Ping there's nothing to tear down (the packet's already gone
+        // out over the air either way) - just stop watching for this
+        // send's proof so a late-arriving one doesn't affect whatever the
+        // screen shows next time it's opened for a different send.
+        if (msngr_send_result_cursor == 1) {
+          msngr_send_state = MSNGR_SEND_IDLE;
+          menu_state = MENU_STATE_MSNGR_PEER;
         }
       }
     #endif
@@ -2822,6 +3733,165 @@
       MENU_GFX.print("tap:next hold:open");
     #endif
   }
+
+  #if HAS_URNS == true
+    // MENU_STATE_URNS_PATH_HASH_VIEW - the full 32-char path hash, two
+    // plain centered lines, no field captions and no BACK row (any input
+    // just dismisses it, see menu_confirm_select()/menu_encoder_rotate())
+    // - the point of this screen is to be nothing but the hash, easy to
+    // read at a glance instead of squeezed into a label+value list row.
+    void draw_menu_urns_path_hash_disp() {
+      MENU_GFX.setFont(MENU_FONT);
+      MENU_GFX.setTextSize(1);
+      MENU_GFX.setTextColor(SSD1306_WHITE);
+
+      std::string full_hex = urns_path_detail_hash.toHex();
+      std::string line1 = full_hex.size() >= 16 ? full_hex.substr(0, 16) : full_hex;
+      std::string line2 = full_hex.size() > 16 ? full_hex.substr(16, 16) : "";
+
+      int16_t x1, y1; uint16_t w1, h1, w2, h2;
+      MENU_GFX.getTextBounds(line1.c_str(), 0, 0, &x1, &y1, &w1, &h1);
+      MENU_GFX.getTextBounds(line2.c_str(), 0, 0, &x1, &y1, &w2, &h2);
+
+      int16_t cx = MENU_GFX.width() / 2;
+      int16_t cy = MENU_GFX.height() / 2;
+      MENU_GFX.setCursor(cx - (int16_t)w1 / 2, cy - 6);
+      MENU_GFX.print(line1.c_str());
+      MENU_GFX.setCursor(cx - (int16_t)w2 / 2, cy + 8);
+      MENU_GFX.print(line2.c_str());
+    }
+
+    // MENU_STATE_MSNGR_TEXT_ENTRY's on-screen keyboard - a real grid (not
+    // a draw_menu_list_disp() vertical list), so it gets its own draw
+    // function, same as draw_menu_memory_disp() above. Header/footer reuse
+    // draw_menu_list_disp()'s own fixed offsets so this screen still looks
+    // like part of the same menu; only the middle content (input preview +
+    // key grid) is bespoke. Column/row math is a first pass tuned by eye
+    // for the generic 128x64/Org_01 combination (same font every HAS_URNS
+    // board uses today, see MSNGR_MSG_DETAIL_CHARS_PER_LINE's own comment)
+    // - expect this to need live on-hardware nudging like every other
+    // pixel-level layout in this file.
+    void draw_menu_msngr_keyboard_disp() {
+      MENU_GFX.setFont(MENU_FONT);
+      MENU_GFX.setTextSize(1);
+      MENU_GFX.setTextColor(SSD1306_WHITE);
+      MENU_GFX.setCursor(6, 8);
+      MENU_GFX.print("Send Message");
+      MENU_GFX.drawFastHLine(4, 12, MENU_CONTENT_W, SSD1306_WHITE);
+
+      // Input preview - tail of what's typed so far (leading "..." if it
+      // doesn't all fit), with a caret after the last character. Same
+      // "show the tail, not the head" idea as MSNGR_MSG_DETAIL's word-wrap,
+      // just single-line since there's no vertical room to spare here.
+      const int16_t box_x = 4, box_y = 13, box_w = MENU_CONTENT_W, box_h = 9;
+      MENU_GFX.drawRect(box_x, box_y, box_w, box_h, SSD1306_WHITE);
+      {
+        std::string shown(msngr_text_entry_buf);
+        size_t full_len = shown.size();
+        int16_t x1, y1; uint16_t tw, th;
+        MENU_GFX.getTextBounds(shown.c_str(), 0, 0, &x1, &y1, &tw, &th);
+        const int16_t max_w = box_w - 6;
+        while (tw > (uint16_t)max_w && !shown.empty()) {
+          shown.erase(0, 1);
+          std::string probe = "..." + shown;
+          MENU_GFX.getTextBounds(probe.c_str(), 0, 0, &x1, &y1, &tw, &th);
+        }
+        if (shown.size() < full_len) shown = "..." + shown;
+        MENU_GFX.getTextBounds(shown.c_str(), 0, 0, &x1, &y1, &tw, &th);
+        MENU_GFX.setCursor(box_x + 2, box_y + 6); // nudged up 1px, per user request on real hardware
+        MENU_GFX.print(shown.c_str());
+        int16_t caret_x = box_x + 2 + (int16_t)tw + 1;
+        if (caret_x < box_x + box_w - 1) MENU_GFX.drawFastVLine(caret_x, box_y + 1, box_h - 2, SSD1306_WHITE);
+      }
+
+      // Keyboard grid - reserve extra width for the last (action) column,
+      // sized to the widest action label ("SPACE"), split the rest evenly
+      // across the other 10 columns, and hand any leftover pixels to the
+      // first few columns - same approach meshtastic's own
+      // VirtualKeyboard::draw() uses, just against Adafruit_GFX instead of
+      // OLEDDisplay.
+      const int16_t grid_top = 23;
+      const int16_t grid_bottom = MENU_LIST_FOOTER_HLINE_Y;
+      const uint8_t row_h = (uint8_t)((grid_bottom - grid_top) / MSNGR_KB_ROWS);
+
+      int16_t x1, y1; uint16_t last_col_w, th;
+      MENU_GFX.getTextBounds("SPACE", 0, 0, &x1, &y1, &last_col_w, &th);
+      last_col_w += 4;
+      const uint8_t left_cols = MSNGR_KB_COLS - 1;
+      int16_t usable_w = MENU_CONTENT_W - last_col_w;
+      if (usable_w < left_cols) usable_w = left_cols;
+      int16_t cell_w = usable_w / left_cols;
+      int16_t leftover = usable_w - cell_w * left_cols;
+
+      int16_t col_x[MSNGR_KB_COLS], col_w[MSNGR_KB_COLS];
+      int16_t running_x = box_x;
+      for (uint8_t c = 0; c < left_cols; c++) {
+        int16_t cw = cell_w + (c < leftover ? 1 : 0);
+        col_x[c] = running_x;
+        col_w[c] = cw;
+        running_x += cw;
+      }
+      col_x[left_cols] = running_x;
+      col_w[left_cols] = last_col_w;
+
+      const uint8_t cur_row = msngr_kb_cursor / MSNGR_KB_COLS;
+      const uint8_t cur_col = msngr_kb_cursor % MSNGR_KB_COLS;
+
+      for (uint8_t r = 0; r < MSNGR_KB_ROWS; r++) {
+        for (uint8_t c = 0; c < MSNGR_KB_COLS; c++) {
+          char ch = MSNGR_KB_LAYOUT[r][c];
+          uint8_t type = msngr_kb_key_type(ch);
+          int16_t kx = col_x[c];
+          int16_t ky = grid_top + r * row_h;
+          int16_t kw = col_w[c];
+
+          char label_buf[2];
+          const char *label;
+          switch (type) {
+            case MSNGR_KB_BACKSPACE: label = "DEL"; break;
+            case MSNGR_KB_SEND:      label = "SEND"; break;
+            case MSNGR_KB_SPACE:     label = "SPACE"; break;
+            case MSNGR_KB_BACK:      label = "BACK"; break;
+            case MSNGR_KB_SHIFT:     label = msngr_kb_shift_on ? "^^" : "^"; break;
+            default: {
+              char c2 = ch;
+              if (msngr_kb_shift_on && c2 >= 'a' && c2 <= 'z') c2 = c2 - 'a' + 'A';
+              label_buf[0] = c2; label_buf[1] = 0;
+              label = label_buf;
+              break;
+            }
+          }
+
+          bool selected = (r == cur_row && c == cur_col);
+          if (selected) {
+            MENU_GFX.fillRect(kx, ky, kw, row_h - 1, SSD1306_WHITE);
+            MENU_GFX.setTextColor(SSD1306_BLACK);
+          } else {
+            MENU_GFX.setTextColor(SSD1306_WHITE);
+          }
+
+          uint16_t lw, lh;
+          int16_t lx1, ly1;
+          MENU_GFX.getTextBounds(label, 0, 0, &lx1, &ly1, &lw, &lh);
+          int16_t label_x = kx + (kw - (int16_t)lw + 1) / 2;
+          if (label_x < kx) label_x = kx;
+          int16_t label_y = ky + row_h - 3; // nudged up 1px, per user request on real hardware - fits the key boxes better
+          MENU_GFX.setCursor(label_x, label_y);
+          MENU_GFX.print(label);
+        }
+      }
+
+      MENU_GFX.setTextColor(SSD1306_WHITE);
+      MENU_GFX.drawFastHLine(4, MENU_LIST_FOOTER_HLINE_Y, MENU_CONTENT_W, SSD1306_WHITE);
+      MENU_GFX.setCursor(6, MENU_LIST_FOOTER_TEXT_Y);
+      #if HAS_ENCODER == true
+        if (encoder_enabled) MENU_GFX.print("turn:move press:open");
+        else                 MENU_GFX.print("tap:next hold:open");
+      #else
+        MENU_GFX.print("tap:next hold:open");
+      #endif
+    }
+  #endif
 
   #if MCU_VARIANT == MCU_ESP32
     // Compact horizontal bar meter, sized to fit inside one MENU_LIST_ROW_H
@@ -3282,6 +4352,14 @@
         sprintf(valbufs[MENU_ITEM_FW_UPDATE], ">"); // opens a submenu, not an inline value
       #endif
 
+      #if HAS_URNS == true
+        labels[MENU_ITEM_MESSENGER] = "Messenger";
+        sprintf(valbufs[MENU_ITEM_MESSENGER], ">"); // opens a submenu, not an inline value
+
+        labels[MENU_ITEM_URNS] = "URNS";
+        sprintf(valbufs[MENU_ITEM_URNS], ">"); // opens a submenu, not an inline value
+      #endif
+
       labels[MENU_ITEM_SAVE_EXIT] = "SAVE & EXIT";
       valbufs[MENU_ITEM_SAVE_EXIT][0] = 0;
 
@@ -3347,15 +4425,15 @@
         if (staged_wifi_nm[0]==0 && staged_wifi_nm[1]==0 && staged_wifi_nm[2]==0 && staged_wifi_nm[3]==0) sprintf(valbufs[WIFI_ITEM_NETMASK], "DHCP");
         else format_addr_octets(staged_wifi_nm, valbufs[WIFI_ITEM_NETMASK]);
 
-        // "NONE" rather than "DHCP" when unset - unlike IP/Netmask, there's
+        // "N/A" rather than "DHCP" when unset - unlike IP/Netmask, there's
         // no DHCP client running once IP/NM are static, so an unset
-        // Gateway/DNS just means "none configured," not "provided by DHCP."
+        // Gateway/DNS just means "not configured," not "provided by DHCP."
         labels[WIFI_ITEM_GATEWAY] = "Gateway";
-        if (staged_wifi_gw[0]==0 && staged_wifi_gw[1]==0 && staged_wifi_gw[2]==0 && staged_wifi_gw[3]==0) sprintf(valbufs[WIFI_ITEM_GATEWAY], "NONE");
+        if (staged_wifi_gw[0]==0 && staged_wifi_gw[1]==0 && staged_wifi_gw[2]==0 && staged_wifi_gw[3]==0) sprintf(valbufs[WIFI_ITEM_GATEWAY], "N/A");
         else format_addr_octets(staged_wifi_gw, valbufs[WIFI_ITEM_GATEWAY]);
 
         labels[WIFI_ITEM_DNS] = "DNS";
-        if (staged_wifi_dns[0]==0 && staged_wifi_dns[1]==0 && staged_wifi_dns[2]==0 && staged_wifi_dns[3]==0) sprintf(valbufs[WIFI_ITEM_DNS], "NONE");
+        if (staged_wifi_dns[0]==0 && staged_wifi_dns[1]==0 && staged_wifi_dns[2]==0 && staged_wifi_dns[3]==0) sprintf(valbufs[WIFI_ITEM_DNS], "N/A");
         else format_addr_octets(staged_wifi_dns, valbufs[WIFI_ITEM_DNS]);
 
         labels[WIFI_ITEM_CLEAR] = "Clear Static";
@@ -3427,21 +4505,21 @@
           else                                             sprintf(valbufs[ETH_ITEM_NETMASK], "DHCP");
         }
 
-        // "NONE" rather than "DHCP" when unset - unlike IP/Netmask, there's
+        // "N/A" rather than "DHCP" when unset - unlike IP/Netmask, there's
         // no DHCP client running once IP/NM are static, so an unset
-        // Gateway/DNS just means "none configured," not "provided by DHCP."
+        // Gateway/DNS just means "not configured," not "provided by DHCP."
         labels[ETH_ITEM_GATEWAY] = "Gateway";
         {
           uint8_t gw_octets[4];
           if (addr4_read(ADDR_CONF_ETH_GW, gw_octets)) format_addr_octets(gw_octets, valbufs[ETH_ITEM_GATEWAY]);
-          else                                             sprintf(valbufs[ETH_ITEM_GATEWAY], "NONE");
+          else                                             sprintf(valbufs[ETH_ITEM_GATEWAY], "N/A");
         }
 
         labels[ETH_ITEM_DNS] = "DNS";
         {
           uint8_t dns_octets[4];
           if (addr4_read(ADDR_CONF_ETH_DNS, dns_octets)) format_addr_octets(dns_octets, valbufs[ETH_ITEM_DNS]);
-          else                                              sprintf(valbufs[ETH_ITEM_DNS], "NONE");
+          else                                              sprintf(valbufs[ETH_ITEM_DNS], "N/A");
         }
 
         labels[ETH_ITEM_CLEAR] = "Clear Static";
@@ -3528,7 +4606,7 @@
         sprintf(valbufs[GNSS_ITEM_MODULE], "%s", gnss_module_status_text());
 
         labels[GNSS_ITEM_FIX] = "Fix";
-        sprintf(valbufs[GNSS_ITEM_FIX], gnss_has_fix() ? "YES" : "NO");
+        sprintf(valbufs[GNSS_ITEM_FIX], gnss_has_fix() ? "YES" : "No Fix");
 
         labels[GNSS_ITEM_SATELLITES] = "Satellites";
         sprintf(valbufs[GNSS_ITEM_SATELLITES], "%u", (unsigned)gnss_satellite_count());
@@ -3548,12 +4626,6 @@
         labels[GNSS_ITEM_TIME] = "GNSS Time";
         if (gnss_time_valid()) sprintf(valbufs[GNSS_ITEM_TIME], "%02u:%02u:%02u", gnss_time_hour(), gnss_time_minute(), gnss_time_second());
         else                    sprintf(valbufs[GNSS_ITEM_TIME], "N/A");
-
-        labels[GNSS_ITEM_NMEA_CHARS] = "NMEA Chars";
-        sprintf(valbufs[GNSS_ITEM_NMEA_CHARS], "%lu", (unsigned long)gnss_chars_processed());
-
-        labels[GNSS_ITEM_NMEA_CKSUM] = "NMEA OK/Err";
-        sprintf(valbufs[GNSS_ITEM_NMEA_CKSUM], "%lu/%lu", (unsigned long)gnss_checksum_passed(), (unsigned long)gnss_checksum_failed());
 
         labels[GNSS_ITEM_BACK] = "BACK";
         valbufs[GNSS_ITEM_BACK][0] = 0;
@@ -3605,6 +4677,425 @@
         valbufs[1][0] = 0;
         valbufs[2][0] = 0;
         draw_menu_list_disp("ENABLE LR MODE?", labels, valbufs, 3, espnow_lr_confirm_cursor);
+      }
+    #endif
+    #if HAS_URNS == true
+      else if (menu_state == MENU_STATE_URNS_LIST) {
+        const char *labels[URNS_ITEM_COUNT];
+        char valbufs[URNS_ITEM_COUNT][24];
+
+        labels[URNS_ITEM_ENABLED] = "Enabled";
+        sprintf(valbufs[URNS_ITEM_ENABLED], staged_urns_enabled ? "ON" : "OFF");
+
+        labels[URNS_ITEM_TRANSPORT] = "Transport Mode";
+        sprintf(valbufs[URNS_ITEM_TRANSPORT], staged_urns_transport_enabled ? "ON" : "OFF");
+
+        labels[URNS_ITEM_PATHS] = "Path Table";
+        sprintf(valbufs[URNS_ITEM_PATHS], "%u", (unsigned)RNS::Transport::new_path_table().size());
+
+        labels[URNS_ITEM_FREE] = "Free";
+        {
+          // update_display() (RNode_Firmware.ino) calls draw_settings_menu_disp()
+          // on every loop() iteration while this screen is open, not just on
+          // change - esp_littlefs_info() (what usedBytes()/totalBytes() both
+          // call, each independently) walks the whole filesystem's block
+          // allocation to compute this, which was cheap on the original
+          // 512KB urns partition but not on the grown ~6.9MB one (see
+          // project_urns_partition_growth memory) - calling it unthrottled
+          // stalled loopTask long enough to trip the task watchdog, the
+          // same failure mode as the LittleFS-full crash earlier. Cache it
+          // and only refresh once a second.
+          static size_t cached_free_b = 0;
+          static unsigned long last_check_ms = 0;
+          unsigned long now_ms = millis();
+          if (now_ms - last_check_ms >= 1000 || last_check_ms == 0) {
+            size_t total_b = (size_t)LittleFS.totalBytes();
+            size_t used_b  = (size_t)LittleFS.usedBytes();
+            cached_free_b = (total_b > used_b) ? (total_b - used_b) : 0;
+            last_check_ms = now_ms;
+          }
+          if (cached_free_b >= 1024 * 1024) sprintf(valbufs[URNS_ITEM_FREE], "%.1fMB", cached_free_b / (1024.0 * 1024.0));
+          else                              sprintf(valbufs[URNS_ITEM_FREE], "%.1fKB", cached_free_b / 1024.0);
+        }
+
+        labels[URNS_ITEM_BACK] = "BACK";
+        valbufs[URNS_ITEM_BACK][0] = 0;
+
+        draw_menu_list_disp("URNS", labels, valbufs, URNS_ITEM_COUNT, urns_menu_cursor);
+      } else if (menu_state == MENU_STATE_URNS_FREE_DETAIL) {
+        // Static snapshot from urns_free_detail_refresh() (called once on
+        // entry, menu_confirm_select()) - NOT recomputed here, same
+        // throttling reasoning as URNS_ITEM_FREE's own cache above, except
+        // here there's no periodic refresh at all since walking every
+        // bucket's directory is a heavier operation than a single
+        // esp_littlefs_info() call.
+        const char *labels[URNS_FREE_DETAIL_ITEM_COUNT];
+        char valbufs[URNS_FREE_DETAIL_ITEM_COUNT][24];
+        size_t vals[URNS_FREE_DETAIL_ITEM_COUNT - 1] = {
+          urns_free_detail_identity, urns_free_detail_announce,
+          urns_free_detail_paths, urns_free_detail_messages, urns_free_detail_other
+        };
+        const char *names[URNS_FREE_DETAIL_ITEM_COUNT - 1] = {
+          "Identity", "Announce", "Paths", "Messages", "Other"
+        };
+        for (uint8_t i = 0; i < URNS_FREE_DETAIL_ITEM_COUNT - 1; i++) {
+          labels[i] = names[i];
+          size_t v = vals[i];
+          // Identity is a single small key file (bytes, not KB-scale) -
+          // "0.1KB" rounds away almost all the precision that's actually
+          // available for it, so show raw bytes below 1KB for every
+          // bucket rather than special-casing just Identity.
+          if (v >= 1024 * 1024)   sprintf(valbufs[i], "%.1fMB", v / (1024.0 * 1024.0));
+          else if (v >= 1024)     sprintf(valbufs[i], "%.1fKB", v / 1024.0);
+          else                    sprintf(valbufs[i], "%zuB", v);
+        }
+        labels[URNS_FREE_DETAIL_ITEM_BACK] = "BACK";
+        valbufs[URNS_FREE_DETAIL_ITEM_BACK][0] = 0;
+
+        draw_menu_list_disp("URNS FREE", labels, valbufs, URNS_FREE_DETAIL_ITEM_COUNT, urns_free_detail_cursor);
+      } else if (menu_state == MENU_STATE_URNS_EDIT) {
+        if (urns_menu_cursor == URNS_ITEM_ENABLED) {
+          draw_menu_edit_disp("URNS ENABLED", staged_urns_enabled ? "ON" : "OFF");
+        } else {
+          draw_menu_edit_disp("TRANSPORT MODE", staged_urns_transport_enabled ? "ON" : "OFF");
+        }
+      } else if (menu_state == MENU_STATE_URNS_PATHS) {
+        // Built fresh every draw call, same "recompute live state each
+        // frame" convention as draw_menu_memory_disp()'s heap/PSRAM
+        // figures - the path table changes as announces arrive, and a
+        // stale snapshot would be actively misleading on a "live network
+        // state" screen like this one.
+        // new_path_table() returns a const&, but TypedStore's begin()/end()
+        // aren't const-qualified (neither is the BasicFileStore/HeapStore
+        // they wrap) even though iteration here is read-only - the
+        // const_cast is scoped to this one read-only display loop, not a
+        // library patch (unlike the Transport.cpp/Identity.cpp fixes,
+        // this isn't a bug, just an API that doesn't expose a const
+        // iteration path).
+        RNS::Persistence::NewPathTable& pt = const_cast<RNS::Persistence::NewPathTable&>(RNS::Transport::new_path_table());
+        uint8_t row_count = urns_path_display_row_count();
+
+        const char *labels[MENU_URNS_PATH_MAX_ROWS + 1];
+        char label_bufs[MENU_URNS_PATH_MAX_ROWS][9];   // 8 hex chars + NUL
+        char valbufs[MENU_URNS_PATH_MAX_ROWS + 1][24];
+
+        if (pt.size() == 0) {
+          labels[0] = "No Paths";
+          valbufs[0][0] = 0;
+        } else {
+          uint8_t i = 0;
+          for (auto it = pt.begin(); it != pt.end() && i < MENU_URNS_PATH_MAX_ROWS; ++it, i++) {
+            auto entry = *it;
+            snprintf(label_bufs[i], sizeof(label_bufs[i]), "%s", entry.key.toHex().substr(0, 8).c_str());
+            labels[i] = label_bufs[i];
+            uint8_t hops = entry.value._hops;
+            sprintf(valbufs[i], "%u hop%s", hops, hops == 1 ? "" : "s");
+          }
+        }
+        labels[row_count - 1] = "BACK";
+        valbufs[row_count - 1][0] = 0;
+
+        draw_menu_list_disp("PATH TABLE", labels, valbufs, row_count, urns_paths_menu_cursor);
+      } else if (menu_state == MENU_STATE_URNS_PATH_DETAIL) {
+        // Looked up fresh by the captured full hash every draw call (not
+        // handed a snapshot at click time) - same "always show live
+        // state" convention as the list. If the entry expired/got culled
+        // between clicking and viewing (DESTINATION_TIMEOUT etc.), get()
+        // just returns false and Expiry shows that plainly instead of
+        // whatever stale data happened to be sitting around.
+        RNS::Persistence::NewPathTable& pt = const_cast<RNS::Persistence::NewPathTable&>(RNS::Transport::new_path_table());
+        RNS::Persistence::DestinationEntry entry;
+        bool found = pt.get(urns_path_detail_hash, entry);
+
+        const char *labels[URNS_PATH_DETAIL_ITEM_COUNT];
+        char valbufs[URNS_PATH_DETAIL_ITEM_COUNT][24];
+
+        // Preview only (16 of 32 hex chars) - the Hash row itself is
+        // enterable and opens MENU_STATE_URNS_PATH_HASH_VIEW for the full
+        // value.
+        std::string full_hex = urns_path_detail_hash.toHex();
+        labels[URNS_PATH_DETAIL_ITEM_HASH] = "Hash";
+        snprintf(valbufs[URNS_PATH_DETAIL_ITEM_HASH], 24, "%s", full_hex.substr(0, 16).c_str());
+
+        labels[URNS_PATH_DETAIL_ITEM_EXPIRY] = "Expiry";
+        if (!found) {
+          sprintf(valbufs[URNS_PATH_DETAIL_ITEM_EXPIRY], "Expired");
+        } else {
+          double remaining = entry._expires - RNS::Utilities::OS::time();
+          if (remaining <= 0) {
+            sprintf(valbufs[URNS_PATH_DETAIL_ITEM_EXPIRY], "Expired");
+          } else {
+            unsigned long rem_s = (unsigned long)remaining;
+            if (rem_s < 60) sprintf(valbufs[URNS_PATH_DETAIL_ITEM_EXPIRY], "%lus", rem_s);
+            else if (rem_s < 3600) sprintf(valbufs[URNS_PATH_DETAIL_ITEM_EXPIRY], "%lum", rem_s / 60);
+            else sprintf(valbufs[URNS_PATH_DETAIL_ITEM_EXPIRY], "%luh", rem_s / 3600);
+          }
+        }
+
+        labels[URNS_PATH_DETAIL_ITEM_BACK] = "BACK";
+        valbufs[URNS_PATH_DETAIL_ITEM_BACK][0] = 0;
+
+        draw_menu_list_disp("PATH DETAIL", labels, valbufs, URNS_PATH_DETAIL_ITEM_COUNT, urns_path_detail_cursor);
+      } else if (menu_state == MENU_STATE_URNS_PATH_HASH_VIEW) {
+        draw_menu_urns_path_hash_disp();
+      } else if (menu_state == MENU_STATE_MSNGR_LIST) {
+        const char *labels[MSNGR_TOP_ITEM_COUNT];
+        char valbufs[MSNGR_TOP_ITEM_COUNT][24];
+
+        labels[MSNGR_TOP_ITEM_INBOX] = "Inbox";
+        sprintf(valbufs[MSNGR_TOP_ITEM_INBOX], "%u", (unsigned)(urns_message_store ? urns_message_store->get_unread_count() : 0));
+
+        labels[MSNGR_TOP_ITEM_BOOKMARKS] = "Bookmarks";
+        sprintf(valbufs[MSNGR_TOP_ITEM_BOOKMARKS], "%u", (unsigned)msngr_bookmark_count);
+
+        labels[MSNGR_TOP_ITEM_ANNOUNCES] = "Announces";
+        {
+          uint8_t n = 0;
+          for (uint8_t i = 0; i < MSNGR_MAX_ANNOUNCES; i++) if (msngr_announces[i].in_use) n++;
+          sprintf(valbufs[MSNGR_TOP_ITEM_ANNOUNCES], "%u", (unsigned)n);
+        }
+
+        labels[MSNGR_TOP_ITEM_ANNOUNCE_NODE] = "Announce Node";
+        valbufs[MSNGR_TOP_ITEM_ANNOUNCE_NODE][0] = 0;
+
+        labels[MSNGR_TOP_ITEM_BACK] = "BACK";
+        valbufs[MSNGR_TOP_ITEM_BACK][0] = 0;
+
+        draw_menu_list_disp("MESSENGER", labels, valbufs, MSNGR_TOP_ITEM_COUNT, msngr_menu_cursor);
+      } else if (menu_state == MENU_STATE_MSNGR_INBOX) {
+        uint8_t row_count = msngr_inbox_row_count();
+        const char *labels[MENU_MSNGR_LIST_MAX_ROWS + 1];
+        char label_bufs[MENU_MSNGR_LIST_MAX_ROWS][MSNGR_NAME_MAX_LEN + 1];
+        char valbufs[MENU_MSNGR_LIST_MAX_ROWS + 1][24];
+
+        size_t conv_count = urns_message_store ? urns_message_store->get_conversation_count() : 0;
+        if (conv_count == 0) {
+          labels[0] = "No Messages";
+          valbufs[0][0] = 0;
+        } else {
+          std::vector<RNS::Bytes> convs = urns_message_store->get_conversations();
+          uint8_t n = (uint8_t)convs.size();
+          if (n > MENU_MSNGR_LIST_MAX_ROWS) n = MENU_MSNGR_LIST_MAX_ROWS;
+          for (uint8_t i = 0; i < n; i++) {
+            snprintf(label_bufs[i], sizeof(label_bufs[i]), "%s", messenger_peer_display_name(convs[i]).c_str());
+            labels[i] = label_bufs[i];
+            LXMF::MessageStore::ConversationInfo info = urns_message_store->get_conversation_info(convs[i]);
+            if (info.unread_count > 0) sprintf(valbufs[i], "(%u)", (unsigned)info.unread_count);
+            else valbufs[i][0] = 0;
+          }
+        }
+        labels[row_count - 1] = "BACK";
+        valbufs[row_count - 1][0] = 0;
+
+        draw_menu_list_disp("INBOX", labels, valbufs, row_count, msngr_inbox_cursor);
+      } else if (menu_state == MENU_STATE_MSNGR_BOOKMARKS) {
+        uint8_t row_count = msngr_bookmarks_row_count();
+        const char *labels[MSNGR_MAX_BOOKMARKS + 1];
+        char valbufs[MSNGR_MAX_BOOKMARKS + 1][24];
+
+        if (msngr_bookmark_count == 0) {
+          labels[0] = "No Bookmarks";
+          valbufs[0][0] = 0;
+        } else {
+          uint8_t vis = 0;
+          for (uint8_t i = 0; i < MSNGR_MAX_BOOKMARKS; i++) {
+            if (!msngr_bookmarks[i].in_use) continue;
+            // Points directly at the persistent global entry's own name
+            // buffer (not a stack-local copy) - safe since msngr_bookmarks
+            // outlives this draw call, same "labels can point at storage
+            // that isn't a string literal" shape as PATH TABLE's hash rows,
+            // just not needing a temporary buffer here since the source is
+            // already stable.
+            labels[vis] = msngr_bookmarks[i].name;
+            valbufs[vis][0] = 0;
+            vis++;
+          }
+        }
+        labels[row_count - 1] = "BACK";
+        valbufs[row_count - 1][0] = 0;
+
+        draw_menu_list_disp("BOOKMARKS", labels, valbufs, row_count, msngr_bookmarks_cursor);
+      } else if (menu_state == MENU_STATE_MSNGR_ANNOUNCES) {
+        uint8_t row_count = msngr_announces_row_count();
+        const char *labels[MSNGR_MAX_ANNOUNCES + 1];
+        char valbufs[MSNGR_MAX_ANNOUNCES + 1][24];
+
+        uint8_t any = 0;
+        for (uint8_t i = 0; i < MSNGR_MAX_ANNOUNCES; i++) if (msngr_announces[i].in_use) any++;
+
+        if (any == 0) {
+          labels[0] = "No Announces";
+          valbufs[0][0] = 0;
+        } else {
+          uint8_t vis = 0;
+          for (uint8_t i = 0; i < MSNGR_MAX_ANNOUNCES; i++) {
+            if (!msngr_announces[i].in_use) continue;
+            labels[vis] = msngr_announces[i].name[0] ? msngr_announces[i].name : "(unnamed)";
+            unsigned long ago_s = (millis() - msngr_announces[i].last_heard_ms) / 1000;
+            if (ago_s < 60) sprintf(valbufs[vis], "%lus", ago_s);
+            else if (ago_s < 3600) sprintf(valbufs[vis], "%lum", ago_s / 60);
+            else sprintf(valbufs[vis], "%luh", ago_s / 3600);
+            vis++;
+          }
+        }
+        labels[row_count - 1] = "BACK";
+        valbufs[row_count - 1][0] = 0;
+
+        draw_menu_list_disp("ANNOUNCES", labels, valbufs, row_count, msngr_announces_cursor);
+      } else if (menu_state == MENU_STATE_MSNGR_PEER) {
+        uint8_t msg_rows = msngr_peer_msg_row_count();
+        uint8_t row_count = msngr_peer_row_count();
+        const char *labels[MSNGR_PEER_MAX_MSG_ROWS + MSNGR_PEER_ACTION_COUNT];
+        char label_bufs[MSNGR_PEER_MAX_MSG_ROWS][24];
+        char valbufs[MSNGR_PEER_MAX_MSG_ROWS + MSNGR_PEER_ACTION_COUNT][24];
+
+        // Reads msngr_peer_cache (Messenger.h, populated once on screen
+        // entry/after a send), not MessageStore directly - see that
+        // cache's own comment for why (this used to read flash on every
+        // redraw here, which is what actually caused a real crash - a
+        // LoRa DIO0 interrupt landing inside the resulting flash-cache-
+        // disabled window hit an SPI-bus-arbitration assert).
+        //
+        // draw_menu_list_disp() left-aligns labels[] and right-aligns
+        // valbufs[] - reused here (instead of a real bubble layout) to
+        // put outgoing messages on the left and incoming ones on the
+        // right, so direction reads at a glance without needing the old
+        // "<"/">" text prefix.
+        for (uint8_t i = 0; i < msg_rows; i++) {
+          if (msngr_peer_cache[i].incoming) {
+            labels[i] = "";
+            snprintf(valbufs[i], 24, "%s", msngr_peer_cache[i].snippet);
+          } else {
+            snprintf(label_bufs[i], sizeof(label_bufs[i]), "%s", msngr_peer_cache[i].snippet);
+            labels[i] = label_bufs[i];
+            valbufs[i][0] = 0;
+          }
+        }
+
+        uint8_t base = msg_rows;
+        labels[base + MSNGR_PEER_ACTION_SEND_HI]  = "Send: Hi";  valbufs[base + MSNGR_PEER_ACTION_SEND_HI][0]  = 0;
+        labels[base + MSNGR_PEER_ACTION_SEND_BYE] = "Send: Bye"; valbufs[base + MSNGR_PEER_ACTION_SEND_BYE][0] = 0;
+        labels[base + MSNGR_PEER_ACTION_SEND_SOS] = "Send: SOS"; valbufs[base + MSNGR_PEER_ACTION_SEND_SOS][0] = 0;
+        labels[base + MSNGR_PEER_ACTION_SEND_CUSTOM] = "Send: Custom"; valbufs[base + MSNGR_PEER_ACTION_SEND_CUSTOM][0] = 0;
+        labels[base + MSNGR_PEER_ACTION_PING] = "Ping"; valbufs[base + MSNGR_PEER_ACTION_PING][0] = 0;
+
+        bool is_bookmarked = messenger_bookmark_find(msngr_active_peer_hash) >= 0;
+        labels[base + MSNGR_PEER_ACTION_BOOKMARK] = is_bookmarked ? "Remove Bookmark" : "Add Bookmark";
+        valbufs[base + MSNGR_PEER_ACTION_BOOKMARK][0] = 0;
+
+        labels[base + MSNGR_PEER_ACTION_CLEAR] = "Clear Conversation";
+        valbufs[base + MSNGR_PEER_ACTION_CLEAR][0] = 0;
+
+        labels[base + MSNGR_PEER_ACTION_BACK] = "BACK";
+        valbufs[base + MSNGR_PEER_ACTION_BACK][0] = 0;
+
+        char title[24];
+        snprintf(title, sizeof(title), "%s", messenger_peer_display_name(msngr_active_peer_hash).c_str());
+        draw_menu_list_disp(title, labels, valbufs, row_count, msngr_peer_cursor);
+      } else if (menu_state == MENU_STATE_MSNGR_MSG_DETAIL) {
+        uint8_t row_count = msngr_msg_detail_row_count();
+        // +2, not +1 - content lines plus the trailing Delete and BACK rows.
+        const char *labels[MSNGR_MSG_DETAIL_MAX_LINES + 2];
+        char label_bufs[MSNGR_MSG_DETAIL_MAX_LINES][MSNGR_MSG_DETAIL_CHARS_PER_LINE + 1];
+        char valbufs[MSNGR_MSG_DETAIL_MAX_LINES + 2][24];
+
+        // Reads msngr_msg_detail_cache_* (Messenger.h, populated once
+        // when the message row was selected) - same "don't read flash
+        // from the render path" reasoning as MENU_STATE_MSNGR_PEER above.
+        const std::string &content = msngr_msg_detail_cache_content;
+
+        uint8_t lines = row_count - 2; // content lines - DELETE + BACK are appended after
+        for (uint8_t i = 0; i < lines; i++) {
+          size_t start = (size_t)i * MSNGR_MSG_DETAIL_CHARS_PER_LINE;
+          if (start < content.size()) {
+            snprintf(label_bufs[i], sizeof(label_bufs[i]), "%s", content.substr(start, MSNGR_MSG_DETAIL_CHARS_PER_LINE).c_str());
+          } else {
+            label_bufs[i][0] = 0;
+          }
+          labels[i] = label_bufs[i];
+          valbufs[i][0] = 0;
+        }
+
+        labels[lines] = "Delete";
+        valbufs[lines][0] = 0;
+        labels[lines + 1] = "BACK";
+        valbufs[lines + 1][0] = 0;
+
+        draw_menu_list_disp(msngr_msg_detail_cache_incoming ? "RECEIVED" : "SENT", labels, valbufs, row_count, msngr_msg_detail_cursor);
+      } else if (menu_state == MENU_STATE_MSNGR_DELETE_CONFIRM) {
+        // Plain 2-item list, same draw_menu_list_disp() as everywhere else -
+        // same pattern as F/W Update's UPDATE/CANCEL (MENU_STATE_FWUPD_CONFIRM).
+        const char *labels[2] = { "DELETE", "CANCEL" };
+        char valbufs[2][24];
+        valbufs[0][0] = 0;
+        valbufs[1][0] = 0;
+        draw_menu_list_disp("DELETE MSG?", labels, valbufs, 2, msngr_delete_confirm_cursor);
+      } else if (menu_state == MENU_STATE_MSNGR_CLEAR_CONFIRM) {
+        const char *labels[2] = { "CLEAR", "CANCEL" };
+        char valbufs[2][24];
+        valbufs[0][0] = 0;
+        valbufs[1][0] = 0;
+        draw_menu_list_disp("CLEAR ALL?", labels, valbufs, 2, msngr_clear_confirm_cursor);
+      } else if (menu_state == MENU_STATE_MSNGR_TEXT_ENTRY) {
+        draw_menu_msngr_keyboard_disp();
+      } else if (menu_state == MENU_STATE_MSNGR_DISCARD_CONFIRM) {
+        const char *labels[2] = { "DISCARD", "CANCEL" };
+        char valbufs[2][24];
+        valbufs[0][0] = 0;
+        valbufs[1][0] = 0;
+        draw_menu_list_disp("DISCARD MSG?", labels, valbufs, 2, msngr_discard_confirm_cursor);
+      } else if (menu_state == MENU_STATE_MSNGR_PING_RESULT) {
+        // Reads msngr_ping_state/msngr_ping_rtt fresh on every redraw -
+        // messenger_ping_process() (RNode_Firmware.ino's loop()) is what
+        // actually advances them, same "read live state, don't poll from
+        // here" split as every other MSNGR screen's draw code.
+        const char *labels[2];
+        char valbufs[2][24];
+        char status_buf[24];
+        switch (msngr_ping_state) {
+          case MSNGR_PING_RESOLVING:    snprintf(status_buf, sizeof(status_buf), "Resolving path..."); break;
+          case MSNGR_PING_ESTABLISHING: snprintf(status_buf, sizeof(status_buf), "Pinging..."); break;
+          case MSNGR_PING_SUCCESS:      snprintf(status_buf, sizeof(status_buf), "RTT: %.0f ms", msngr_ping_rtt * 1000.0); break;
+          case MSNGR_PING_TIMEOUT:      snprintf(status_buf, sizeof(status_buf), "Timed Out"); break;
+          case MSNGR_PING_NO_IDENTITY:  snprintf(status_buf, sizeof(status_buf), "No Identity"); break;
+          case MSNGR_PING_FAILED:       snprintf(status_buf, sizeof(status_buf), "Link Failed"); break;
+          default:                      snprintf(status_buf, sizeof(status_buf), "..."); break;
+        }
+        labels[0] = status_buf;
+        valbufs[0][0] = 0;
+        labels[1] = "BACK";
+        valbufs[1][0] = 0;
+
+        char title[24];
+        snprintf(title, sizeof(title), "PING: %s", messenger_peer_display_name(msngr_active_peer_hash).c_str());
+        draw_menu_list_disp(title, labels, valbufs, 2, msngr_ping_result_cursor);
+      } else if (menu_state == MENU_STATE_MSNGR_SEND_RESULT) {
+        // Reads msngr_send_state fresh on every redraw - messenger_send_
+        // process()/messenger_on_delivered() (Messenger.h) are what
+        // actually advance it, same "read live state, don't poll from
+        // here" split as MSNGR_PING_RESULT above. Terminal states
+        // (Delivered/No Confirmation) auto-return to MENU_STATE_MSNGR_PEER
+        // after MSNGR_SEND_RESULT_POPUP_MS (msngr_send_result_process(),
+        // this file) - unlike Ping, no manual BACK needed to see the
+        // outcome and move on, matching the Announce/GPS-Sync/NTP-Sync
+        // popups' own auto-dismiss convention.
+        const char *labels[2];
+        char valbufs[2][24];
+        char status_buf[24];
+        switch (msngr_send_state) {
+          case MSNGR_SEND_PENDING:   snprintf(status_buf, sizeof(status_buf), "Sending..."); break;
+          case MSNGR_SEND_DELIVERED: snprintf(status_buf, sizeof(status_buf), "Delivered"); break;
+          case MSNGR_SEND_TIMEOUT:   snprintf(status_buf, sizeof(status_buf), "No Confirmation"); break;
+          default:                   snprintf(status_buf, sizeof(status_buf), "..."); break;
+        }
+        labels[0] = status_buf;
+        valbufs[0][0] = 0;
+        labels[1] = "BACK";
+        valbufs[1][0] = 0;
+
+        char title[24];
+        snprintf(title, sizeof(title), "SEND: %s", messenger_peer_display_name(msngr_active_peer_hash).c_str());
+        draw_menu_list_disp(title, labels, valbufs, 2, msngr_send_result_cursor);
       }
     #endif
     #if HAS_SENSORS == true

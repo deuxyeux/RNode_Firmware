@@ -1,0 +1,45 @@
+# Name,   Type, SubType, Offset,  Size, Flags
+#
+# Derived from the stock esp32 core 3.3.11 default_16MB.csv. Originally
+# app0/app1 were each shrunk by 0x40000 (256KB) to free 0x80000 (512KB) for
+# a new "urns" LittleFS data partition (microReticulum's Identity/key/
+# path-table persistence + the LXMF MessageStore). That 512KB turned out
+# too small in practice - Identity::_known_store alone (the announce/peer
+# cache, RNS_KNOWN_DESTINATIONS_SEGMENT_SIZE*_COUNT, see Identity.cpp) has
+# a fixed 256KB footprint, leaving almost nothing for actual LXMF messages
+# once the node's been on a live mesh for a while - "No more free space"
+# on every single incoming message even with MessageStore's own caps
+# nowhere near full (see project_message_store_fifo_retention memory).
+#
+# app1 (the ota_1/second OTA slot) IS actually used - Boards.h sets HAS_OTA
+# true for this board regardless of platformio.ini's own build_flags, and
+# OTA.h's esp_https_ota-based updater (independent web server, port 8080)
+# writes new images into the *inactive* OTA partition. Shrunk from 6MB to
+# 3MB anyway - still ~1.4x the current ~2.1MB firmware, comfortable room
+# for a real OTA image, freeing 3MB for urns. app0 (the slot actually
+# running) is untouched.
+#
+# The dedicated "spiffs" partition (Console web UI's real SPIFFS
+# filesystem) is dropped entirely - HAS_CONSOLE is false for this board
+# (Boards.h, after the Console/BLE crash that corrupted LittleFS - see
+# feedback_console_ble_crash_littlefs_corruption memory), so all of
+# Console.h (the only code that ever touches SPIFFS/that partition label)
+# is compiled out. OTA's web page is a separate server that doesn't use
+# SPIFFS at all, so nothing on this board references "spiffs" anymore.
+# That reclaimed 3.375MB also goes to urns.
+#
+# Net: urns grows 512KB -> ~6.9MB (0x6E0000), all from space that was
+# either drastically oversized (app1) or entirely dead (spiffs) on this
+# specific board/branch. coredump keeps its original offset/size.
+#
+# NOTE: growing/moving the urns partition changes its flash offset, so the
+# LittleFS filesystem there gets reformatted from scratch on first boot
+# after this change (LittleFS.begin(true, ...)'s formatOnFail) - this
+# includes the node's own persisted identity. The RNode gets a new
+# destination hash; existing peers need to hear a fresh announce from it.
+nvs,      data, nvs,     0x9000,  0x5000,
+otadata,  data, ota,     0xe000,  0x2000,
+app0,     app,  ota_0,   0x10000, 0x600000,
+app1,     app,  ota_1,   0x610000,0x300000,
+urns,     data, spiffs,  0x910000,0x6E0000,
+coredump, data, coredump,0xFF0000,0x10000,
