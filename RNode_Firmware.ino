@@ -3400,7 +3400,19 @@ void button_event(uint8_t event, unsigned long duration) {
         menu_button_press(duration);
       }
     #endif
-    } else {
+    } else if (device_init_done) {
+      // Every tier below can reach real hardware init (bt_start()'s NimBLE
+      // stack, console_start(), sleep_now()) - device_init_done guards the
+      // whole chain the same way menu_open_from_closed()/messenger_open_
+      // from_closed() already guard themselves, so a press landing before
+      // boot fully settles just does nothing instead of reaching into
+      // half-initialized subsystems. Confirmed live on hardware: a button
+      // press this early can fall into the short-tap BT-toggle fallback
+      // below and call bt_start() while WiFi's own init is still settling -
+      // nimble_port_init() fails with "rc=-1 Unknown ESP_ERR error" and
+      // that failure isn't handled gracefully, crashing with a
+      // LoadProhibited exception instead of erroring out cleanly.
+      //
       // Each tier's #if guards the whole condition, not just its body -
       // a board missing a given capability (e.g. HAS_CONSOLE, true on
       // very few boards) must fall through to the next lower tier for
