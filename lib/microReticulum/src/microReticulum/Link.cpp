@@ -887,6 +887,20 @@ void Link::start_watchdog() {
 	//z thread.start()
 }
 
+bool Link::check_establishment_timeout() {
+	assert(_object);
+	if (_object->_status == Type::Link::PENDING || _object->_status == Type::Link::HANDSHAKE) {
+		if (OS::time() >= _object->_request_time + _object->_establishment_timeout) {
+			VERBOSEF("Link establishment timed out for %s", toString().c_str());
+			_object->_status = Type::Link::CLOSED;
+			_object->_teardown_reason = Type::Link::TIMEOUT;
+			link_closed();
+			return true;
+		}
+	}
+	return false;
+}
+
 /*p TODO
 
 void Link::__watchdog_job() {

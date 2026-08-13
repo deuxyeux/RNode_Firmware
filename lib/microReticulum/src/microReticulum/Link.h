@@ -213,6 +213,17 @@ namespace RNS {
 		void link_closed();
 		void start_watchdog();
 		void __watchdog_job();
+		// Polling substitute for the never-implemented start_watchdog()/
+		// __watchdog_job() thread above. Ports only the PENDING/HANDSHAKE
+		// establishment-timeout branches of that pseudocode. Call
+		// periodically (e.g. from Transport::jobs()) for every link in
+		// pending_links/active_links: a link stuck in PENDING or HANDSHAKE
+		// (e.g. one that fails Token/HMAC decryption during the handshake)
+		// otherwise never reaches CLOSED, and Transport's own reap loop
+		// only erases links that are already CLOSED — so it leaks the
+		// link's crypto buffers and resource state forever. Returns true
+		// if the link was just closed by this call.
+		bool check_establishment_timeout();
 		// Cooperative pump: iterate this link's incoming/outgoing resources
 		// and tick each Resource::__watchdog_job(). Safe to call from
 		// Transport::jobs() — snapshots both sets before pumping so that a

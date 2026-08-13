@@ -560,6 +560,11 @@ DestinationEntry empty_destination_entry;
 			if (OS::time() > (_links_last_checked + _links_check_interval)) {
 				std::set<Link> pending_links(_pending_links);
 				for (auto& link : pending_links) {
+					// Polling substitute for the never-implemented Link watchdog
+					// thread — see Link::check_establishment_timeout(). Without
+					// this, a link stuck in PENDING/HANDSHAKE never reaches
+					// CLOSED and the erase below never fires, leaking it.
+					const_cast<Link&>(link).check_establishment_timeout();
 					if (link.status() == Type::Link::CLOSED) {
 						// If we are not a Transport Instance, finding a pending link
 						// that was never activated will trigger an expiry of the path
@@ -591,6 +596,12 @@ DestinationEntry empty_destination_entry;
 				}
 				std::set<Link> active_links(_active_links);
 				for (auto& link : active_links) {
+					// Same substitute as above — _active_links also holds
+					// non-initiator (incoming) links from the moment they're
+					// registered, well before they reach ACTIVE, so links
+					// stuck in HANDSHAKE (e.g. a failed Token/HMAC decrypt)
+					// need this too.
+					const_cast<Link&>(link).check_establishment_timeout();
 					if (link.status() == Type::Link::CLOSED) {
 						_active_links.erase(link);
 					}
