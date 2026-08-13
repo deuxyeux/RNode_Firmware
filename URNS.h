@@ -31,7 +31,9 @@
 #pragma push_macro("MTU")
 #undef MTU
 #include <microReticulum.h>
-#include <LXMF/LXMRouter.h>
+#if HAS_LXMF == true
+  #include <LXMF/LXMRouter.h>
+#endif
 #pragma pop_macro("MTU")
 
 #define URNS_BASE_PATH         "/urns"
@@ -75,19 +77,21 @@ void urns_sync_time_from_rtc();
 // would corrupt the host's in-progress frame.
 bool urns_enqueue_outgoing(const uint8_t* data, uint16_t len);
 
-// Defined in Messenger.h (included right after this file) - saves the
-// message to urns_message_store, resolves/caches the sender's display
-// name, and fires the inbound alert chirp. Forward-declared here so
-// urns_init()'s delivery callback (below) can reach it despite Messenger.h
-// not existing yet at this point in the include chain - same pattern as
-// urns_sync_time_from_rtc()/urns_enqueue_outgoing() above.
-void messenger_on_delivery(LXMF::LXMessage& msg);
+#if HAS_LXMF == true
+  // Defined in Messenger.h (included right after this file) - saves the
+  // message to urns_message_store, resolves/caches the sender's display
+  // name, and fires the inbound alert chirp. Forward-declared here so
+  // urns_init()'s delivery callback (below) can reach it despite Messenger.h
+  // not existing yet at this point in the include chain - same pattern as
+  // urns_sync_time_from_rtc()/urns_enqueue_outgoing() above.
+  void messenger_on_delivery(LXMF::LXMessage& msg);
 
-// Outbound-proof-of-delivery counterpart - fires when static_proof_callback
-// (lib/microLXMF's LXMRouter.cpp) confirms delivery of a message THIS
-// device sent, not one it received. Forward-declared for the same reason
-// as messenger_on_delivery() above.
-void messenger_on_delivered(LXMF::LXMessage& msg);
+  // Outbound-proof-of-delivery counterpart - fires when static_proof_callback
+  // (lib/microLXMF's LXMRouter.cpp) confirms delivery of a message THIS
+  // device sent, not one it received. Forward-declared for the same reason
+  // as messenger_on_delivery() above.
+  void messenger_on_delivered(LXMF::LXMessage& msg);
+#endif
 
 // RX-side counterpart to urns_enqueue_outgoing() above - kiss_write_packet()
 // (RNode_Firmware.ino) calls this instead of urns_lora_interface.handle_
@@ -155,26 +159,14 @@ private:
   }
 };
 
-// Logs every announce Transport processes, from any destination/aspect
-// (nullptr filter) - not just ones addressed to urns_destination. This is
-// the only way to observe RX at all right now; nothing else logs on a
-// received announce.
-class UrnsAnnounceHandler : public RNS::AnnounceHandler {
-public:
-  UrnsAnnounceHandler() : RNS::AnnounceHandler(nullptr) {}
-  virtual ~UrnsAnnounceHandler() {}
-  virtual void received_announce(const RNS::Bytes& destination_hash, const RNS::Identity& announced_identity, const RNS::Bytes& app_data) override {
-    DEBUG_LOG("[URNS] RX announce from %s (identity %s)\r\n", destination_hash.toHex().c_str(), announced_identity ? announced_identity.hash().toHex().c_str() : "unknown");
-  }
-};
-
 microStore::FileSystem urns_filesystem;
 RNS::Reticulum urns_reticulum({RNS::Type::NONE});
 RNS::Identity urns_identity({RNS::Type::NONE});
 RNS::Interface urns_lora_interface({RNS::Type::NONE});
 RNS::Destination urns_destination({RNS::Type::NONE});
-RNS::HAnnounceHandler urns_announce_handler(new UrnsAnnounceHandler());
-LXMF::LXMRouter::Ptr urns_lxmf_router;
+#if HAS_LXMF == true
+  LXMF::LXMRouter::Ptr urns_lxmf_router;
+#endif
 
 bool urns_ready = false;
 
@@ -196,49 +188,67 @@ bool urns_enabled = true;
 // comment for why.
 bool urns_transport_enabled = false;
 
-#define URNS_LXMF_SEND_OK          0
-#define URNS_LXMF_SEND_NOT_READY   1
-#define URNS_LXMF_SEND_NO_IDENTITY 2
+// RNS::Reticulum::link_mtu_discovery()/remote_management_enabled()/
+// probe_destination_enabled() (urns_init() below; ADDR_CONF_URNS_LINK_MTU_
+// DISCOVERY/_REMOTE_MGMT/_PROBE_DEST, ROM.h; RNode Settings > URNS). Same
+// "read once at boot, no live start/stop path" convention as urns_enabled/
+// urns_transport_enabled above - all three are also the exact accessors
+// the built-in "uReticulum General Config" Provisioning namespace already
+// exposes (BuiltinNamespaces.cpp), just now reachable from the on-device
+// menu too. Defaults here preserve this file's prior compiled-in behavior
+// (link_mtu_discovery/remote_management were already effectively true,
+// probe_destination_enabled was never touched and defaults false in the
+// library itself, Reticulum.cpp) - a never-configured device behaves
+// exactly as before this menu existed.
+bool urns_link_mtu_discovery = true;
+bool urns_remote_management_enabled = true;
+bool urns_probe_destination_enabled = false;
 
-inline const char* urns_lxmf_send_result_text(uint8_t result) {
-  switch (result) {
-    case URNS_LXMF_SEND_OK:          return "SENT";
-    case URNS_LXMF_SEND_NOT_READY:   return "NOT READY";
-    case URNS_LXMF_SEND_NO_IDENTITY: return "UNKNOWN DEST";
-    default:                         return "ERROR";
+#if HAS_LXMF == true
+  #define URNS_LXMF_SEND_OK          0
+  #define URNS_LXMF_SEND_NOT_READY   1
+  #define URNS_LXMF_SEND_NO_IDENTITY 2
+
+  inline const char* urns_lxmf_send_result_text(uint8_t result) {
+    switch (result) {
+      case URNS_LXMF_SEND_OK:          return "SENT";
+      case URNS_LXMF_SEND_NOT_READY:   return "NOT READY";
+      case URNS_LXMF_SEND_NO_IDENTITY: return "UNKNOWN DEST";
+      default:                         return "ERROR";
+    }
   }
-}
 
-// Same MD5-of-BT-MAC scheme bt_devname (Bluetooth.h) already uses for its
-// "RNode XXXX" Bluetooth name - MD5 hash of the 6 raw BT MAC bytes, last 2
-// hash bytes as hex. This is also the exact 4-digit ID shown in the boot
-// banner carousel (Display.h, bt_dh[14]/bt_dh[15]) - reusing the algorithm
-// here (rather than the already-computed bt_dh global) means the LXMF
-// display name matches what's printed on the device's own screen even if
-// Bluetooth is disabled and bt_setup_hw() never ran.
-std::string urns_compute_default_display_name() {
-  uint8_t mac[6];
-  esp_read_mac(mac, ESP_MAC_BT);
-  unsigned char* hash = MD5::make_hash((char*)mac, sizeof(mac));
-  char name[16];
-  snprintf(name, sizeof(name), "RNode %02X%02X", hash[14], hash[15]);
-  free(hash);
-  return std::string(name);
-}
-
-// Overrideable via a plain text file on the urns LittleFS partition
-// (URNS-managed storage, per the design decision - independent of EEPROM's
-// fixed-field conventions). No menu text-entry UI writes this yet; falls
-// back to the MAC-derived default whenever the file is absent or empty.
-std::string urns_lxmf_display_name() {
-  RNS::Bytes stored;
-  if (RNS::Utilities::OS::read_file(URNS_DISPLAY_NAME_PATH, stored) > 0) {
-    std::string name = stored.toString();
-    while (!name.empty() && (name.back() == '\n' || name.back() == '\r')) name.pop_back();
-    if (!name.empty()) return name;
+  // Same MD5-of-BT-MAC scheme bt_devname (Bluetooth.h) already uses for its
+  // "RNode XXXX" Bluetooth name - MD5 hash of the 6 raw BT MAC bytes, last 2
+  // hash bytes as hex. This is also the exact 4-digit ID shown in the boot
+  // banner carousel (Display.h, bt_dh[14]/bt_dh[15]) - reusing the algorithm
+  // here (rather than the already-computed bt_dh global) means the LXMF
+  // display name matches what's printed on the device's own screen even if
+  // Bluetooth is disabled and bt_setup_hw() never ran.
+  std::string urns_compute_default_display_name() {
+    uint8_t mac[6];
+    esp_read_mac(mac, ESP_MAC_BT);
+    unsigned char* hash = MD5::make_hash((char*)mac, sizeof(mac));
+    char name[16];
+    snprintf(name, sizeof(name), "RNode %02X%02X", hash[14], hash[15]);
+    free(hash);
+    return std::string(name);
   }
-  return urns_compute_default_display_name();
-}
+
+  // Overrideable via a plain text file on the urns LittleFS partition
+  // (URNS-managed storage, per the design decision - independent of EEPROM's
+  // fixed-field conventions). No menu text-entry UI writes this yet; falls
+  // back to the MAC-derived default whenever the file is absent or empty.
+  std::string urns_lxmf_display_name() {
+    RNS::Bytes stored;
+    if (RNS::Utilities::OS::read_file(URNS_DISPLAY_NAME_PATH, stored) > 0) {
+      std::string name = stored.toString();
+      while (!name.empty() && (name.back() == '\n' || name.back() == '\r')) name.pop_back();
+      if (!name.empty()) return name;
+    }
+    return urns_compute_default_display_name();
+  }
+#endif
 
 // Sums file sizes under `path`, recursing into subdirectories (used by
 // e.g. "/urns/messages", which has "m/"+"c/<peer>/" subdirs - see
@@ -289,7 +299,63 @@ size_t urns_dir_size_recursive(const char *path) {
   return total;
 }
 
+// RNS log callback, registered below for every HAS_URNS board (not just
+// HAS_LXMF ones - this used to live in Messenger.h's messenger_init(),
+// which only ever ran when HAS_LXMF was true. On a HAS_URNS-but-not-
+// HAS_LXMF board (MeshPoE-S3), RNS::doLog() then had no callback
+// registered at all and fell back to its own default: raw, unframed
+// Serial.print() straight onto the SAME connection the binary KISS
+// protocol uses (Log.cpp), silently corrupting the host link with log
+// text mixed into KISS frames whenever the onboard node produced logging
+// (a live, currently-active regression - not just a "logs are missing"
+// issue). Registering this here, unconditionally on HAS_URNS, closes
+// that gap on every board while also being the single source of CMD_LOG
+// frames (0x80, Framing.h) for microReticulum_Firmware's own webconsole
+// Logs tab - see g_cmd_log_queue/cmd_log_task (Utilities.h/
+// RNode_Firmware.ino). Not only ever called from loop()'s own task -
+// LXStamper's async worker (lib/microLXMF, on HAS_LXMF boards) runs
+// pinned to core 0 and calls INFO()/DEBUG() from there - both DEBUG_LOG()
+// and cmd_log_guarded() are queue-based so neither destination is ever
+// written to directly from whichever task this runs on.
+void urns_rns_log_callback(const char *msg, RNS::LogLevel level) {
+  #if HAS_DEBUG_UART == true
+    DEBUG_LOG("[RNS] %s\r\n", msg);
+  #endif
+  #if MCU_VARIANT == MCU_ESP32
+    char line[CMD_LOG_MSG_LEN];
+    snprintf(line, sizeof(line), "%s [%s] %s", RNS::getTimeString(), RNS::getLevelName(level), msg);
+    cmd_log_guarded(line);
+  #endif
+}
+
 void urns_init() {
+  // See urns_rns_log_callback()'s own comment above for why this is
+  // registered here (HAS_URNS) rather than Messenger.h (HAS_LXMF only).
+  // History: NOTICE -> INFO -> TRACE (to match a genuine microReticulum
+  // node's real default, confirmed via a live reference capture) -> back
+  // to INFO. TRACE reproducibly crashed real hardware: every RNS::log()
+  // call nests inside whatever call depth was already active (Transport::
+  // inbound()'s announce/packet processing, etc.), and each one adds the
+  // library's own 1024-byte RNS_LOG_BUFFER_SIZE formatting buffer *plus*
+  // our own callback's ~450+ bytes (CMD_LOG line buffer + DEBUG_LOG's own
+  // buffer) on top, at every call site, compounding with depth. Queue-
+  // based delivery (both destinations, housekeeping_task()) means the
+  // *write* no longer blocks anything, but doesn't reduce this per-call
+  // stack cost at the log call site itself. Confirmed live: BLE went from
+  // a comfortable working margin back to crashing (980 bytes free after a
+  // "successful" bt_start, cascading into a NimBLE ble_store_config_init
+  // assert) purely from raising this level, with everything else
+  // unchanged. TRACE_LEVEL comparison boards in microReticulum_Firmware
+  // itself (e.g. lilygo-t3-s3) run the exact same chip/BLE/WiFi
+  // combination without hitting this - root cause of that gap not fully
+  // understood yet (their T-Beam board has 520KB SRAM vs our ESP32-S3's
+  // ~340KB, but their more-comparable T3-S3 board is also ESP32-S3 and
+  // still doesn't reproduce this) - worth a dedicated investigation
+  // later, not something to guess at while chasing stability. INFO is the
+  // last level confirmed comfortably stable including BLE margin.
+  RNS::set_log_callback(urns_rns_log_callback);
+  RNS::loglevel(RNS::LOG_INFO);
+
   DEBUG_LOG("[URNS] step 1: mounting LittleFS\r\n");
   if (!LittleFS.begin(true, URNS_BASE_PATH, 10, URNS_PARTITION_LABEL)) {
     DEBUG_LOG("[URNS] Failed to mount partition, onboard node disabled\r\n");
@@ -319,17 +385,27 @@ void urns_init() {
   RNS::Reticulum::storagepath(URNS_BASE_PATH);
   DEBUG_LOG("[URNS] step 6: transport_enabled(%d)\r\n", (int)urns_transport_enabled);
   urns_reticulum.transport_enabled(urns_transport_enabled);
+  // Whether Link MTU discovery is attempted - RNode Settings > URNS >
+  // Link MTU Discovery, same accessor the built-in "uReticulum General
+  // Config" Provisioning namespace already exposes (BuiltinNamespaces.cpp).
+  RNS::Reticulum::link_mtu_discovery(urns_link_mtu_discovery);
   // Enable RNS's remote-management wiring (Transport::start(), triggered
   // by reticulum.start() just below) so Provisioning::Provisioner
   // (provisioning_init(), called from setup() right after urns_init()
-  // returns) is reachable over a Link, not just local KISS. Safe to turn
-  // on unconditionally: Transport::remote_management_allowed() (the
+  // returns) is reachable over a Link, not just local KISS - RNode
+  // Settings > URNS > Remote Management. This alone doesn't grant remote
+  // access even when on: Transport::remote_management_allowed() (the
   // ALLOW_LIST gate on the "remote.management" destination) defaults to
   // an empty set, so no remote peer can actually invoke /provision until
   // the operator adds one - and that allow-list is itself only settable
   // via local KISS provisioning first (CMD_PROVISION_REQ, Provisioning.h),
   // the same bootstrap order microReticulum_Firmware's web console uses.
-  RNS::Reticulum::remote_management_enabled(true);
+  // Turning this off removes the remote path entirely, leaving only local
+  // KISS provisioning.
+  RNS::Reticulum::remote_management_enabled(urns_remote_management_enabled);
+  // Whether this node answers probe requests from peers (RNS's lightweight
+  // reachability check) - RNode Settings > URNS > Probe Destination.
+  RNS::Reticulum::probe_destination_enabled(urns_probe_destination_enabled);
   DEBUG_LOG("[URNS] step 7: reticulum.start()\r\n");
   urns_reticulum.start();
   DEBUG_LOG("[URNS] step 8: reticulum started\r\n");
@@ -358,15 +434,35 @@ void urns_init() {
   urns_destination = RNS::Destination(urns_identity, RNS::Type::Destination::IN, RNS::Type::Destination::SINGLE, "rnode", "onboard");
   urns_destination.set_proof_strategy(RNS::Type::Destination::PROVE_ALL);
 
-  DEBUG_LOG("[URNS] step 14: registering announce handler\r\n");
-  RNS::Transport::register_announce_handler(urns_announce_handler);
+  // Used to register a custom UrnsAnnounceHandler here purely to log
+  // "[URNS] RX announce from ..." - removed as redundant once
+  // RNS::loglevel() was raised to LOG_TRACE (urns_init(), above): the
+  // vendored library's own Transport-level logging already covers
+  // announce reception in full detail at that verbosity, matching a
+  // genuine microReticulum node's own output exactly (the whole point of
+  // raising the level) - a second, differently-formatted line from our
+  // own duplicate handler on top of that was redundant noise, not
+  // something a real node would ever produce.
 
+#if HAS_LXMF == true
+  // Direct Serial0 write, bypassing the async DEBUG_LOG queue - this is a
+  // one-off measurement, not a permanent log line, and needs to survive
+  // whatever burst of other DEBUG_LOG() traffic is happening around LXMF
+  // construction without risking a silent drop (DEBUG_LOG_QUEUE_DEPTH is
+  // only 16, non-blocking xQueueSend - fails open by dropping, not
+  // blocking, exactly what happened to the queued version of this line).
+  #if HAS_DEBUG_UART == true
+    Serial0.printf("[HeapTrace] before_lxmf_router free=%u\r\n", (unsigned)ESP.getFreeHeap());
+  #endif
   DEBUG_LOG("[URNS] step 15: constructing LXMF router\r\n");
   // No MessageStore yet (Phase 1: hardcoded test destination, no
   // conversation/destination list) - LXMRouter doesn't need one, it's a
   // fully separate opt-in component (confirmed by reading LXMRouter.cpp -
   // it never references MessageStore internally).
   urns_lxmf_router = std::make_shared<LXMF::LXMRouter>(urns_identity, URNS_BASE_PATH "/lxmf", false);
+  #if HAS_DEBUG_UART == true
+    if (!heap_caps_check_integrity_all(true)) { Serial0.print("[HeapCorruption] detected after LXMRouter construction\r\n"); }
+  #endif
   urns_lxmf_router->register_delivery_callback([](LXMF::LXMessage& msg) {
     DEBUG_LOG("[URNS] LXMF RX from %s: %s\r\n", msg.source_hash().toHex().c_str(), msg.content().toString().c_str());
     messenger_on_delivery(msg);
@@ -379,6 +475,7 @@ void urns_init() {
   std::string display_name = urns_lxmf_display_name();
   urns_lxmf_router->set_display_name(display_name);
   DEBUG_LOG("[URNS] step 15b: LXMF display name set to \"%s\"\r\n", display_name.c_str());
+#endif
 
   urns_ready = true;
   DEBUG_LOG("[URNS] step 16: ready, identity hash: %s\r\n", urns_identity.hash().toHex().c_str());
@@ -447,8 +544,16 @@ void urns_lxmf_loop() {
     urns_lora_interface.handle_incoming(RNS::Bytes(urns_rx_staging_buf, urns_rx_staging_len));
     urns_rx_pending = false;
   }
+#if HAS_LXMF == true
   urns_lxmf_router->process_outbound();
+  #if HAS_DEBUG_UART == true
+    if (!heap_caps_check_integrity_all(true)) { Serial0.print("[HeapCorruption] detected after process_outbound\r\n"); }
+  #endif
   urns_lxmf_router->process_inbound();
+  #if HAS_DEBUG_UART == true
+    if (!heap_caps_check_integrity_all(true)) { Serial0.print("[HeapCorruption] detected after process_inbound\r\n"); }
+  #endif
+#endif
   urns_cull_stores();
   LoRa->unmaskDio0();
 }
@@ -462,6 +567,7 @@ void urns_announce() {
   DEBUG_LOG("[URNS] Announcing destination %s\r\n", urns_destination.hash().toHex().c_str());
   urns_destination.announce(RNS::bytesFromString("URNS-TEST"));
 
+#if HAS_LXMF == true
   // Announces the LXMF delivery destination itself, carrying the display
   // name set above (LXMRouter::announce() builds app_data from
   // _display_name automatically when no explicit app_data is passed). The
@@ -471,4 +577,5 @@ void urns_announce() {
   // which is exactly the blank/hash-only name field originally reported.
   DEBUG_LOG("[URNS] Announcing LXMF delivery destination (display name: \"%s\")\r\n", urns_lxmf_router->display_name().c_str());
   urns_lxmf_router->announce();
+#endif
 }

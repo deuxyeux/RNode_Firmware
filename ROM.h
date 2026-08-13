@@ -177,6 +177,23 @@
   #define URNS_TRANSPORT_ENABLE_BYTE  0x01
   #define URNS_TRANSPORT_DISABLE_BYTE 0x00
 
+  // RNode Settings > URNS > Link MTU Discovery/Remote Management/Probe
+  // Destination - RNS::Reticulum::link_mtu_discovery()/remote_management_
+  // enabled()/probe_destination_enabled() (urns_init(), URNS.h). Same
+  // unclaimed 256-823 gap as ADDR_CONF_URNS/_TRANSPORT above, same "staged,
+  // no self-reboot until SAVE & EXIT" shape.
+  #define ADDR_CONF_URNS_LINK_MTU_DISCOVERY 261
+  #define URNS_LINK_MTU_DISCOVERY_ENABLE_BYTE  0x01
+  #define URNS_LINK_MTU_DISCOVERY_DISABLE_BYTE 0x00
+
+  #define ADDR_CONF_URNS_REMOTE_MGMT 262
+  #define URNS_REMOTE_MGMT_ENABLE_BYTE  0x01
+  #define URNS_REMOTE_MGMT_DISABLE_BYTE 0x00
+
+  #define ADDR_CONF_URNS_PROBE_DEST 263
+  #define URNS_PROBE_DEST_ENABLE_BYTE  0x01
+  #define URNS_PROBE_DEST_DISABLE_BYTE 0x00
+
   #define CONFIG_SIZE     256
   #define ADDR_CONF_SSID 0x00
   #define ADDR_CONF_PSK  0x21

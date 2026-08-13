@@ -281,6 +281,16 @@
 
     #elif BOARD_MODEL == BOARD_MESHPOE_S3
       #define IS_ESP32S3 true
+      // Second HAS_URNS board (meshpoe-s3-urns branch), reusing the same
+      // vendored microReticulum/microStore/microLXMF stack and platformio.ini
+      // build as MeshAdventurer-S3 - see the global-defaults block below for
+      // what this flag does.
+      #define HAS_URNS true
+      // Re-enabled after root-causing the heap-corruption crash to a real
+      // bug in the vendored LXMessage::unpack_from_bytes() field-count
+      // handling (lib/microLXMF/src/LXMF/LXMessage.cpp) - fixed there, not
+      // something to work around by leaving this feature off.
+      #define HAS_LXMF true
       #define HAS_DISPLAY true
       #define HAS_NP true
       #define HAS_BLUETOOTH false
@@ -288,7 +298,17 @@
       #define HAS_WIFI true
       #define HAS_ESPNOW true
       #define HAS_ETHERNET true
-      #define HAS_CONSOLE true
+      // Disabled on this branch (meshpoe-s3-urns) - same reasoning as
+      // MeshAdventurer-S3's own HAS_CONSOLE false above: the button-hold
+      // web console (Console.h) calls bt_stop() before starting on
+      // HAS_BLUETOOTH||HAS_BLE boards, which reliably crashes NimBLE on
+      // reinit (assert failed: ble_hs_init, ble_hs.c:1001) and corrupts the
+      // LittleFS partition URNS.h's onboard node keeps its identity in.
+      // MeshPoE-S3 has the same HAS_BLUETOOTH false/HAS_BLE true NimBLE-only
+      // setup as MeshAdventurer-S3, so it's exposed to the identical crash
+      // now that HAS_URNS is enabled here too. See
+      // feedback_console_ble_crash_littlefs_corruption memory.
+      #define HAS_CONSOLE false
       // Network OTA firmware updates (OTA.h) - see BUILD_NUMBER's own
       // comment above for why that fallback lives outside this board block.
       #define HAS_OTA true
@@ -359,9 +379,15 @@
 
     #elif BOARD_MODEL == BOARD_MESHADVENTURER_S3
       #define IS_ESP32S3 true
-      // See global-defaults block below for what this is - only defined
-      // true here since this is currently the sole HAS_URNS board.
+      // See global-defaults block below for what this is - MeshPoE-S3 (see
+      // its own block above) is the other HAS_URNS board.
       #define HAS_URNS true
+      // HAS_LXMF defaults false regardless of HAS_URNS (global-defaults
+      // block below) - this board's Messenger app is the established,
+      // tested feature this whole branch was built around, so opt in
+      // explicitly rather than silently losing it now that the default
+      // flipped.
+      #define HAS_LXMF true
       #define HAS_DISPLAY true
       #define HAS_NP true
       #define HAS_BLUETOOTH false
@@ -1789,11 +1815,25 @@
   // normal KISS/host modem path, giving the device its own Identity that
   // can originate/receive Reticulum packets directly (sensor telemetry,
   // GNSS wardrive beacons) over the same shared radio. Experimental,
-  // branch-only (microreticulum-onboard-node) - not wired into the
-  // arduino-cli/Makefile toolchain, only the platformio.ini env at the
-  // repo root. MeshAdventurer-S3 only for now.
+  // branch-only - not wired into the arduino-cli/Makefile toolchain, only
+  // the platformio.ini envs at the repo root. MeshAdventurer-S3
+  // (microreticulum-onboard-node branch) and MeshPoE-S3
+  // (meshpoe-s3-urns branch) only for now.
   #ifndef HAS_URNS
     #define HAS_URNS false
+  #endif
+
+  // Whether the LXMF messenger app (Messenger.h) and its onboard LXMRouter
+  // run on top of the microReticulum node above. Split out from HAS_URNS so
+  // a board can run the bare RNS transport (Identity, Transport, path
+  // table, Provisioning) without the messenger/LXMF stack on top - defaults
+  // false regardless of HAS_URNS, so a board must explicitly opt in with its
+  // own "#define HAS_LXMF true" after defining HAS_URNS true (see
+  // BOARD_MESHADVENTURER_S3's block for the pattern). Meaningless (and
+  // unused) when HAS_URNS is false, since URNS.h/Messenger.h are only
+  // #include'd behind HAS_URNS in the first place (Utilities.h).
+  #ifndef HAS_LXMF
+    #define HAS_LXMF false
   #endif
 
   // Whether this board has a free UART broken out to a header/pins that

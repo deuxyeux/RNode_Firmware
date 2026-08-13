@@ -283,7 +283,9 @@ void buzzer_wait_for_melody();
     void kiss_select_interface(uint8_t vport);
   #endif
   #include "URNS.h"
-  #include "Messenger.h"
+  #if HAS_LXMF == true
+    #include "Messenger.h"
+  #endif
   #include "Provisioning.h"
 #endif
 

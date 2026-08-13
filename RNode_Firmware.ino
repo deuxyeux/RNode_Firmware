@@ -804,6 +804,20 @@ void setup() {
     if (urns_transport_raw == URNS_TRANSPORT_ENABLE_BYTE) urns_transport_enabled = true;
     else if (urns_transport_raw == URNS_TRANSPORT_DISABLE_BYTE) urns_transport_enabled = false;
 
+    // Same "never touched" convention as urns_raw above, for the three
+    // uReticulum General Config toggles (URNS.h).
+    uint8_t urns_link_mtu_raw = EEPROM.read(ADDR_CONF_URNS_LINK_MTU_DISCOVERY);
+    if (urns_link_mtu_raw == URNS_LINK_MTU_DISCOVERY_ENABLE_BYTE) urns_link_mtu_discovery = true;
+    else if (urns_link_mtu_raw == URNS_LINK_MTU_DISCOVERY_DISABLE_BYTE) urns_link_mtu_discovery = false;
+
+    uint8_t urns_remote_mgmt_raw = EEPROM.read(ADDR_CONF_URNS_REMOTE_MGMT);
+    if (urns_remote_mgmt_raw == URNS_REMOTE_MGMT_ENABLE_BYTE) urns_remote_management_enabled = true;
+    else if (urns_remote_mgmt_raw == URNS_REMOTE_MGMT_DISABLE_BYTE) urns_remote_management_enabled = false;
+
+    uint8_t urns_probe_dest_raw = EEPROM.read(ADDR_CONF_URNS_PROBE_DEST);
+    if (urns_probe_dest_raw == URNS_PROBE_DEST_ENABLE_BYTE) urns_probe_destination_enabled = true;
+    else if (urns_probe_dest_raw == URNS_PROBE_DEST_DISABLE_BYTE) urns_probe_destination_enabled = false;
+
     if (urns_enabled) {
       // Identity/persistence only - doesn't touch the radio, so it's fine
       // this early. urns_radio_bringup() is deferred to after
@@ -811,18 +825,48 @@ void setup() {
       // startRadio() would otherwise always hit its not-ready branch).
       urns_init();
       HEAP_TRACE("after urns_init");
-      // Messenger app (Messenger.h) - bookmarks/message store/announce
-      // handler. Only meaningful once urns_init() actually succeeded
-      // (urns_ready) - a mount failure there leaves nothing for this to
-      // build on.
-      if (urns_ready) messenger_init();
-      HEAP_TRACE("after messenger_init");
+      // Temporary direct-Serial0 measurement (bypasses the async DEBUG_LOG
+      // queue that dropped this same line under HEAP_TRACE above during a
+      // logging burst) - see before_lxmf_router's own comment, URNS.h.
+      #if HAS_LXMF == true && HAS_DEBUG_UART == true
+        Serial0.printf("[HeapTrace] after_urns_init_direct free=%u\r\n", (unsigned)ESP.getFreeHeap());
+      #endif
+      #if HAS_LXMF == true
+        // Messenger app (Messenger.h) - bookmarks/message store/announce
+        // handler. Only meaningful once urns_init() actually succeeded
+        // (urns_ready) - a mount failure there leaves nothing for this to
+        // build on.
+        if (urns_ready) messenger_init();
+        HEAP_TRACE("after messenger_init");
+      #endif
       // Provisioning.h - local KISS (CMD_PROVISION_REQ/RSP) + RNS-remote
       // (remote.management destination, already enabled above inside
       // urns_init()) config/management. Same urns_ready guard as
       // messenger_init() just above.
       if (urns_ready) provisioning_init();
       HEAP_TRACE("after provisioning_init");
+      #if HAS_LXMF == true && HAS_DEBUG_UART == true
+        if (!heap_caps_check_integrity_all(true)) { Serial0.print("[HeapCorruption] detected after provisioning_init\r\n"); }
+      #endif
+
+      // Final authoritative safety check, run last and regardless of how
+      // probe_destination_enabled ended up set - not just the EEPROM
+      // read/Menu.h gate above. provisioning_init() (Provisioner::begin()
+      // -> apply_loaded_to_runtime(), Provisioning.cpp) re-applies whatever
+      // a Provisioning client (KISS or RNS-remote/"webconsole") previously
+      // committed to its own separate storage file on the urns partition,
+      // completely independent of and after our own EEPROM read above -
+      // so a client can silently re-enable this via Provisioning even when
+      // our own EEPROM/Menu.h says it should be off. Confirmed live on
+      // hardware: Transport::start() (both this vendored port and upstream
+      // Python RNS, ~/Development/Reticulum/RNS/Transport.py) only ever
+      // constructs the actual probe-responder Destination inside its own
+      // transport_enabled() branch - enabling this without Transport Mode
+      // also on crashes (Interrupt WDT panic on Core 1).
+      if (RNS::Reticulum::probe_destination_enabled() && !RNS::Reticulum::transport_enabled()) {
+        RNS::Reticulum::probe_destination_enabled(false);
+        urns_probe_destination_enabled = false;
+      }
     }
   #endif
 
@@ -3079,16 +3123,30 @@ void loop() {
       urns_lxmf_loop();
       #if MCU_VARIANT == MCU_ESP32
         check_heap_integrity("urns_lxmf_loop");
-        set_checkpoint("messenger_ping_process");
       #endif
-      messenger_ping_process();
-      messenger_send_process();
-      msngr_send_result_process();
-      #if MCU_VARIANT == MCU_ESP32
-        set_checkpoint("messenger_heartbeat_process");
-      #endif
-      #if HAS_DEBUG_UART == true
-        messenger_heartbeat_process();
+      #if HAS_LXMF == true
+        #if MCU_VARIANT == MCU_ESP32
+          set_checkpoint("messenger_ping_process");
+        #endif
+        messenger_ping_process();
+        #if MCU_VARIANT == MCU_ESP32
+          check_heap_integrity("messenger_ping_process");
+        #endif
+        messenger_send_process();
+        #if MCU_VARIANT == MCU_ESP32
+          check_heap_integrity("messenger_send_process");
+        #endif
+        msngr_send_result_process();
+        #if MCU_VARIANT == MCU_ESP32
+          check_heap_integrity("msngr_send_result_process");
+          set_checkpoint("messenger_heartbeat_process");
+        #endif
+        #if HAS_DEBUG_UART == true
+          messenger_heartbeat_process();
+          #if MCU_VARIANT == MCU_ESP32
+            check_heap_integrity("messenger_heartbeat_process");
+          #endif
+        #endif
       #endif
 
       // Tier 2 one-shot smoke test: announce once, a few seconds after
@@ -3552,7 +3610,7 @@ void button_event(uint8_t event, unsigned long duration) {
           menu_open_from_closed();
         } else
       #endif
-      #if HAS_URNS == true
+      #if HAS_LXMF == true
         // Dedicated shorter hold for the emergency Messenger app
         // (Messenger.h/BUTTON_HOLD_TIER_MESSENGER) - see that tier's own
         // comment (Menu.h) for why 1500ms sits where it does relative to

@@ -1681,7 +1681,7 @@ void draw_bt_icon(int px, int py, Adafruit_GFX &gfx = stat_area) {
   #endif
 }
 
-#if HAS_URNS == true
+#if HAS_LXMF == true
 // messenger_has_unread() (Messenger.h) isn't declared yet at this point -
 // Display.h is #include'd (Utilities.h) before Messenger.h - same
 // reasoning as the wifi_mode/eth_link_up/espnow_ui_active externs above.
@@ -1690,7 +1690,7 @@ extern bool messenger_has_unread();
 #endif
 
 void draw_lora_icon(int px, int py, Adafruit_GFX &gfx = stat_area) {
-  #if HAS_URNS == true
+  #if HAS_LXMF == true
     if (messenger_has_unread()) {
       static bool envelope_frame = false;
       static unsigned long envelope_last_ms = 0;
@@ -3175,7 +3175,7 @@ void draw_disp_area() {
           // set by espnow_init()'s esp_wifi_set_channel()/peer.channel,
           // ESPNOW.h) is more useful here than a static "ACTIVE" label,
           // especially given the known STA-mode channel-drift caveat
-          // (wifi_remote_reconnect(), Remote.h) - this makes the currently-
+          // (wifi_remote_start_sta(), Remote.h) - this makes the currently-
           // locked channel visible at a glance instead of hidden state.
           char bot_buf[11];
           sprintf(bot_buf, "CHANNEL %u", wr_channel);

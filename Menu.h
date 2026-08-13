@@ -224,6 +224,31 @@
     #define MENU_NEXT_IDX_SE MENU_NEXT_IDX_S
   #endif
 
+  #if HAS_LXMF == true
+    // Opens the Messenger app's top screen (MENU_STATE_MSNGR_LIST) - the
+    // same screen a long main-button hold jumps to directly
+    // (BUTTON_HOLD_TIER_MESSENGER below). Sits right above the URNS
+    // diagnostics submenu, since both depend on the same onboard node.
+    // Moved above ESP-NOW per user request - both items depend on the
+    // same onboard microReticulum node, kept near the top of the list.
+    #define MENU_ITEM_MESSENGER MENU_NEXT_IDX_SE
+    #define MENU_NEXT_IDX_SE2 (MENU_NEXT_IDX_SE + 1)
+  #else
+    #define MENU_NEXT_IDX_SE2 MENU_NEXT_IDX_SE
+  #endif
+
+  #if HAS_URNS == true
+    // Opens the URNS submenu (Enabled + Path Table, URNS_ITEM_*,
+    // MENU_STATE_URNS_LIST/EDIT) - same shape as ESP-NOW below. Enabled
+    // reboots on change (urns_init()/urns_radio_bringup() are boot-only,
+    // no live start/stop path) - staged here, actually written by
+    // menu_commit_and_exit(), same as ESP-NOW's own Enabled field.
+    #define MENU_ITEM_URNS MENU_NEXT_IDX_SE2
+    #define MENU_NEXT_IDX_SE3 (MENU_NEXT_IDX_SE2 + 1)
+  #else
+    #define MENU_NEXT_IDX_SE3 MENU_NEXT_IDX_SE2
+  #endif
+
   #if HAS_ESPNOW == true
     // Opens the ESP-NOW submenu (Enabled + Mode fields, ESPNOW_ITEM_*,
     // MENU_STATE_ESPNOW_LIST/EDIT) - same shape as GNSS/Sensors below.
@@ -231,10 +256,10 @@
     // Utilities.h) - ESP-NOW has no runtime start/stop path, only a
     // boot-time espnow_init() call - so like WiFi's Mode field, they're
     // only staged here and actually written by menu_commit_and_exit().
-    #define MENU_ITEM_ESPNOW MENU_NEXT_IDX_SE
-    #define MENU_NEXT_IDX_0  (MENU_NEXT_IDX_SE + 1)
+    #define MENU_ITEM_ESPNOW MENU_NEXT_IDX_SE3
+    #define MENU_NEXT_IDX_0  (MENU_NEXT_IDX_SE3 + 1)
   #else
-    #define MENU_NEXT_IDX_0 MENU_NEXT_IDX_SE
+    #define MENU_NEXT_IDX_0 MENU_NEXT_IDX_SE3
   #endif
 
   #if HAS_WIFI == true
@@ -289,30 +314,7 @@
     #define MENU_NEXT_IDX_C MENU_NEXT_IDX_B
   #endif
 
-  #if HAS_URNS == true
-    // Opens the Messenger app's top screen (MENU_STATE_MSNGR_LIST) - the
-    // same screen a long main-button hold jumps to directly
-    // (BUTTON_HOLD_TIER_MESSENGER below). Sits right above the URNS
-    // diagnostics submenu, since both depend on the same onboard node.
-    #define MENU_ITEM_MESSENGER MENU_NEXT_IDX_C
-    #define MENU_NEXT_IDX_C2 (MENU_NEXT_IDX_C + 1)
-  #else
-    #define MENU_NEXT_IDX_C2 MENU_NEXT_IDX_C
-  #endif
-
-  #if HAS_URNS == true
-    // Opens the URNS submenu (Enabled + Path Table, URNS_ITEM_*,
-    // MENU_STATE_URNS_LIST/EDIT) - same shape as ESP-NOW above. Enabled
-    // reboots on change (urns_init()/urns_radio_bringup() are boot-only,
-    // no live start/stop path) - staged here, actually written by
-    // menu_commit_and_exit(), same as ESP-NOW's own Enabled field.
-    #define MENU_ITEM_URNS MENU_NEXT_IDX_C2
-    #define MENU_NEXT_IDX_D (MENU_NEXT_IDX_C2 + 1)
-  #else
-    #define MENU_NEXT_IDX_D MENU_NEXT_IDX_C2
-  #endif
-
-  #define MENU_ITEM_SAVE_EXIT MENU_NEXT_IDX_D
+  #define MENU_ITEM_SAVE_EXIT MENU_NEXT_IDX_C
   #define MENU_ITEM_COUNT     (MENU_ITEM_SAVE_EXIT + 1)
 
   #if HAS_WIFI == true
@@ -458,10 +460,27 @@
     // deliberately a leaf/client node, not a relay - see
     // project_microreticulum_onboard_node memory.
     #define URNS_ITEM_TRANSPORT 1
+    // Editable - RNS::Reticulum::link_mtu_discovery()/remote_management_
+    // enabled()/probe_destination_enabled() (urns_init(), URNS.h;
+    // ADDR_CONF_URNS_LINK_MTU_DISCOVERY/_REMOTE_MGMT/_PROBE_DEST, ROM.h).
+    // Same "staged, no self-reboot until SAVE & EXIT" shape as Enabled/
+    // Transport Mode above - all are boot-only settings with no live
+    // start/stop path, same reasoning as the built-in "uReticulum General
+    // Config" Provisioning namespace's own bool fields for these
+    // (BuiltinNamespaces.cpp) exposing the exact same accessors.
+    #define URNS_ITEM_LINK_MTU_DISCOVERY 2
+    // Defaults ON - matches this file's own prior hardcoded
+    // remote_management_enabled(true) (see urns_init()'s own comment on
+    // why that was safe unconditionally: the real security gate is the
+    // separate, empty-by-default remote_management_allowed() ALLOW_LIST).
+    #define URNS_ITEM_REMOTE_MGMT        3
+    // Defaults OFF - matches RNS::Reticulum::probe_destination_enabled()'s
+    // own library default (Reticulum.cpp).
+    #define URNS_ITEM_PROBE_DEST         4
     // Opens MENU_STATE_URNS_PATHS - a read-only, scrollable dump of
     // RNS::Transport's live path table (destination hash + hop count),
     // same "own submenu, only BACK does anything" shape as SENSORS_LIST.
-    #define URNS_ITEM_PATHS     2
+    #define URNS_ITEM_PATHS     5
     // Read-only info row - remaining free space on the "urns" LittleFS
     // partition (identity/path-table persistence + the LXMF MessageStore,
     // see MessageStore.h). LittleFS.usedBytes()/totalBytes() report for
@@ -473,9 +492,9 @@
     // does anything" shape as URNS_PATH_DETAIL/SENSORS_LIST. Computed
     // once on entry (urns_free_detail_refresh(), Menu.h) rather than in
     // the draw path - see the row's own draw-code comment for why.
-    #define URNS_ITEM_FREE      3
-    #define URNS_ITEM_BACK      4
-    #define URNS_ITEM_COUNT     5
+    #define URNS_ITEM_FREE      6
+    #define URNS_ITEM_BACK      7
+    #define URNS_ITEM_COUNT     8
 
     // MENU_STATE_URNS_FREE_DETAIL rows - each is one data-type bucket on
     // the urns partition (see urns_free_detail_refresh()):
@@ -517,6 +536,7 @@
     #define URNS_PATH_DETAIL_ITEM_BACK   2
     #define URNS_PATH_DETAIL_ITEM_COUNT  3
 
+  #if HAS_LXMF == true
     // Messenger app (Messenger.h) - MENU_STATE_MSNGR_LIST's own item rows.
     #define MSNGR_TOP_ITEM_INBOX         0
     #define MSNGR_TOP_ITEM_BOOKMARKS     1
@@ -606,6 +626,7 @@
       if (ch == '\x1b') return MSNGR_KB_BACK;
       return MSNGR_KB_CHAR;
     }
+  #endif
   #endif
 
   #if HAS_SENSORS == true
@@ -974,7 +995,7 @@
       // HAS_MENU is implicitly true here - this whole file only compiles
       // when it is.
       if (held_ms > 3000) return BUTTON_HOLD_TIER_SETTINGS;
-      #if HAS_URNS == true
+      #if HAS_LXMF == true
         // A shorter, dedicated tier for the emergency Messenger app
         // (Messenger.h) - sits below Settings' own 3s threshold so it
         // doesn't steal that gesture, but above every board's existing
@@ -1144,6 +1165,9 @@
     uint8_t urns_menu_cursor = 0;
     bool staged_urns_enabled = true;
     bool staged_urns_transport_enabled = false;
+    bool staged_urns_link_mtu_discovery = true;
+    bool staged_urns_remote_mgmt_enabled = true;
+    bool staged_urns_probe_dest_enabled = false;
     uint8_t urns_paths_menu_cursor = 0;
     uint8_t urns_path_detail_cursor = 0;
     uint8_t urns_free_detail_cursor = URNS_FREE_DETAIL_ITEM_BACK;
@@ -1196,6 +1220,7 @@
       return (uint8_t)(n + 1); // paths + BACK
     }
 
+  #if HAS_LXMF == true
     // Messenger app (Messenger.h) - MENU_STATE_MSNGR_* cursor/context state.
     uint8_t msngr_menu_cursor = 0;
     uint8_t msngr_inbox_cursor = 0;
@@ -1331,6 +1356,7 @@
       if (lines > MSNGR_MSG_DETAIL_MAX_LINES) lines = MSNGR_MSG_DETAIL_MAX_LINES;
       return (uint8_t)(lines + 2); // content lines + DELETE + BACK
     }
+  #endif
   #endif
   #if HAS_ENCODER == true
     bool staged_encoder_enabled = false;
@@ -1971,6 +1997,9 @@
     #if HAS_URNS == true
       staged_urns_enabled = urns_enabled;
       staged_urns_transport_enabled = urns_transport_enabled;
+      staged_urns_link_mtu_discovery = urns_link_mtu_discovery;
+      staged_urns_remote_mgmt_enabled = urns_remote_management_enabled;
+      staged_urns_probe_dest_enabled = urns_probe_destination_enabled;
     #endif
     #if HAS_ENCODER == true
       staged_encoder_enabled = encoder_enabled;
@@ -2038,7 +2067,7 @@
   // Single write site: only fields that actually changed get persisted,
   // and only once per menu session - never per detent.
   void menu_commit_and_exit() {
-    #if HAS_URNS == true
+    #if HAS_LXMF == true
       // Leaving the whole menu (not just backing out of the ping-result
       // screen, which already calls this itself) would otherwise abandon
       // a still-PENDING/HANDSHAKE link with nothing left to ever tear it
@@ -2115,8 +2144,19 @@
     #endif
     #if HAS_URNS == true
       {
+        // Safety net for the URNS_LIST confirm-handler's own gate (which
+        // only stops *opening* Probe Destination's edit screen while
+        // Transport Mode isn't staged on) - also cover the case where
+        // Transport Mode gets staged back off *after* Probe Destination
+        // was already staged/saved on in an earlier session. See that
+        // gate's own comment for why this combination crashes.
+        if (!staged_urns_transport_enabled) { staged_urns_probe_dest_enabled = false; }
+
         bool urns_enable_changed = (staged_urns_enabled != urns_enabled);
         bool urns_transport_changed = (staged_urns_transport_enabled != urns_transport_enabled);
+        bool urns_link_mtu_changed = (staged_urns_link_mtu_discovery != urns_link_mtu_discovery);
+        bool urns_remote_mgmt_changed = (staged_urns_remote_mgmt_enabled != urns_remote_management_enabled);
+        bool urns_probe_dest_changed = (staged_urns_probe_dest_enabled != urns_probe_destination_enabled);
         if (urns_enable_changed) {
           // Raw physical byte, not through eeprom_addr() - same convention
           // as ADDR_CONF_ESPNOW_MODE/LR above (ADDR_CONF_URNS, ROM.h).
@@ -2127,7 +2167,20 @@
           eeprom_update(ADDR_CONF_URNS_TRANSPORT, staged_urns_transport_enabled ? URNS_TRANSPORT_ENABLE_BYTE : URNS_TRANSPORT_DISABLE_BYTE);
           urns_transport_enabled = staged_urns_transport_enabled;
         }
-        if (urns_enable_changed || urns_transport_changed) { hard_reset(); }
+        if (urns_link_mtu_changed) {
+          eeprom_update(ADDR_CONF_URNS_LINK_MTU_DISCOVERY, staged_urns_link_mtu_discovery ? URNS_LINK_MTU_DISCOVERY_ENABLE_BYTE : URNS_LINK_MTU_DISCOVERY_DISABLE_BYTE);
+          urns_link_mtu_discovery = staged_urns_link_mtu_discovery;
+        }
+        if (urns_remote_mgmt_changed) {
+          eeprom_update(ADDR_CONF_URNS_REMOTE_MGMT, staged_urns_remote_mgmt_enabled ? URNS_REMOTE_MGMT_ENABLE_BYTE : URNS_REMOTE_MGMT_DISABLE_BYTE);
+          urns_remote_management_enabled = staged_urns_remote_mgmt_enabled;
+        }
+        if (urns_probe_dest_changed) {
+          eeprom_update(ADDR_CONF_URNS_PROBE_DEST, staged_urns_probe_dest_enabled ? URNS_PROBE_DEST_ENABLE_BYTE : URNS_PROBE_DEST_DISABLE_BYTE);
+          urns_probe_destination_enabled = staged_urns_probe_dest_enabled;
+        }
+        if (urns_enable_changed || urns_transport_changed || urns_link_mtu_changed ||
+            urns_remote_mgmt_changed || urns_probe_dest_changed) { hard_reset(); }
       }
     #endif
     #if HAS_ENCODER == true
@@ -2153,7 +2206,7 @@
         // (set once in espnow_init(), ESPNOW.h) does NOT get re-applied
         // live though - same pre-existing, documented residual limitation
         // as an external STA AP's channel differing from wr_channel
-        // (wifi_remote_reconnect()'s own comment, Remote.h) - a reboot is
+        // (wifi_remote_start_sta()'s own comment, Remote.h) - a reboot is
         // still needed for ESP-NOW to pick up a changed channel.
         eeprom_update(eeprom_addr(ADDR_CONF_WCHN), staged_wifi_channel);
         wr_channel = staged_wifi_channel;
@@ -2304,7 +2357,7 @@
   // Speed) already wrote to EEPROM the moment they were confirmed, so
   // there's nothing to discard for those either way.
   void menu_close_without_saving() {
-    #if HAS_URNS == true
+    #if HAS_LXMF == true
       // Same "don't abandon an in-flight ping" reasoning as
       // menu_commit_and_exit() above - this is the inactivity-timeout exit
       // path, so it's the one most likely to actually catch a ping mid-
@@ -2453,7 +2506,10 @@
         // ESPNOW_EDIT - urns_menu_cursor still points at whichever field
         // was open when this state was entered.
         if (urns_menu_cursor == URNS_ITEM_ENABLED) staged_urns_enabled = !staged_urns_enabled;
-        else                                       staged_urns_transport_enabled = !staged_urns_transport_enabled;
+        else if (urns_menu_cursor == URNS_ITEM_TRANSPORT) staged_urns_transport_enabled = !staged_urns_transport_enabled;
+        else if (urns_menu_cursor == URNS_ITEM_LINK_MTU_DISCOVERY) staged_urns_link_mtu_discovery = !staged_urns_link_mtu_discovery;
+        else if (urns_menu_cursor == URNS_ITEM_REMOTE_MGMT) staged_urns_remote_mgmt_enabled = !staged_urns_remote_mgmt_enabled;
+        else                                                staged_urns_probe_dest_enabled = !staged_urns_probe_dest_enabled;
       } else if (menu_state == MENU_STATE_URNS_PATHS) {
         buzzer_encoder_tick_melody();
         urns_paths_menu_cursor = menu_clamp_cursor(urns_paths_menu_cursor, dir, urns_path_display_row_count(), wrap);
@@ -2468,7 +2524,9 @@
         // it too, same as a confirm (see menu_confirm_select()).
         buzzer_encoder_tick_melody();
         menu_state = MENU_STATE_URNS_PATH_DETAIL;
-      } else if (menu_state == MENU_STATE_MSNGR_LIST) {
+      }
+      #if HAS_LXMF == true
+      else if (menu_state == MENU_STATE_MSNGR_LIST) {
         buzzer_encoder_tick_melody();
         msngr_menu_cursor = menu_clamp_cursor(msngr_menu_cursor, dir, MSNGR_TOP_ITEM_COUNT, wrap);
       } else if (menu_state == MENU_STATE_MSNGR_INBOX) {
@@ -2508,6 +2566,7 @@
         buzzer_encoder_tick_melody();
         msngr_send_result_cursor = menu_clamp_cursor(msngr_send_result_cursor, dir, 2, wrap);
       }
+      #endif
     #endif
     #if HAS_SENSORS == true
       else if (menu_state == MENU_STATE_SENSORS_LIST) {
@@ -2584,7 +2643,7 @@
   // through to the normal rotate handling - so holding the button while
   // turning anywhere else keeps behaving exactly as it already did.
   void menu_encoder_chord_rotate(int8_t dir) {
-    #if HAS_URNS == true
+    #if HAS_LXMF == true
       if (menu_state == MENU_STATE_MSNGR_TEXT_ENTRY) {
         msngr_kb_chord_used = true;
         uint8_t kb_row = msngr_kb_cursor / MSNGR_KB_COLS;
@@ -2624,7 +2683,7 @@
     }
   }
 
-  #if HAS_URNS == true
+  #if HAS_LXMF == true
     // Reached from button_event()'s own dedicated BUTTON_HOLD_TIER_MESSENGER
     // hold duration - lands directly on the Messenger app's top screen
     // rather than the settings top list, same "no-op if console/firmware-
@@ -2661,7 +2720,7 @@
       }
     #endif
 
-    #if HAS_URNS == true
+    #if HAS_LXMF == true
       if (menu_state == MENU_STATE_MSNGR_TEXT_ENTRY && msngr_kb_chord_used) {
         // The hold that's ending just chorded in one or more capital
         // letters (menu_encoder_chord_rotate()) - this release is the
@@ -2673,7 +2732,7 @@
     #endif
 
     unsigned long long_press_threshold = 700;
-    #if HAS_URNS == true
+    #if HAS_LXMF == true
       // Chording needs the button held down while rotating, which can
       // easily run past the normal 700ms threshold on a slow or deliberate
       // turn - a much longer threshold here means an ordinary chord
@@ -2683,7 +2742,7 @@
     #endif
 
     if (duration > long_press_threshold) {
-      #if HAS_URNS == true
+      #if HAS_LXMF == true
         if (menu_state == MENU_STATE_MSNGR_TEXT_ENTRY) {
           buzzer_encoder_click_melody();
           menu_msngr_text_entry_leave();
@@ -2741,20 +2800,22 @@
           gnss_menu_cursor = 0;
         }
       #endif
-      #if HAS_ESPNOW == true
-        else if (menu_cursor == MENU_ITEM_ESPNOW) {
-          menu_state = MENU_STATE_ESPNOW_LIST;
-          espnow_menu_cursor = 0;
-        }
-      #endif
-      #if HAS_URNS == true
+      #if HAS_LXMF == true
         else if (menu_cursor == MENU_ITEM_MESSENGER) {
           menu_state = MENU_STATE_MSNGR_LIST;
           msngr_menu_cursor = 0;
         }
+      #endif
+      #if HAS_URNS == true
         else if (menu_cursor == MENU_ITEM_URNS) {
           menu_state = MENU_STATE_URNS_LIST;
           urns_menu_cursor = 0;
+        }
+      #endif
+      #if HAS_ESPNOW == true
+        else if (menu_cursor == MENU_ITEM_ESPNOW) {
+          menu_state = MENU_STATE_ESPNOW_LIST;
+          espnow_menu_cursor = 0;
         }
       #endif
       #if HAS_SENSORS == true
@@ -3157,7 +3218,21 @@
       else if (menu_state == MENU_STATE_URNS_LIST) {
         if (urns_menu_cursor == URNS_ITEM_BACK) {
           menu_state = MENU_STATE_LIST;
-        } else if (urns_menu_cursor == URNS_ITEM_ENABLED || urns_menu_cursor == URNS_ITEM_TRANSPORT) {
+        } else if (urns_menu_cursor == URNS_ITEM_PROBE_DEST) {
+          // Requires Transport Mode - RNS::Transport::start() (both the
+          // vendored C++ port and upstream Python RNS, confirmed against
+          // ~/Development/Reticulum/RNS/Transport.py) only ever constructs
+          // the actual probe-responder Destination inside its own
+          // transport_enabled() branch. Turning this on without Transport
+          // Mode also on sets a flag with no real destination behind it -
+          // confirmed live on hardware to crash (Interrupt WDT panic,
+          // something downstream still touches the never-constructed
+          // Destination). Checks the *staged* value, not the live one, so
+          // a user can still turn both on together in one menu session
+          // before SAVE & EXIT reboots into the new state.
+          if (staged_urns_transport_enabled) { menu_state = MENU_STATE_URNS_EDIT; }
+        } else if (urns_menu_cursor == URNS_ITEM_ENABLED || urns_menu_cursor == URNS_ITEM_TRANSPORT ||
+                   urns_menu_cursor == URNS_ITEM_LINK_MTU_DISCOVERY || urns_menu_cursor == URNS_ITEM_REMOTE_MGMT) {
           menu_state = MENU_STATE_URNS_EDIT;
         } else if (urns_menu_cursor == URNS_ITEM_PATHS) {
           menu_state = MENU_STATE_URNS_PATHS;
@@ -3214,7 +3289,9 @@
         // A single fixed view, nothing to select - any confirm just
         // dismisses it, same as MENU_STATE_STATUS_POPUP.
         menu_state = MENU_STATE_URNS_PATH_DETAIL;
-      } else if (menu_state == MENU_STATE_MSNGR_LIST) {
+      }
+      #if HAS_LXMF == true
+      else if (menu_state == MENU_STATE_MSNGR_LIST) {
         if (msngr_menu_cursor == MSNGR_TOP_ITEM_BACK) {
           menu_state = MENU_STATE_LIST;
         } else if (msngr_menu_cursor == MSNGR_TOP_ITEM_INBOX) {
@@ -3468,6 +3545,7 @@
           menu_state = MENU_STATE_MSNGR_PEER;
         }
       }
+      #endif
     #endif
     #if HAS_SENSORS == true
       else if (menu_state == MENU_STATE_SENSORS_LIST) {
@@ -3766,6 +3844,7 @@
       MENU_GFX.print(line2.c_str());
     }
 
+  #if HAS_LXMF == true
     // MENU_STATE_MSNGR_TEXT_ENTRY's on-screen keyboard - a real grid (not
     // a draw_menu_list_disp() vertical list), so it gets its own draw
     // function, same as draw_menu_memory_disp() above. Header/footer reuse
@@ -3896,6 +3975,7 @@
         MENU_GFX.print("tap:next hold:open");
       #endif
     }
+  #endif
   #endif
 
   #if MCU_VARIANT == MCU_ESP32
@@ -4312,14 +4392,24 @@
         sprintf(valbufs[MENU_ITEM_SOUND], staged_sound_enabled ? "ON" : "OFF");
       #endif
 
-      #if HAS_ESPNOW == true
-        labels[MENU_ITEM_ESPNOW] = "ESP-NOW";
-        sprintf(valbufs[MENU_ITEM_ESPNOW], ">"); // opens a submenu, not an inline value
-      #endif
-
       #if HAS_ENCODER == true
         labels[MENU_ITEM_ENCODER] = "Encoder";
         sprintf(valbufs[MENU_ITEM_ENCODER], staged_encoder_enabled ? "ON" : "OFF");
+      #endif
+
+      #if HAS_LXMF == true
+        labels[MENU_ITEM_MESSENGER] = "Messenger";
+        sprintf(valbufs[MENU_ITEM_MESSENGER], ">"); // opens a submenu, not an inline value
+      #endif
+
+      #if HAS_URNS == true
+        labels[MENU_ITEM_URNS] = "URNS";
+        sprintf(valbufs[MENU_ITEM_URNS], ">"); // opens a submenu, not an inline value
+      #endif
+
+      #if HAS_ESPNOW == true
+        labels[MENU_ITEM_ESPNOW] = "ESP-NOW";
+        sprintf(valbufs[MENU_ITEM_ESPNOW], ">"); // opens a submenu, not an inline value
       #endif
 
       #if HAS_WIFI == true
@@ -4355,14 +4445,6 @@
       #if HAS_OTA == true
         labels[MENU_ITEM_FW_UPDATE] = "F/W Update";
         sprintf(valbufs[MENU_ITEM_FW_UPDATE], ">"); // opens a submenu, not an inline value
-      #endif
-
-      #if HAS_URNS == true
-        labels[MENU_ITEM_MESSENGER] = "Messenger";
-        sprintf(valbufs[MENU_ITEM_MESSENGER], ">"); // opens a submenu, not an inline value
-
-        labels[MENU_ITEM_URNS] = "URNS";
-        sprintf(valbufs[MENU_ITEM_URNS], ">"); // opens a submenu, not an inline value
       #endif
 
       labels[MENU_ITEM_SAVE_EXIT] = "SAVE & EXIT";
@@ -4695,6 +4777,23 @@
         labels[URNS_ITEM_TRANSPORT] = "Transport Mode";
         sprintf(valbufs[URNS_ITEM_TRANSPORT], staged_urns_transport_enabled ? "ON" : "OFF");
 
+        labels[URNS_ITEM_LINK_MTU_DISCOVERY] = "Link MTU Discovery";
+        sprintf(valbufs[URNS_ITEM_LINK_MTU_DISCOVERY], staged_urns_link_mtu_discovery ? "ON" : "OFF");
+
+        labels[URNS_ITEM_REMOTE_MGMT] = "Remote Management";
+        sprintf(valbufs[URNS_ITEM_REMOTE_MGMT], staged_urns_remote_mgmt_enabled ? "ON" : "OFF");
+
+        labels[URNS_ITEM_PROBE_DEST] = "Probe Destination";
+        // Inert (see the confirm-handler's own gate/comment) unless
+        // Transport Mode is staged on too - shown as N/A rather than a
+        // silent dead-end row, same "explain why, don't just ignore the
+        // press" reasoning as every other gated field in this menu.
+        if (staged_urns_transport_enabled) {
+          sprintf(valbufs[URNS_ITEM_PROBE_DEST], staged_urns_probe_dest_enabled ? "ON" : "OFF");
+        } else {
+          sprintf(valbufs[URNS_ITEM_PROBE_DEST], "N/A");
+        }
+
         labels[URNS_ITEM_PATHS] = "Path Table";
         sprintf(valbufs[URNS_ITEM_PATHS], "%u", (unsigned)RNS::Transport::new_path_table().size());
 
@@ -4761,8 +4860,14 @@
       } else if (menu_state == MENU_STATE_URNS_EDIT) {
         if (urns_menu_cursor == URNS_ITEM_ENABLED) {
           draw_menu_edit_disp("URNS ENABLED", staged_urns_enabled ? "ON" : "OFF");
-        } else {
+        } else if (urns_menu_cursor == URNS_ITEM_TRANSPORT) {
           draw_menu_edit_disp("TRANSPORT MODE", staged_urns_transport_enabled ? "ON" : "OFF");
+        } else if (urns_menu_cursor == URNS_ITEM_LINK_MTU_DISCOVERY) {
+          draw_menu_edit_disp("LINK MTU DISCOVERY", staged_urns_link_mtu_discovery ? "ON" : "OFF");
+        } else if (urns_menu_cursor == URNS_ITEM_REMOTE_MGMT) {
+          draw_menu_edit_disp("REMOTE MANAGEMENT", staged_urns_remote_mgmt_enabled ? "ON" : "OFF");
+        } else {
+          draw_menu_edit_disp("PROBE DESTINATION", staged_urns_probe_dest_enabled ? "ON" : "OFF");
         }
       } else if (menu_state == MENU_STATE_URNS_PATHS) {
         // Built fresh every draw call, same "recompute live state each
@@ -4843,7 +4948,9 @@
         draw_menu_list_disp("PATH DETAIL", labels, valbufs, URNS_PATH_DETAIL_ITEM_COUNT, urns_path_detail_cursor);
       } else if (menu_state == MENU_STATE_URNS_PATH_HASH_VIEW) {
         draw_menu_urns_path_hash_disp();
-      } else if (menu_state == MENU_STATE_MSNGR_LIST) {
+      }
+      #if HAS_LXMF == true
+      else if (menu_state == MENU_STATE_MSNGR_LIST) {
         const char *labels[MSNGR_TOP_ITEM_COUNT];
         char valbufs[MSNGR_TOP_ITEM_COUNT][24];
 
@@ -5102,6 +5209,7 @@
         snprintf(title, sizeof(title), "SEND: %s", messenger_peer_display_name(msngr_active_peer_hash).c_str());
         draw_menu_list_disp(title, labels, valbufs, 2, msngr_send_result_cursor);
       }
+      #endif
     #endif
     #if HAS_SENSORS == true
       else if (menu_state == MENU_STATE_SENSORS_LIST) {

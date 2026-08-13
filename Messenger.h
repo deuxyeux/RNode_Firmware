@@ -29,10 +29,9 @@
   #include <LXMF/MessageStore.h>
   #pragma pop_macro("MTU")
 
-  // For messenger_rns_log_to_debug_uart()'s mutex - not reliably pulled in
-  // transitively just via Arduino.h in this build (lib/microLXMF's own
-  // LXStamper.cpp needs the same explicit includes for its own FreeRTOS
-  // task/mutex use).
+  // Not reliably pulled in transitively just via Arduino.h in this build -
+  // lib/microLXMF's own LXStamper.cpp needs these same explicit includes
+  // for its own FreeRTOS task/mutex use.
   #ifdef ESP_PLATFORM
     #include <freertos/FreeRTOS.h>
     #include <freertos/semphr.h>
@@ -346,7 +345,7 @@
 
   // Only ever sees announces from the delivery destinations of real LXMF
   // peers (aspect_filter "lxmf.delivery") - not the "rnode.onboard" Phase 1
-  // test destination URNS.h's own UrnsAnnounceHandler logs everything for.
+  // test destination.
   class MessengerAnnounceHandler : public RNS::AnnounceHandler {
   public:
     MessengerAnnounceHandler() : RNS::AnnounceHandler("lxmf.delivery") {}
@@ -667,32 +666,12 @@
   }
 
   #if HAS_DEBUG_UART == true
-    // RNS::doLog() (lib/microReticulum's Log.cpp) writes to the native USB
-    // CDC `Serial` by default - the same port the binary KISS protocol
-    // uses. On this board that meant RNS's own ERROR/INFO/DEBUG calls
-    // (used throughout MessageStore.cpp, LXMRouter.cpp, Transport.cpp,
-    // ...) were either invisible (no KISS host attached) or, worse, mixed
-    // straight into the KISS byte stream a real host *was* reading (a
-    // latent corruption risk, not just a visibility gap). Tee them to
-    // Serial0 instead - the dedicated debug UART this board actually has
-    // free (see HAS_DEBUG_UART, Boards.h) - via the log framework's own
-    // callback hook. This is what actually surfaced the real
-    // MessageStore-never-initializes bug (see remove_message_hash()'s own
-    // comment, MessageStore.cpp) - keeping it registered permanently.
-    //
-    // This callback isn't only ever called from loop()'s own task:
-    // LXStamper's async stamp-generation worker (lib/microLXMF's
-    // LXStamper.cpp) runs on its own FreeRTOS task, explicitly
-    // xTaskCreatePinnedToCore()'d to core 0 specifically so it doesn't
-    // compete with loop() on core 1 - and generate_stamp() itself calls
-    // INFO()/DEBUG() while it runs, landing here from that other core.
-    // DEBUG_LOG() itself no longer touches Serial0 directly from the
-    // caller's own task (see Utilities.h, debug_log_guarded()) - it just
-    // queues the line for a dedicated consumer task to print, so no
-    // extra guarding needed here regardless of which task calls this.
-    void messenger_rns_log_to_debug_uart(const char *msg, RNS::LogLevel level) {
-      DEBUG_LOG("[RNS] %s\r\n", msg);
-    }
+    // Note: the RNS log callback itself (formerly defined here as
+    // messenger_rns_log_to_debug_uart(), teeing to Serial0) now lives in
+    // URNS.h as urns_rns_log_callback() - see that function's own comment
+    // for why it moved (this file's messenger_init() is HAS_LXMF-only,
+    // which left HAS_URNS-but-not-HAS_LXMF boards with no callback
+    // registered at all).
 
     // User-requested: a periodic Serial0 line (independent of anything
     // else logging) so a physical TX LED on the debug UART adapter keeps
@@ -750,28 +729,23 @@
   }
 
   void messenger_init() {
-    #if HAS_DEBUG_UART == true
-      RNS::set_log_callback(messenger_rns_log_to_debug_uart);
-      // The default runtime level (Log.cpp: `LogLevel _level = LOG_TRACE;`)
-      // is the single most verbose setting this framework has - every
-      // packet, announce, and resource tick throughout Transport/
-      // LXMRouter/MessageStore logs at INFO/VERBOSE/DEBUG/TRACE, and each
-      // one is now a synchronous, blocking Serial0.printf() at 115200
-      // baud (see messenger_rns_log_to_debug_uart()'s own comment) sitting
-      // directly in loop()'s critical path. Confirmed on real hardware:
-      // normal radio/mesh traffic under the full TRACE firehose made the
-      // whole device sluggish - buttons/menu barely responsive, not
-      // frozen outright but clearly starved. NOTICE keeps genuinely
-      // actionable state changes (errors, warnings, established/closed
-      // links, etc.) without the ordinary per-packet chatter. Bump this
-      // back up temporarily (RNS::loglevel(RNS::LOG_TRACE) or similar) for
-      // a future deep-debugging session - it's what found the
-      // MessageStore-never-initializes bug - just don't leave it there.
-      RNS::loglevel(RNS::LOG_NOTICE);
-    #endif
+    // RNS::set_log_callback()/loglevel() now happen unconditionally in
+    // urns_init() (URNS.h, HAS_URNS-gated) instead of here - this used to
+    // be HAS_LXMF-only, which left HAS_URNS-but-not-HAS_LXMF boards
+    // (MeshPoE-S3) with no log callback registered at all and RNS::doLog()
+    // silently corrupting the main KISS Serial stream with raw log text
+    // (see urns_rns_log_callback()'s own comment, URNS.h). urns_init()
+    // always runs before messenger_init() (RNode_Firmware.ino setup()), so
+    // this is already done by the time we get here.
     urns_message_store = new LXMF::MessageStore(URNS_BASE_PATH "/messages");
+    #if HAS_DEBUG_UART == true
+      if (!heap_caps_check_integrity_all(true)) { Serial0.print("[HeapCorruption] detected after MessageStore construction\r\n"); }
+    #endif
     RNS::Transport::register_announce_handler(msngr_announce_handler);
     messenger_bookmarks_load();
+    #if HAS_DEBUG_UART == true
+      if (!heap_caps_check_integrity_all(true)) { Serial0.print("[HeapCorruption] detected after messenger_bookmarks_load\r\n"); }
+    #endif
     DEBUG_LOG("[Messenger] ready, %u bookmark(s) loaded\r\n", (unsigned)msngr_bookmark_count);
   }
 
