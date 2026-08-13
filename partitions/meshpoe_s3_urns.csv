@@ -1,0 +1,35 @@
+# Name,   Type, SubType, Offset,  Size, Flags
+#
+# Derived from the stock esp32 core 3.3.11 default_16MB.csv, same shrink-app1
+# approach as partitions/meshadventurer_s3_urns.csv - see that file's own
+# comment for the full reasoning on why a "urns" LittleFS partition exists at
+# all and why 512KB (the very first attempt, on that board) was too small.
+#
+# HAS_CONSOLE is false on this board too now (Boards.h) - the same NimBLE/
+# LittleFS-corruption crash that motivated dropping it on MeshAdventurer-S3
+# applies identically here (same HAS_BLUETOOTH false/HAS_BLE true NimBLE-only
+# setup). With Console.h's SPIFFS filesystem entirely unused, the dedicated
+# "spiffs" partition is dropped and folded into urns, same as that board.
+#
+# app1 (the ota_1/second OTA slot) IS actually used - Boards.h sets HAS_OTA
+# true for this board, and OTA.h's esp_https_ota-based updater writes new
+# images into the *inactive* OTA partition. Shrunk from 6.25MB to 3MB, same
+# as MeshAdventurer-S3 - still comfortable headroom over the current
+# ~2.1-2.2MB firmware. app0 (the slot actually running) is untouched.
+#
+# Net: urns grows from the previous 3.5MB (app1's freed space only) to
+# ~6.9MB (0x6E0000, app1 + the reclaimed spiffs space) - matches
+# MeshAdventurer-S3's own urns size exactly, same reasoning.
+#
+# NOTE: same as meshadventurer_s3_urns.csv - growing/moving the urns
+# partition changes its flash offset, so the LittleFS filesystem there gets
+# reformatted from scratch on first boot after this change (LittleFS.begin
+# (true, ...)'s formatOnFail) - this includes the node's own persisted
+# identity. The RNode gets a new destination hash; existing peers need to
+# hear a fresh announce from it.
+nvs,      data, nvs,     0x9000,  0x5000,
+otadata,  data, ota,     0xe000,  0x2000,
+app0,     app,  ota_0,   0x10000, 0x600000,
+app1,     app,  ota_1,   0x610000,0x300000,
+urns,     data, spiffs,  0x910000,0x6E0000,
+coredump, data, coredump,0xFF0000,0x10000,
