@@ -76,7 +76,7 @@ class BLESerial : public BLECharacteristicCallbacks, public BLEServerCallbacks, 
 public:
   BLESerial();
 
-  void begin(const char *name);
+  bool begin(const char *name);
   void end();
   void disconnect();
   void startAdvertising();

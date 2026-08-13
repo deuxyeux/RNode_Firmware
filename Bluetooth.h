@@ -197,6 +197,41 @@ char bt_da[BT_DEV_ADDR_LEN];
     }
 
   #elif HAS_BLE == true
+    #if HAS_URNS == true && (HAS_WIFI == true || HAS_ETHERNET == true)
+      // BLE and WiFi/Ethernet networking can't both be up at once on
+      // HAS_URNS boards - the internal-DRAM budget doesn't have room for
+      // both. Confirmed live: URNS/Reticulum's own init costs ~53KB,
+      // WiFi Remote's STA/lwIP bring-up costs ~50KB more (not ESP-NOW
+      // itself, which is cheap - it's the underlying WiFi.mode() call),
+      // leaving too little margin for bt_start()'s own ~78-82KB
+      // nimble_port_init() spike. A failed/partial bt_start() doesn't
+      // fail cleanly either - it drains the heap enough (observed: under
+      // 1KB free afterward) to also break the still-running WiFi stack,
+      // which is worse than just refusing up front. See
+      // project_meshpoe_s3_ble_urns_memory_crunch memory for the full
+      // budget breakdown.
+      //
+      // One-directional by design (matches what was actually asked for):
+      // this only blocks BLE from coming up while networking is active.
+      // It does NOT tear down BLE if WiFi/Ethernet gets turned on while
+      // BLE is already running - that reverse case can still recreate the
+      // same conflict and isn't guarded here.
+      #if HAS_WIFI == true
+        #include <WiFi.h>
+      #endif
+      #if HAS_ETHERNET == true
+        extern bool eth_disabled;
+      #endif
+      bool ble_networking_conflict() {
+        #if HAS_WIFI == true
+          if (WiFi.getMode() != WIFI_MODE_NULL) return true;
+        #endif
+        #if HAS_ETHERNET == true
+          if (!eth_disabled) return true;
+        #endif
+        return false;
+      }
+    #endif
     bool bt_setup_hw(); void bt_security_setup();
     BLESecurity *ble_security = new BLESecurity();
     bool ble_authenticated = false;
@@ -204,13 +239,59 @@ char bt_da[BT_DEV_ADDR_LEN];
 
     void bt_flush() { if (bt_state == BT_STATE_CONNECTED) { SerialBT.flush(); } }
 
+    // Minimum uptime before it's safe to actually bring up the NimBLE
+    // stack (SerialBT.begin() below, which wraps BLEDevice::init() ->
+    // nimble_port_init()). Confirmed live on hardware: a button press in
+    // roughly the first 6-7s after boot lands while WiFi's own driver
+    // init/connect sequence is still active, and the two contend for the
+    // shared radio/controller - nimble_port_init() fails ("rc=-1 Unknown
+    // ESP_ERR error") and BLEDevice::createServer() right after it derefs
+    // state that was never set up, crashing with an unhandled
+    // LoadProhibited exception rather than erroring out gracefully. 10s
+    // gives real margin past the observed ~6-7s danger window. A press
+    // this early just silently does nothing rather than crashing - the
+    // device is still mid-boot-sequence at this point anyway.
+    #define BT_START_MIN_UPTIME_MS 10000
     void bt_start() {
       // Serial.println("BT start");
+      if (millis() < BT_START_MIN_UPTIME_MS) return;
+      #if HAS_URNS == true && (HAS_WIFI == true || HAS_ETHERNET == true)
+        // See ble_networking_conflict()'s own comment (above) for why -
+        // silent no-op, matching the BT_START_MIN_UPTIME_MS guard just
+        // above.
+        if (ble_networking_conflict()) return;
+      #endif
       display_unblank();
       if (bt_state == BT_STATE_OFF) {
-        bt_state = BT_STATE_ON;
-        SerialBT.begin(bt_devname);
-        SerialBT.setTimeout(10);
+        // Temporary diagnostic - correlate free heap with a real nimble_
+        // port_init() failure to check the memory-pressure hypothesis
+        // (bt_start() alone was previously measured needing ~82KB).
+        // HEAP_TRACE (RNode_Firmware.ino) isn't visible yet at this point
+        // in the include chain (Utilities.h, which pulls this file in,
+        // is #include'd before HEAP_TRACE is #define'd) - same reasoning
+        // as URNS.h's own DEBUG_LOG-not-HEAP_TRACE usage.
+        // internal=X - RNS_CONTAINER_ALLOCATOR=RNS_PSRAM_ALLOCATOR (this
+        // session) merges PSRAM into the general MALLOC_CAP_DEFAULT heap,
+        // so plain getFreeHeap() no longer distinguishes "plenty of PSRAM,
+        // starved for internal DRAM" from genuine overall exhaustion -
+        // and FreeRTOS kernel objects (semaphores/queues, which is exactly
+        // what BLEServer's constructor allocates) can only ever come from
+        // internal DRAM, never PSRAM. Measuring both to tell those apart.
+        DEBUG_LOG("[HeapTrace] bt_start:before_begin free=%u internal=%u\r\n", (unsigned)ESP.getFreeHeap(), (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+        // SerialBT.begin() (BLESerial::begin(), BLESerial.cpp) now returns
+        // false instead of crashing when the underlying BLEDevice::init()
+        // fails (confirmed live: a WiFi/BLE coexistence race can still make
+        // nimble_port_init() fail even past BT_START_MIN_UPTIME_MS above -
+        // that guard reduces how often this is hit, it doesn't guarantee
+        // it can't happen). Only claim bt_state == ON if init actually
+        // succeeded, so a failed attempt can be retried by pressing again
+        // instead of getting stuck showing BT as on with nothing running.
+        bool ok = SerialBT.begin(bt_devname);
+        DEBUG_LOG("[HeapTrace] bt_start:after_begin free=%u\r\n", (unsigned)ESP.getFreeHeap());
+        if (ok) {
+          bt_state = BT_STATE_ON;
+          SerialBT.setTimeout(10);
+        }
       }
     }
 

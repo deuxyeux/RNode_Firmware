@@ -115,9 +115,21 @@ void BLESerial::disconnect() {
   }
 }
 
-void BLESerial::begin(const char *name) {
+bool BLESerial::begin(const char *name) {
   ConnectedDeviceCount = 0;
-  BLEDevice::init(name);
+  // BLEDevice::init() (Arduino core) returns false on failure - e.g.
+  // nimble_port_init() failing due to a WiFi/BLE controller coexistence
+  // race - but the original code here discarded that return value and
+  // proceeded regardless. Confirmed live on hardware, decoded via
+  // addr2line: esp_ble_tx_power_set() right below then derefs NimBLE host
+  // state that was never actually initialized, crashing with an unhandled
+  // LoadProhibited exception. Bail out here instead, leaving the BLE
+  // stack untouched so the caller (bt_start(), Bluetooth.h) can revert
+  // bt_state back to OFF rather than getting stuck ON with nothing
+  // actually running.
+  if (!BLEDevice::init(name)) {
+    return false;
+  }
 
   esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_DEFAULT, ESP_PWR_LVL_P9);
   esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV, ESP_PWR_LVL_P9);
@@ -129,6 +141,7 @@ void BLESerial::begin(const char *name) {
 
   SetupSerialService();
   this->startAdvertising();
+  return true;
 }
 
 void BLESerial::startAdvertising() {
