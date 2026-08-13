@@ -427,7 +427,17 @@ LXMessage LXMessage::unpack_from_bytes(const Bytes& lxmf_bytes, Type::Message::M
 			}
 		};
 
-		for (size_t i = 0; i < map_size.size() && temp_fields_count < MAX_FIELDS; ++i) {
+		// Must always skip-parse every field the map claims to have, even
+		// once temp_fields_count hits MAX_FIELDS - fields_p has to end up
+		// past the *entire* fields section for target_offset (below) to be
+		// correct. Stopping the loop early here used to leave fields_p
+		// pointing mid-data whenever a peer sent >MAX_FIELDS fields, which
+		// desynced the Unpacker's cursor reposition below and let the
+		// subsequent stamp deserialize() read a length-prefixed binary
+		// blob from a bogus offset - a real, confirmed heap-corrupting bug
+		// (arbitrary peer-controlled "length" read from unsynced data,
+		// then allocated/copied).
+		for (size_t i = 0; i < map_size.size(); ++i) {
 			const uint8_t* k_start = fields_p;
 			if (!skip(fields_p, fields_end)) break;
 			const uint8_t* k_end = fields_p;
@@ -435,10 +445,12 @@ LXMessage LXMessage::unpack_from_bytes(const Bytes& lxmf_bytes, Type::Message::M
 			if (!skip(fields_p, fields_end)) break;
 			const uint8_t* v_end = fields_p;
 
-			temp_fields[temp_fields_count].in_use = true;
-			temp_fields[temp_fields_count].key.assign(k_start, k_end - k_start);
-			temp_fields[temp_fields_count].value.assign(v_start, v_end - v_start);
-			++temp_fields_count;
+			if (temp_fields_count < MAX_FIELDS) {
+				temp_fields[temp_fields_count].in_use = true;
+				temp_fields[temp_fields_count].key.assign(k_start, k_end - k_start);
+				temp_fields[temp_fields_count].value.assign(v_start, v_end - v_start);
+				++temp_fields_count;
+			}
 		}
 		// Reposition the Unpacker's item cursor past the entire fields
 		// portion so the optional stamp (element 4) deserializes from
