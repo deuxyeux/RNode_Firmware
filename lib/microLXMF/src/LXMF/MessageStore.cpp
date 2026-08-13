@@ -429,6 +429,17 @@ bool MessageStore::save_message(const LXMessage& message) {
 
 	INFO("Saving message: " + message.hash().toHex());
 
+	// Bisecting the residual per-message heap loss (see on_packet's own
+	// comment, LXMRouter.cpp) further into save_message()'s own phases -
+	// live testing confirmed heap declines steadily with received-message
+	// count even before RETAINED_MESSAGES_PER_CONVERSATION trimming ever
+	// kicks in (so it's not a trim/evict bug), and the decline is present
+	// well before this call returns (on_delivery's own before/after, which
+	// wraps this call, already shows it) - so it's somewhere in here.
+	#if MCU_VARIANT == MCU_ESP32
+		unsigned smh_free_entry = ESP.getFreeHeap();
+	#endif
+
 	// Make room *before* attempting any write below, not after - a
 	// critically full filesystem (see RETAINED_MESSAGES_PER_CONVERSATION/
 	// MAX_TOTAL_RETAINED_MESSAGES, MessageStore.h) fails the new
@@ -571,6 +582,13 @@ bool MessageStore::save_message(const LXMessage& message) {
 		payload_committed = true;
 
 		DEBUG("  Message file saved: " + message_path);
+		#if MCU_VARIANT == MCU_ESP32
+			unsigned smh_free_after_payload = ESP.getFreeHeap();
+			char smh_buf1[128];
+			snprintf(smh_buf1, sizeof(smh_buf1), "[HeapDelta] save_message after_payload_commit before=%u after=%u delta=%ld",
+				smh_free_entry, smh_free_after_payload, (long)smh_free_entry - (long)smh_free_after_payload);
+			NOTICE(smh_buf1);
+		#endif
 
 		// Update conversation index
 		// Determine peer hash (the other party in the conversation)
@@ -646,6 +664,13 @@ bool MessageStore::save_message(const LXMessage& message) {
 			Utilities::OS::remove_file(backup_message_path.c_str());
 		}
 		payload_committed = false;
+		#if MCU_VARIANT == MCU_ESP32
+			unsigned smh_free_after_index = ESP.getFreeHeap();
+			char smh_buf2[128];
+			snprintf(smh_buf2, sizeof(smh_buf2), "[HeapDelta] save_message after_index_commit before=%u after=%u delta=%ld",
+				smh_free_after_payload, smh_free_after_index, (long)smh_free_after_payload - (long)smh_free_after_index);
+			NOTICE(smh_buf2);
+		#endif
 
 		// The replacement index is now durable. It is safe to remove the
 		// hard-cap payload that the committed index no longer references.
@@ -681,6 +706,15 @@ bool MessageStore::save_message(const LXMessage& message) {
 		// more than the store-wide cap.
 		trim_conversation_to_retention(peer_hash);
 		trim_global_total();
+
+		#if MCU_VARIANT == MCU_ESP32
+			unsigned smh_free_exit = ESP.getFreeHeap();
+			char smh_buf3[160];
+			snprintf(smh_buf3, sizeof(smh_buf3), "[HeapDelta] save_message after_cull_trim before=%u after=%u delta=%ld total_delta=%ld",
+				smh_free_after_index, smh_free_exit, (long)smh_free_after_index - (long)smh_free_exit,
+				(long)smh_free_entry - (long)smh_free_exit);
+			NOTICE(smh_buf3);
+		#endif
 
 		INFO("Message saved successfully");
 		return true;

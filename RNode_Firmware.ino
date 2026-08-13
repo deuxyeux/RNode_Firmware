@@ -60,7 +60,21 @@
   // that's already critical. This traces free internal heap at each major
   // setup() stage to find which specific subsystem's init is the actual
   // big consumer, instead of continuing to guess.
-  #define HEAP_TRACE(label) DEBUG_LOG("[HeapTrace] %s free=%u\r\n", label, (unsigned)ESP.getFreeHeap())
+  // psram_free/psram_used added to directly answer "is RNS_CONTAINER_
+  // ALLOCATOR=RNS_PSRAM_ALLOCATOR (platformio.ini) actually landing
+  // anything in PSRAM" - the on-device Memory menu showing 0% PSRAM used
+  // raised the question live. ContainerAllocator::allocate() (vendored
+  // microReticulum, Utilities/Memory.h) does call ps_malloc() correctly
+  // when this allocator is selected, but RNS_USE_FS (also set) means the
+  // bulk PathTable/AnnounceTable/hashlist *record* data is file-backed
+  // (microStore::BasicFileStore, LittleFS) rather than RAM-resident at
+  // all - only smaller/more transient in-memory Bytes/container objects
+  // ever actually go through ps_malloc(), so genuinely near-zero PSRAM
+  // usage at a given instant doesn't necessarily mean the allocator isn't
+  // working, just that URNS's real day-to-day allocations are mostly on
+  // disk already. Tracking free PSRAM at every existing HEAP_TRACE call
+  // site to get real data instead of guessing.
+  #define HEAP_TRACE(label) DEBUG_LOG("[HeapTrace] %s free=%u psram_free=%u psram_used=%u\r\n", label, (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getFreePsram(), (unsigned)(ESP.getPsramSize() - ESP.getFreePsram()))
 #endif
 
 // Same temporary-diagnostic scope as the watchdog below. The checkpoint
@@ -888,6 +902,9 @@ void setup() {
     #endif
     #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
       HEAP_TRACE("after bt_init");
+      #if HAS_LXMF == true && HAS_DEBUG_UART == true
+        if (!heap_caps_check_integrity_all(true)) { Serial0.print("[HeapCorruption] detected after bt_init\r\n"); }
+      #endif
     #endif
 
     if (console_active) {
@@ -957,6 +974,9 @@ void setup() {
       #endif
       #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
         HEAP_TRACE("after espnow_init");
+        #if HAS_LXMF == true && HAS_DEBUG_UART == true
+          if (!heap_caps_check_integrity_all(true)) { Serial0.print("[HeapCorruption] detected after espnow_init\r\n"); }
+        #endif
       #endif
       #if HAS_ETHERNET == true
         eth_speed_mode = EEPROM.read(eeprom_addr(ADDR_CONF_ETHSPD));
@@ -1014,6 +1034,9 @@ void setup() {
         #else
           if (WiFi.getMode() != WIFI_MODE_NULL) { ota_server_init(); }
         #endif
+        #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true && HAS_LXMF == true && HAS_DEBUG_UART == true
+          if (!heap_caps_check_integrity_all(true)) { Serial0.print("[HeapCorruption] detected after ota_server_init\r\n"); }
+        #endif
       #endif
       kiss_indicate_reset();
     }
@@ -1048,6 +1071,9 @@ void setup() {
   if (hw_ready) { DEBUG_LOG("RNode ready\r\n"); }
   #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
     HEAP_TRACE("setup:end");
+    #if HAS_LXMF == true && HAS_DEBUG_UART == true
+      if (!heap_caps_check_integrity_all(true)) { Serial0.print("[HeapCorruption] detected at setup:end\r\n"); }
+    #endif
   #endif
 
   #if HAS_URNS == true
@@ -3027,9 +3053,22 @@ void loop() {
   #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
     esp_task_wdt_reset();
   #endif
+  // housekeeping_task()/kiss_tx_task() (this file) run as their own
+  // dedicated FreeRTOS tasks, not folded onto loopTask - see their own
+  // comments for why. They briefly were folded here (to recover ~14KB+ of
+  // task stack/TCB overhead for BLE's DRAM margin, matching
+  // microReticulum_Firmware's zero-extra-task shape) but that reintroduced
+  // a real, confirmed hang: StallCapture caught loopTask blocked exactly at
+  // this point (checkpoint stuck at "housekeeping_poll", CPU idle, task
+  // watchdog firing ~25s later) - the "Serial.write() occasionally never
+  // returns" USBCDC quirk these tasks were originally isolated to protect
+  // against. stall_monitor_task (RNode_Firmware.ino) is what caught and
+  // reported it - it stayed a separate task throughout since it can't
+  // detect loopTask stalling from loopTask itself.
   #if HAS_URNS == true
     if (urns_ready) {
       #if MCU_VARIANT == MCU_ESP32
+        check_heap_integrity("loop:top");
         set_checkpoint("urns_reticulum.loop");
       #endif
       urns_reticulum.loop();
@@ -3140,6 +3179,9 @@ void loop() {
       set_checkpoint("check_modem_status");
     #endif
     check_modem_status();
+    #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
+      check_heap_integrity("check_modem_status");
+    #endif
 
   } else {
     if (hw_ready) {
@@ -3190,11 +3232,17 @@ void loop() {
     if (!fifo_isempty_locked(&serialFIFO)) serial_poll();
   #endif
 
+  #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
+    check_heap_integrity("serial_poll");
+  #endif
   #if HAS_DISPLAY
     #if MCU_VARIANT == MCU_ESP32
       set_checkpoint("update_display");
     #endif
     if (disp_ready && !display_updating) update_display();
+  #endif
+  #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
+    check_heap_integrity("update_display");
   #endif
 
   #if HAS_BUZZER == true
@@ -3229,32 +3277,68 @@ void loop() {
   #if MCU_VARIANT == MCU_ESP32
     set_checkpoint("loop:tail");
   #endif
+  #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
+    check_heap_integrity("loop:tail");
+  #endif
 
   #if HAS_OTA == true
+    #if MCU_VARIANT == MCU_ESP32
+      set_checkpoint("ota_loop");
+    #endif
     if (!console_active) ota_loop();
   #endif
 
   #if HAS_ESPNOW == true
+    #if MCU_VARIANT == MCU_ESP32
+      set_checkpoint("update_espnow");
+    #endif
     if (espnow_enabled) { update_espnow(); update_espnow_tx(); }
   #endif
 
   #if HAS_GPS == true
+    #if MCU_VARIANT == MCU_ESP32
+      set_checkpoint("gnss_update");
+    #endif
     gnss_update();
   #endif
 
   #if HAS_INPUT
+    #if MCU_VARIANT == MCU_ESP32
+      set_checkpoint("input_read");
+    #endif
     input_read();
   #endif
 
   #if HAS_ENCODER == true
+    #if MCU_VARIANT == MCU_ESP32
+      set_checkpoint("encoder_process");
+    #endif
     encoder_process();
   #endif
   #if HAS_MENU == true
+    #if MCU_VARIANT == MCU_ESP32
+      set_checkpoint("menu_button_process");
+    #endif
     menu_button_process();
+    #if MCU_VARIANT == MCU_ESP32
+      set_checkpoint("menu_timeout_process");
+    #endif
     menu_timeout_process();
     #if HAS_WIFI == true || HAS_ETHERNET == true
+      #if MCU_VARIANT == MCU_ESP32
+        set_checkpoint("menu_popup_process");
+      #endif
       menu_popup_process();
     #endif
+  #endif
+  #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
+    check_heap_integrity("menu_tail");
+  #endif
+  #if MCU_VARIANT == MCU_ESP32
+    set_checkpoint("loop:end");
+  #endif
+  #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
+    check_heap_integrity("loop:end");
   #endif
 
   if (memory_low) {
