@@ -755,7 +755,10 @@
   // is held pending for MENU_BTN_DOUBLE_TAP_WINDOW ms in case a second one
   // follows (see menu_button_process(), polled from loop()) - if it does,
   // the pair is treated as "go backward" instead of two forward steps.
-  #define MENU_BTN_DOUBLE_TAP_WINDOW 200
+  // Loosened from 200 to 300 (per user feedback - navigation felt too tight
+  // to land a double-tap reliably) - now a bit more forgiving than
+  // MeshCore's own comparable MULTI_CLICK_WINDOW_MS (280ms).
+  #define MENU_BTN_DOUBLE_TAP_WINDOW 300
   bool menu_btn_pending = false;
   unsigned long menu_btn_last_click = 0;
 
@@ -3627,8 +3630,10 @@
   // through the current level, same as one encoder detent; a quick second
   // short press (double-tap) cycles backward instead - see
   // menu_btn_pending/menu_button_process(). Long press confirms/selects,
-  // same as an encoder short-click. 150-499ms is a dead zone (no-op) so an
-  // imprecise press doesn't do either by accident.
+  // same as an encoder short-click. 200-499ms is a dead zone (no-op) so an
+  // imprecise press doesn't do either by accident. Short-tap boundary
+  // loosened from 150 to 200 alongside MENU_BTN_DOUBLE_TAP_WINDOW (per user
+  // feedback - navigation felt too tight to land reliably).
   void menu_button_press(unsigned long duration) {
     menu_last_activity_ms = millis();
     display_unblank();
@@ -3637,9 +3642,9 @@
         // Not a real navigable screen - a single short tap dismisses it
         // immediately, no need for the usual double-tap-pending wait
         // (there's nothing to go "back" from here) or to wait for a long
-        // press. duration < 150 is still the dead zone below this, same
+        // press. duration < 200 is still the dead zone below this, same
         // as everywhere else.
-        if (duration >= 150) {
+        if (duration >= 200) {
           menu_btn_pending = false;
           buzzer_encoder_click_melody();
           menu_state = menu_popup_return_state;
@@ -3647,7 +3652,7 @@
         return;
       }
     #endif
-    if (duration < 150) {
+    if (duration < 200) {
       unsigned long now = millis();
       if (menu_btn_pending && (now - menu_btn_last_click) <= MENU_BTN_DOUBLE_TAP_WINDOW) {
         // Second tap of a double-tap: cancel the deferred single-tap
