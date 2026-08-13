@@ -7,6 +7,7 @@
 #include "sx126x.h"
 
 #if MCU_VARIANT == MCU_ESP32
+  #include "driver/gpio.h"
   #define ISR_VECT IRAM_ATTR
 #else
   #define ISR_VECT
@@ -157,6 +158,7 @@ sx126x::sx126x() :
   _fifo_rx_addr_ptr(0),
   _packet({0}),
   _preinit_done(false),
+  _dio0_pending(false),
   _onReceive(NULL)
 { setTimeout(0); }
 
@@ -237,12 +239,33 @@ void sx126x::loraMode() {
 }
 
 void sx126x::waitOnBusy() {
+  CHECKPOINT("radio:spi:waitbusy_enter");
   unsigned long time = millis();
   if (_busy != -1) {
-    while (digitalRead(_busy) == HIGH) {
+    // gpio_get_level(), not digitalRead(), on ESP32 - matches
+    // microReticulum_Firmware's own sx126x.cpp exactly. digitalRead() on
+    // Arduino-ESP32 goes through more abstraction than a raw ESP-IDF
+    // register read (pin validation, and depending on core version,
+    // shared state that can also be touched by other GPIO users - our
+    // own display/GNSS/sensor code all does digitalWrite()/digitalRead()
+    // from other contexts) - any contention there could stall this
+    // specific busy-wait longer than the SPI/GPIO hardware read itself
+    // would ever take. gpio_get_level() is a direct register read with no
+    // such surface. This was the one concrete implementation difference
+    // found comparing against their sx126x.cpp while chasing a live
+    // Interrupt-WDT crash with loopTask stuck inside this exact call
+    // chain (radio:spi:read_return) - their firmware runs the identical
+    // zero-extra-task loopTask architecture on the same chip without
+    // hitting it.
+    #if MCU_VARIANT == MCU_ESP32
+      while (gpio_get_level((gpio_num_t)_busy) == HIGH) {
+    #else
+      while (digitalRead(_busy) == HIGH) {
+    #endif
         if (millis() >= (time + 100)) { break; }
     }
   }
+  CHECKPOINT("radio:spi:waitbusy_exit");
 }
 
 void sx126x::executeOpcode(uint8_t opcode, uint8_t *buffer, uint8_t size) {
@@ -255,15 +278,26 @@ void sx126x::executeOpcode(uint8_t opcode, uint8_t *buffer, uint8_t size) {
   digitalWrite(_ss, HIGH);
 }
 
+// TEMPORARY - finer breadcrumbs than executeOpcode() above, since this is
+// the specific call endPacket()'s TX-done poll loop hammers (see
+// RNode_Firmware.ino's g_loop_checkpoint comment) and the crash caught
+// live only narrowed it down to "somewhere in here", not which SPI step.
 void sx126x::executeOpcodeRead(uint8_t opcode, uint8_t *buffer, uint8_t size) {
   waitOnBusy();
+  CHECKPOINT("radio:spi:ss_low");
   digitalWrite(_ss, LOW);
+  CHECKPOINT("radio:spi:begintxn");
   SPI.beginTransaction(_spiSettings);
+  CHECKPOINT("radio:spi:xfer_opcode");
   SPI.transfer(opcode);
+  CHECKPOINT("radio:spi:xfer_dummy");
   SPI.transfer(0x00);
+  CHECKPOINT("radio:spi:xfer_read");
   for (int i = 0; i < size; i++) { buffer[i] = SPI.transfer(0x00); }
+  CHECKPOINT("radio:spi:endtxn");
   SPI.endTransaction();
   digitalWrite(_ss, HIGH);
+  CHECKPOINT("radio:spi:read_return");
 }
 
 void sx126x::writeBuffer(const uint8_t* buffer, size_t size) {
@@ -667,7 +701,29 @@ int sx126x::endPacket() {
     buf[0] = 0x00;
     buf[1] = 0x00;
     executeOpcodeRead(OP_GET_IRQ_STATUS_6X, buf, 2);
-    yield();
+    // THE actual root cause of the long-running Interrupt-WDT crash saga
+    // (feedback_sx126x_tx_rx_spi_mutex_race memory) - found via fine-
+    // grained CHECKPOINT()s inside executeOpcodeRead() (see waitOnBusy()/
+    // that function's own comments): every single captured crash's last
+    // checkpoint was "radio:spi:read_return" - the SPI transaction itself
+    // *always* completes cleanly, every time. The hang is in the few
+    // instructions right after, which used to just be yield(). yield()
+    // is taskYIELD() - it only asks the scheduler to reconsider; if
+    // loopTask is still the highest-priority ready task (normal case),
+    // the scheduler just picks it right back up immediately. On ESP32,
+    // the interrupt watchdog is fed by the per-core idle task - a busy
+    // loop that only ever calls yield() (never truly blocks) can starve
+    // idle out entirely for as long as this loop spins, which is legally
+    // up to LORA_MODEM_TIMEOUT_MS (20s) if TX-done is slow (e.g. a real
+    // SF12 packet actually taking that long on air) - so eventually the
+    // watchdog fires, on whichever core happened to be running this loop.
+    // vTaskDelay(1) is a real, bounded block: it guarantees at least one
+    // tick where the scheduler must consider *other* ready tasks
+    // (including idle), which is what actually feeds the watchdog. 1ms
+    // of added polling latency here doesn't touch on-air packet timing
+    // at all - it only affects how promptly software notices the DONE
+    // IRQ once the radio has actually finished transmitting.
+    vTaskDelay(pdMS_TO_TICKS(1));
   }
   CHECKPOINT("radio:end_packet:tx_poll_done");
 
@@ -1098,7 +1154,12 @@ void sx126x::dumpRegisters(Stream& out) {
   }
 }
 
-void ISR_VECT sx126x::handleDio0Rise() {
+// No longer ISR_VECT/IRAM_ATTR on ESP32 - only ever called from task
+// context there now (handleDio0IfPending()), freeing IRAM (which was at
+// 100% utilization). Still called from true ISR context on nRF52 (see
+// onDio0Rise()'s own comment) - harmless there since ISR_VECT is already
+// a no-op macro on that platform (IRAM_ATTR is ESP32-specific).
+void sx126x::handleDio0Rise() {
   CHECKPOINT_ISR("radio:isr:irq_status_read");
   uint8_t buf[2];
   buf[0] = 0x00;
@@ -1119,7 +1180,49 @@ void ISR_VECT sx126x::handleDio0Rise() {
   CHECKPOINT_ISR("radio:isr:done");
 }
 
-void ISR_VECT sx126x::onDio0Rise() { sx126x_modem.handleDio0Rise(); }
+// Ported from microReticulum_Firmware's sx126x.cpp (their onDio0Rise()/
+// handleDio0IfPending() split) - the actual fix for the long-running
+// SX1262 TX/RX SPI race saga (feedback_sx126x_tx_rx_spi_mutex_race,
+// project_sx1262_tx_poll_yield_fix memories). Our own onDio0Rise() used
+// to call handleDio0Rise() directly from interrupt context, meaning
+// every incoming packet did real SPI transactions (executeOpcodeRead/
+// executeOpcode, each with their own waitOnBusy() busy-pin poll) *inside
+// the ISR* - which can genuinely contend with any other task-context SPI
+// call (dcd(), currentRssi(), TX) at the hardware level, not just at the
+// FreeRTOS scheduling level. maskDio0()/unmaskDio0() (this file) were a
+// partial band-aid bracketing the highest-risk call sites, but a live
+// crash (task watchdog, loopTask stuck 25s at the very entry of
+// waitOnBusy(), which has its own internal 100ms bound and so cannot
+// legitimately stall that long on its own) proved a real gap remained.
+// Deferring all the actual SPI work to task context entirely - the ISR
+// now only ever sets a flag - removes the race at its root instead of
+// bracketing individual call sites against it: there is no longer any
+// SPI access from interrupt context at all, so nothing to race against.
+//
+// Scoped to ESP32 only for now - microReticulum_Firmware's own version
+// defers for nRF52 too, but receive_callback()'s _onReceive target
+// (RNode_Firmware.ino) has nRF52-specific taskENTER/EXIT_CRITICAL_FROM_
+// ISR() calls that assume true ISR context; moving those to task context
+// too needs its own dedicated nRF52 testing pass, not bundled in here
+// untested. nRF52 keeps the original direct-call behavior for now.
+#if MCU_VARIANT == MCU_ESP32
+  void ISR_VECT sx126x::onDio0Rise() { sx126x_modem._dio0_pending = true; }
+#else
+  void ISR_VECT sx126x::onDio0Rise() { sx126x_modem.handleDio0Rise(); }
+#endif
+
+// Must be called regularly from task context (loop(), RNode_Firmware.ino)
+// whenever radio_online - see onDio0Rise()'s own comment for why this
+// exists instead of doing the work directly in the ISR. On non-ESP32
+// platforms _dio0_pending is never set (onDio0Rise() calls
+// handleDio0Rise() directly there instead), so this is simply a no-op.
+void sx126x::handleDio0IfPending() {
+  if (_dio0_pending) {
+    _dio0_pending = false;
+    handleDio0Rise();
+  }
+}
+
 void sx126x::setSPIFrequency(uint32_t frequency) { _spiSettings = SPISettings(frequency, MSBFIRST, SPI_MODE0); }
 void sx126x::enableCrc() { _crcMode = 1; setPacketParams(_preambleLength, _implicitHeaderMode, _payloadLength, _crcMode); }
 void sx126x::disableCrc() { _crcMode = 0; setPacketParams(_preambleLength, _implicitHeaderMode, _payloadLength, _crcMode); }

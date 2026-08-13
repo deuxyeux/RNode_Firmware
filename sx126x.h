@@ -104,9 +104,19 @@ public:
   // See sx126x.cpp's own comment (near beginPacket()) for the full story -
   // any task-context SPI access to the radio needs these bracketing it,
   // not just the TX path. Public so update_modem_status() (RNode_Firmware.
-  // ino)'s dcd()/currentRssi() calls can use them too.
+  // ino)'s dcd()/currentRssi() calls can use them too. Now largely
+  // belt-and-suspenders since onDio0Rise() (see handleDio0IfPending()'s
+  // own comment) no longer does any SPI work from interrupt context at
+  // all - kept rather than pulled out in the same change that added the
+  // real fix, since they're harmless and this masking effort was already
+  // applied comprehensively across every task-context SPI call site.
   void maskDio0();
   void unmaskDio0();
+
+  // Drains a DIO0 interrupt flagged by onDio0Rise() - must be called
+  // regularly from task context (loop(), RNode_Firmware.ino), never from
+  // an ISR. See its own comment in sx126x.cpp for why this exists.
+  void handleDio0IfPending();
 
 private:
   void explicitHeaderMode();
@@ -150,6 +160,11 @@ private:
   uint8_t _packet[255];
   bool _preinit_done;
   bool _kct8103l;
+  // Set (only) by onDio0Rise() - true ISR context - cleared (only) by
+  // handleDio0IfPending() - task context. A plain bool read/write is
+  // atomic on both ESP32 and nRF52 architectures, so no lock is needed
+  // for this single-writer/single-reader flag.
+  volatile bool _dio0_pending;
   void (*_onReceive)(int);
 };
 

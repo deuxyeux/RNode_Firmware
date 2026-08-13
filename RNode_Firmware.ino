@@ -1241,7 +1241,20 @@ void ISR_VECT receive_callback(int packet_size) {
       #if MCU_VARIANT == MCU_ESP32
         set_checkpoint_isr("radio:isr:receive_callback:queue_send");
       #endif
-      if (!modem_packet_queue || xQueueSendFromISR(modem_packet_queue, &modem_packet, NULL) != pdPASS) {
+      // receive_callback() (this function) is shared across every modem
+      // driver's _onReceive target, not just sx126x - only sx126x.cpp's
+      // own onDio0Rise() was changed to defer to task context
+      // (handleDio0IfPending()); sx127x/sx128x still call their own
+      // handleDioXRise() directly from true ISR context on every
+      // platform, same as sx126x used to. So this must be keyed on the
+      // actual modem in use, not just MCU_VARIANT - an ESP32 board using
+      // SX1276/SX1280 still needs the ISR-safe xQueueSendFromISR() here.
+      #if MCU_VARIANT == MCU_ESP32 && MODEM == SX1262
+        bool queue_ok = modem_packet_queue && xQueueSend(modem_packet_queue, &modem_packet, 0) == pdPASS;
+      #else
+        bool queue_ok = modem_packet_queue && xQueueSendFromISR(modem_packet_queue, &modem_packet, NULL) == pdPASS;
+      #endif
+      if (!queue_ok) {
           free(modem_packet);
       }
       #if MCU_VARIANT == MCU_ESP32
@@ -3017,6 +3030,19 @@ void loop() {
 
   if (radio_online) {
     #if MCU_VARIANT == MCU_ESP32
+      set_checkpoint("radio_online_block");
+    #endif
+    #if MCU_VARIANT == MCU_ESP32
+      // Drains a DIO0 interrupt flagged by sx126x's onDio0Rise() (see its
+      // own comment, sx126x.cpp) - must run every loop() iteration,
+      // before the modem_packet_queue dequeue right below, since this is
+      // what actually populates that queue via receive_callback(). A
+      // no-op on other modems (MODEM != SX1262) - see
+      // handleDio0IfPending()'s own comment for why this is scoped to
+      // sx126x only for now.
+      #if MODEM == SX1262
+        LoRa->handleDio0IfPending();
+      #endif
       modem_packet_t *modem_packet = NULL;
       if(modem_packet_queue && xQueueReceive(modem_packet_queue, &modem_packet, 0) == pdTRUE && modem_packet) {
         host_write_len = modem_packet->len;
