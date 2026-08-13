@@ -165,16 +165,20 @@
   }
 
   // kiss_indicate_channel_stats() (Utilities.h, KISS_STATS_CP macro) used
-  // to run on loopTask and shared g_checkpoint_snapshot/set_checkpoint()
-  // above - that made sense when it needed to show up in loopTask's own
-  // trail. Now that it runs on the separate kiss_stats_task (see that
-  // task's own comment below), it still calls the same macro, which was
-  // silently clobbering loopTask's real last position with its own -
-  // kiss_stats_task's burst of ~14 checkpoint writes happens fast enough
-  // that it usually "wins" the race for whatever the stall monitor/boot
-  // print reads as loopTask's last checkpoint, even though loopTask was
-  // never there. Own buffer, own function, so the two trails can't step
-  // on each other.
+  // to run on loopTask directly and share g_checkpoint_snapshot/
+  // set_checkpoint() above, which silently clobbered loopTask's real last
+  // position with its own whenever it fired - its burst of ~14 checkpoint
+  // writes happens fast enough that it usually "won" the race for
+  // whatever the stall monitor/boot print reads as loopTask's last
+  // checkpoint, even when loopTask itself was stuck somewhere else
+  // entirely. On its own dedicated task (housekeeping_task) - briefly
+  // folded onto loopTask itself (housekeeping_poll(), an experiment
+  // matching microReticulum_Firmware's zero-extra-task architecture) but
+  // moved back after that reintroduced a real hang (see housekeeping_
+  // task()'s own comment). Kept its own separate buffer here regardless of
+  // which task it's on - harmless, and avoids re-litigating this same
+  // clobbering risk if the task layout ever changes again. Own buffer,
+  // own function, so the two trails can't step on each other.
   RTC_NOINIT_ATTR char g_checkpoint_snapshot_kissstats[CHECKPOINT_BUF_LEN];
   void set_checkpoint_kissstats(const char* s) {
     strncpy(g_checkpoint_snapshot_kissstats, s, CHECKPOINT_BUF_LEN-1);
@@ -205,6 +209,17 @@
   RTC_NOINIT_ATTR bool g_stall_captured;
   #define STALL_THRESHOLD_MS 10000
 
+  // Kept as its own minimal task even with housekeeping/kiss_tx work
+  // folded onto loopTask directly (see loop()'s own comment for the full
+  // story - matching microReticulum_Firmware's zero-extra-task
+  // architecture). This one specifically must NOT move: its entire
+  // purpose is detecting loopTask itself stalling, which is only possible
+  // from an independent task. No Serial/UART I/O at all (RTC_NOINIT
+  // bookkeeping only). A live crash under this fold (Interrupt WDT
+  // timeout, loopTask stuck at radio:spi:read_return) turned out to be a
+  // real, still-open radio SPI issue, not something caused by the fold
+  // itself (see sx126x.cpp) - being investigated directly there instead
+  // of reverting this.
   void stall_monitor_task(void *param) {
     bool captured_this_cycle = false;
     while (true) {
@@ -231,34 +246,43 @@
   // write() call that occasionally never returns, despite USBCDC::
   // write()'s own internal timeout logic) off loopTask entirely, so it
   // can only ever block itself, not the radio/LXMF path or the
-  // watchdog's own reset call. Low priority, low frequency poll (500ms) -
-  // this is purely a "did update_airtime() ask for a report" flag, not a
-  // tight loop.
+  // watchdog's own reset call. This is purely a "did update_airtime() ask
+  // for a report" flag, not a tight loop.
   volatile bool g_kiss_stats_pending = false;
-  void kiss_stats_task(void *param) {
-    while (true) {
-      vTaskDelay(pdMS_TO_TICKS(500));
-      if (g_kiss_stats_pending) {
-        g_kiss_stats_pending = false;
-        kiss_indicate_channel_stats();
-      }
-    }
-  }
 
-  // g_debug_log_queue/debug_log_guarded() (Utilities.h) - same isolation
-  // pattern as kiss_stats_task just above, generalized to *all* Serial0
-  // debug logging: this is the only task that ever calls Serial0.print(),
-  // so if that write hangs (confirmed live, same class of bug as
-  // kiss_stats_task's Serial.write() hang, just on the other UART
-  // peripheral), only this task blocks - not loopTask, not whichever
-  // other task called DEBUG_LOG(). Created before DEBUG_UART_BEGIN() so
-  // the queue exists no matter how early the first DEBUG_LOG() call
-  // happens.
-  void debug_log_task(void *param) {
-    char buf[DEBUG_LOG_MSG_LEN];
-    while (true) {
-      if (xQueueReceive(g_debug_log_queue, buf, pdMS_TO_TICKS(1000)) == pdTRUE) {
-        Serial0.print(buf);
+  // housekeeping_task() - back on its own dedicated task, not folded onto
+  // loopTask. It briefly was (matching microReticulum_Firmware's zero-
+  // extra-task architecture, to recover DRAM for BLE) - see loop()'s own
+  // comment for that history - but StallCapture caught loopTask genuinely
+  // blocked here (checkpoint stuck at "housekeeping_poll", CPU sitting
+  // idle, task watchdog firing ~25s later) on real hardware: the same
+  // "Serial.write() occasionally never returns" USBCDC quirk this task was
+  // originally isolated to protect against (see below) is real, not
+  // theoretical - moving it back off loopTask is what actually fixes it,
+  // not a smaller DRAM budget being worth reintroducing this hang for.
+  unsigned long g_last_kiss_stats_check_ms = 0;
+  void housekeeping_task(void *param) {
+    for (;;) {
+      char debug_buf[DEBUG_LOG_MSG_LEN];
+      if (xQueueReceive(g_debug_log_queue, debug_buf, pdMS_TO_TICKS(50)) == pdTRUE) {
+        Serial0.print(debug_buf);
+      }
+      char cmd_buf[CMD_LOG_MSG_LEN];
+      if (xQueueReceive(g_cmd_log_queue, cmd_buf, 0) == pdTRUE) {
+        serial_write(FEND);
+        serial_write(CMD_LOG);
+        size_t len = strnlen(cmd_buf, CMD_LOG_MSG_LEN);
+        for (size_t i = 0; i < len; i++) { escaped_serial_write(cmd_buf[i]); }
+        serial_write(FEND);
+      }
+
+      unsigned long now = millis();
+      if (now - g_last_kiss_stats_check_ms >= 500) {
+        g_last_kiss_stats_check_ms = now;
+        if (g_kiss_stats_pending) {
+          g_kiss_stats_pending = false;
+          kiss_indicate_channel_stats();
+        }
       }
     }
   }
@@ -300,77 +324,79 @@ volatile bool serial_buffering = false;
 #endif
 
 #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
-  // Same isolation pattern as kiss_stats_task/debug_log_task just above,
-  // applied to the highest-frequency Serial-writing call site in the
-  // firmware: actual received-packet delivery over KISS. Every incoming
-  // radio packet used to trigger kiss_indicate_stat_rssi()/
-  // kiss_indicate_stat_snr()/kiss_write_packet() directly on loopTask
-  // (loop()'s modem_packet handling, below) - all three do raw
-  // serial_write()/Serial.write() calls, and this runs on every received
-  // packet, not just periodically like the channel-stats report
-  // kiss_stats_task already isolates. Confirmed live (StallCapture,
-  // eTaskState=eBlocked, landing right in this gap between the
-  // messenger_heartbeat_process and tx_queue_handler checkpoints) that
-  // this - not the already-isolated channel-stats path - is where
-  // loopTask actually hangs under real traffic. modem_packet_t is already
-  // malloc'd per-packet by the ISR/queue producer (modem_packet_queue) -
-  // instead of freeing it immediately after copying into the shared pbuf,
-  // hand ownership straight to this queue; the new task frees it once the
-  // write is done (or dropped, if the queue's full).
+  // kiss_tx_task() - back on its own dedicated task, not folded onto
+  // loopTask (see housekeeping_task()'s own comment for why - the same
+  // "Serial.write() occasionally never returns" hang applies here too, and
+  // this is the highest-frequency Serial-writing call site in the firmware
+  // (actual received-packet delivery over KISS), so if anything it's the
+  // higher-risk of the two to leave on loopTask. Blocks indefinitely on the
+  // queue instead of polling - unlike loop(), a dedicated task can afford
+  // to block waiting for a packet that may never come.
   //
-  // Deliberately does NOT move urns_stage_incoming() here - that's a
-  // plain bounded memcpy into a single-slot staging buffer that loop()
-  // itself drains from urns_lxmf_loop() (see URNS.h's own comment on
-  // urns_stage_incoming), and moving the *write* side to a different task
-  // while the *drain* side stays on loopTask would introduce a genuine
-  // new cross-task race on that staging buffer that doesn't exist today -
-  // unlike the KISS write, staging was never the confirmed hang site, so
-  // there's no reason to take on that risk.
+  // Deliberately does NOT also move urns_stage_incoming() here - that's a
+  // plain bounded memcpy into a single-slot staging buffer, still done
+  // synchronously on loopTask right where modem_packet is dequeued (this
+  // file's loop()) before ownership is handed to g_kiss_tx_queue below; see
+  // URNS.h's own comment on urns_stage_incoming for why that side stays on
+  // loopTask. The two are independent - only the actual host write moves.
   QueueHandle_t g_kiss_tx_queue = NULL;
   void kiss_tx_task(void *param) {
+    for (;;) {
     modem_packet_t *mp = NULL;
-    while (true) {
-      if (xQueueReceive(g_kiss_tx_queue, &mp, portMAX_DELAY) == pdTRUE && mp) {
-        uint8_t rssi_val = (uint8_t)(mp->rssi + rssi_offset);
-        #if HAS_ESPNOW == true
-          kiss_select_interface(0);
-        #endif
-        serial_write(FEND); serial_write(CMD_STAT_RSSI); escaped_serial_write(rssi_val); serial_write(FEND);
-        #if HAS_ESPNOW == true
-          kiss_select_interface(0);
-        #endif
-        serial_write(FEND); serial_write(CMD_STAT_SNR); escaped_serial_write((uint8_t)mp->snr_raw); serial_write(FEND);
+    if (xQueueReceive(g_kiss_tx_queue, &mp, portMAX_DELAY) == pdTRUE && mp) {
+      uint8_t rssi_val = (uint8_t)(mp->rssi + rssi_offset);
+      #if HAS_ESPNOW == true
+        kiss_select_interface(0);
+      #endif
+      serial_write(FEND); serial_write(CMD_STAT_RSSI); escaped_serial_write(rssi_val); serial_write(FEND);
+      #if HAS_ESPNOW == true
+        kiss_select_interface(0);
+      #endif
+      serial_write(FEND); serial_write(CMD_STAT_SNR); escaped_serial_write((uint8_t)mp->snr_raw); serial_write(FEND);
 
-        packet_rx_count++;
-        serial_write(FEND);
-        serial_write(CMD_DATA);
-        for (uint16_t i = 0; i < mp->len; i++) {
-          uint8_t byte = mp->data[i];
-          if (byte == FEND) { serial_write(FESC); byte = TFEND; }
-          if (byte == FESC) { serial_write(FESC); byte = TFESC; }
-          serial_write(byte);
-        }
-        serial_write(FEND);
-        #if HAS_BLE
-          bt_flush();
-        #endif
-
-        free(mp);
-        mp = NULL;
+      packet_rx_count++;
+      serial_write(FEND);
+      serial_write(CMD_DATA);
+      for (uint16_t i = 0; i < mp->len; i++) {
+        uint8_t byte = mp->data[i];
+        if (byte == FEND) { serial_write(FESC); byte = TFEND; }
+        if (byte == FESC) { serial_write(FESC); byte = TFESC; }
+        serial_write(byte);
       }
+      serial_write(FEND);
+      #if HAS_BLE
+        bt_flush();
+      #endif
+
+      free(mp);
+      mp = NULL;
+    }
     }
   }
 #endif
+
 
 char sbuf[128];
 
 void setup() {
   #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
-    // Must exist before the very first DEBUG_LOG() call anywhere below
-    // (including HEAP_TRACE right after this) - see debug_log_task's own
-    // comment (this file) and g_debug_log_queue (Utilities.h).
+    // The queues need to exist this early, before the very first
+    // DEBUG_LOG() call anywhere below (including HEAP_TRACE right after
+    // this) - see g_debug_log_queue/g_cmd_log_queue (Utilities.h).
+    // xQueueSend() doesn't need a consumer running yet; entries just sit
+    // queued until housekeeping_task() (this file) starts draining them -
+    // started right away below anyway, no real gap in practice.
     g_debug_log_queue = xQueueCreate(DEBUG_LOG_QUEUE_DEPTH, DEBUG_LOG_MSG_LEN);
-    xTaskCreatePinnedToCore(debug_log_task, "dbglog", 3072, nullptr, 1, nullptr, 0);
+    g_cmd_log_queue = xQueueCreate(CMD_LOG_QUEUE_DEPTH, CMD_LOG_MSG_LEN);
+    // Stack measured empirically at ~2032B used (see memory) - sized with
+    // headroom, not guessed from scratch. Internal-RAM stack, not PSRAM -
+    // see bt_start()'s own ble_networking_conflict() comment: BLE and
+    // WiFi/Ethernet are now mutually exclusive on HAS_URNS boards, so this
+    // ~3KB no longer needs to compete with BLE's own margin, and there's
+    // no need to take on PSRAM-backed-stack's open question (does it race
+    // safely against flash writes on the other core?) for no remaining
+    // benefit.
+    xTaskCreatePinnedToCore(housekeeping_task, "housekeep", 3072, nullptr, 1, nullptr, 0);
   #endif
   #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
     HEAP_TRACE("setup:entry");
@@ -460,11 +486,11 @@ void setup() {
     // is fully blocked.
     g_loop_task_handle = xTaskGetCurrentTaskHandle();
     g_stall_captured = false;
-    xTaskCreatePinnedToCore(stall_monitor_task, "stallmon", 3072, nullptr, 1, nullptr, 0);
-    // See kiss_stats_task's own comment (this file) - isolates the one
-    // remaining USB-CDC write hang so it can't take the whole device
-    // down. Core 0, same as stall_monitor_task, away from loopTask.
-    xTaskCreatePinnedToCore(kiss_stats_task, "kissstats", 4096, nullptr, 1, nullptr, 0);
+    // housekeeping_task/kiss_tx_task are created further down (see their
+    // own comments) - stall_monitor_task's job (detecting loopTask
+    // stalling from outside loopTask) is what actually caught the hang
+    // that justified keeping them separate, so it's created here regardless.
+    xTaskCreatePinnedToCore(stall_monitor_task, "stallmon", 2048, nullptr, 1, nullptr, 0);
   #endif
 
   #if MCU_VARIANT == MCU_ESP32
@@ -625,10 +651,14 @@ void setup() {
     modem_packet_queue = xQueueCreate(MODEM_QUEUE_SIZE, sizeof(modem_packet_t*));
   #endif
   #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
-    // See kiss_tx_task's own comment (this file) for why this exists.
+    // See kiss_tx_task()'s own comment (this file) for why this exists.
     // Created before radio bring-up, well before any packet could arrive.
     g_kiss_tx_queue = xQueueCreate(MODEM_QUEUE_SIZE, sizeof(modem_packet_t*));
-    xTaskCreatePinnedToCore(kiss_tx_task, "kisstx", 4096, nullptr, 1, nullptr, 0);
+    // Stack measured empirically at ~1044B used (see memory) - sized with
+    // headroom, not guessed from scratch. Internal-RAM stack - see
+    // housekeeping_task's own task-creation comment (above, this file) for
+    // why this isn't PSRAM-backed.
+    xTaskCreatePinnedToCore(kiss_tx_task, "kisstx", 2048, nullptr, 1, nullptr, 0);
   #endif
 
   // Set chip select, reset and interrupt
@@ -953,7 +983,17 @@ void setup() {
         // needs to be reachable out of the box for browser-based tools).
         if (ws_en_raw == WS_ENABLE_BYTE) ws_enabled = true;
         else if (ws_en_raw == WS_DISABLE_BYTE) ws_enabled = false;
+        // See ws_tx_flush()'s own comment (WebSocketRemote.h) for why this
+        // exists - created before ws_remote_init() so the queue exists no
+        // matter how soon a client could connect.
+        #if MCU_VARIANT == MCU_ESP32
+          g_ws_tx_queue = xQueueCreate(2, sizeof(ws_tx_item_t));
+          xTaskCreatePinnedToCore(ws_tx_task, "wstx", 8192, nullptr, 1, nullptr, 0);
+        #endif
         ws_remote_init();
+        #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true && HAS_LXMF == true && HAS_DEBUG_UART == true
+          if (!heap_caps_check_integrity_all(true)) { Serial0.print("[HeapCorruption] detected after ws_remote_init\r\n"); }
+        #endif
       #endif
       #if HAS_OTA == true
         // WebServer::begin() (called from ota_server_init()) needs the
@@ -1642,18 +1682,14 @@ void update_airtime() {
     // time enumeration issue, there's some other still-unidentified
     // condition that can make Serial.write() (native USB CDC) hang
     // despite USBCDC::write()'s own internal timeout logic looking sound
-    // on paper. Rather than keep chasing that specific framework
-    // behavior, fixing this architecturally instead: this report is
-    // low-priority, cosmetic status data (channel utilization/CSMA
-    // stats), not core radio/LXMF functionality, so it no longer runs
-    // inline on loopTask at all - a signal is set here, and a separate,
-    // dedicated low-priority task (kiss_stats_task, this file) picks it
-    // up and does the actual Serial write. If that write ever hangs
-    // again, only that one task blocks - loopTask (radio, LXMF
-    // processing, the watchdog reset, everything that actually matters)
-    // keeps running completely unaffected, instead of the whole device
-    // needing a watchdog panic+reboot to recover from a stuck status
-    // report.
+    // on paper. Still just a signal here, not a direct call - the actual
+    // write happens in housekeeping_task() (this file), on its own
+    // dedicated task, specifically so a hang there can't take loopTask
+    // down with it. Briefly folded onto loopTask itself (an experiment
+    // matching microReticulum_Firmware's zero-extra-task architecture) -
+    // that reintroduced exactly this hang, confirmed live via
+    // StallCapture (loopTask blocked at checkpoint "housekeeping_poll",
+    // task watchdog firing ~25s later) - moved back to its own task.
     #if MCU_VARIANT == MCU_ESP32
       if (millis() > 10000) {
         g_kiss_stats_pending = true;
@@ -3053,16 +3089,16 @@ void loop() {
         // Same as kiss_write_packet()'s own call (RNode_Firmware.ino) -
         // kept here, synchronous, on loopTask, since this is a bounded
         // memcpy into a single-slot staging buffer, not a Serial write.
-        // See kiss_tx_task's own comment for why only the KISS write
-        // itself moves off loopTask, not this.
+        // See kiss_tx_task()'s own comment for why the actual KISS write
+        // is deferred through a queue rather than done inline here.
         #if HAS_URNS == true
           if (urns_ready) { urns_stage_incoming(pbuf, host_write_len); }
         #endif
 
-        // Hand ownership of modem_packet straight to kiss_tx_task instead
-        // of freeing it here and calling kiss_indicate_stat_rssi()/
+        // Hand ownership of modem_packet straight to the g_kiss_tx_queue
+        // instead of freeing it here and calling kiss_indicate_stat_rssi()/
         // kiss_indicate_stat_snr()/kiss_write_packet() synchronously - see
-        // kiss_tx_task's own comment (this file) for why.
+        // kiss_tx_task()'s own comment (this file) for why.
         if (g_kiss_tx_queue && xQueueSend(g_kiss_tx_queue, &modem_packet, 0) != pdTRUE) {
           free(modem_packet); // queue full (consumer stuck?) - drop rather than leak
         }

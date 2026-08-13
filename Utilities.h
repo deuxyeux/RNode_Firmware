@@ -35,26 +35,29 @@
     // wrapped every call in a bounded (50ms) mutex - real improvement,
     // but not sufficient: confirmed live that the actual Serial0.print()
     // call *inside* that guard can itself hang indefinitely (same class
-    // of bug as kiss_stats_task's Serial.write() hang, RNode_Firmware.ino
-    // - a different UART peripheral, same symptom). When that happens,
+    // of bug that this same isolation was built to fix for the *other*
+    // UART's own Serial.write() hang, same symptom). When that happens,
     // whoever holds the mutex at that moment never reaches
-    // xSemaphoreGive(), and loopTask itself can be that holder - exactly
-    // what kiss_stats_task was built to prevent for the *other* UART, and
-    // the mutex approach didn't actually prevent it here.
+    // xSemaphoreGive(), and loopTask itself can be that holder - the
+    // mutex approach didn't actually prevent it here.
     //
-    // Fixed the same way as kiss_stats_task: nobody calls Serial0.print()
-    // directly from their own task anymore. DEBUG_LOG() formats the line
-    // (cheap, can't hang) and drops it on a queue; a single dedicated
-    // low-priority task (debug_log_task, RNode_Firmware.ino) is the only
-    // thing that ever touches Serial0, so if *that* write hangs, only
-    // that one task blocks - loopTask (and everything else) keeps going
-    // regardless. The queue itself is what serializes access now, so no
-    // mutex is needed at all. Fail-open by design: xQueueSend with a 0
-    // wait just drops the line if the queue's full (e.g. the consumer
-    // task is currently stuck on a hung write) rather than ever blocking
-    // the caller - a missed debug line is harmless, an indefinite hang
-    // isn't.
+    // Fixed by queueing instead: nobody calls Serial0.print() directly
+    // from wherever DEBUG_LOG() was called - it formats the line (cheap,
+    // can't hang) and drops it on a queue; the actual write happens in
+    // housekeeping_task() (RNode_Firmware.ino), on its own dedicated task -
+    // specifically so a hung write there can't take loopTask down with it.
+    // Briefly folded onto loopTask itself (an experiment matching
+    // microReticulum_Firmware's zero-extra-task architecture) but that
+    // reintroduced exactly this hang, confirmed live via StallCapture (see
+    // housekeeping_task()'s own comment) - moved back to its own task. The
+    // queue still serializes access either way, so no mutex is needed. Fail-
+    // open by design: xQueueSend with a 0 wait just drops the line if the
+    // queue's full rather than ever blocking the caller - a missed debug
+    // line is harmless, an indefinite hang isn't.
     #define DEBUG_LOG_MSG_LEN 200
+    // Was briefly 32 (to absorb TRACE-level boot bursts) - reverted to 16
+    // along with RNS::loglevel() going back to INFO (urns_init(), URNS.h -
+    // see that revert's own comment for why TRACE was reverted).
     #define DEBUG_LOG_QUEUE_DEPTH 16
     QueueHandle_t g_debug_log_queue = NULL;
     inline void debug_log_guarded(const char* fmt, ...) {
@@ -73,6 +76,40 @@
 #else
   #define DEBUG_UART_BEGIN()
   #define DEBUG_LOG(...)
+#endif
+
+#if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
+  // CMD_LOG (0x80, Framing.h) - a real KISS frame carrying RNS log text,
+  // consumed by microReticulum_Firmware's own webconsole (its Logs tab
+  // already parses exactly this "HH:MM:SS.mmm [LVL] message" format for
+  // level filtering - see RNS::getTimeString()/getLevelName()). The
+  // opcode existed in Framing.h already but nothing ever sent it. Same
+  // queue-based isolation as DEBUG_LOG/g_debug_log_queue just above -
+  // serial_write()/escaped_serial_write() write to the same Serial
+  // connection the binary KISS protocol itself uses, and the RNS log
+  // callback (urns_rns_log_callback(), URNS.h) can be called from other
+  // tasks too (LXStamper's own core-0 proof-of-work task, same reasoning
+  // as DEBUG_LOG's own comment above) - so formatting happens wherever
+  // RNS::log() was called, and only housekeeping_task() (RNode_Firmware.
+  // ino, its own dedicated task) ever actually touches Serial for this.
+  #define CMD_LOG_MSG_LEN 256
+  // Was briefly raised to 32 to absorb TRACE-level bursts, reverted to 8
+  // along with RNS::loglevel() going back to INFO (urns_init(), URNS.h) -
+  // TRACE reproducibly crashed real hardware (BLE margin collapsed to
+  // ~980 bytes, cascading into a NimBLE assert) from the per-call-site
+  // stack cost of logging inside already-deep call chains, not from queue
+  // sizing - see that revert's own comment for the full story. INFO-level
+  // logging is genuinely sparse (~24 call sites in the whole vendored
+  // library, no per-packet chatter), so 8 is enough again.
+  #define CMD_LOG_QUEUE_DEPTH 8
+  QueueHandle_t g_cmd_log_queue = NULL;
+  inline void cmd_log_guarded(const char* line) {
+    if (!g_cmd_log_queue) return;
+    char buf[CMD_LOG_MSG_LEN];
+    strncpy(buf, line, sizeof(buf) - 1);
+    buf[sizeof(buf) - 1] = 0;
+    xQueueSend(g_cmd_log_queue, buf, 0);
+  }
 #endif
 
 #if HAS_EEPROM

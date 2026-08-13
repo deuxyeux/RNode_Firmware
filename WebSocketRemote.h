@@ -84,11 +84,65 @@ bool ws_tx_in_frame = false;
 
 bool ws_host_is_connected() { return ws_state == WS_STATE_CONNECTED; }
 
+// wsServer.sendBIN() used to be called directly from here, i.e. from
+// whichever task happened to be calling serial_write() at the time (any
+// of loopTask, kiss_tx_task, housekeeping_task - anything that can emit a
+// KISS byte). A clean, fully decoded live crash (stack-canary watchpoint
+// on kiss_tx_task, sized 2048 at the time) traced through this exact call
+// into the WebSockets library -> lwIP TCP/IP stack -> WiFi TX - a 30+
+// frame chain (esp_wifi_internal_tx, etharp_output, ip4_output_if,
+// tcp_output_segment, lwip_netconn_do_write, ...) that only actually
+// executes once a WebSocket remote client is connected, so no earlier
+// measurement window (all done with no WS client attached) ever caught
+// it. Bumping every caller task's stack to cover this worst case was
+// tried and worked, but cost ~10KB combined and still left loopTask
+// itself unprotected (it calls serial_write() constantly too, and was
+// never explicitly sized with this hazard in mind). Isolating the actual
+// network call behind its own queue+dedicated task (g_ws_tx_queue/
+// ws_tx_task, this file) - the same pattern already used for Serial/
+// Serial0 writes (debug_log_task/cmd_log_task history, RNode_Firmware.ino)
+// - means only that one task needs the large stack, and every caller of
+// serial_write() (including loopTask) is protected uniformly instead of
+// needing this reasoned about per call site.
+//
+// wifi_remote_write() (Remote.h, the raw-TCP KISS remote on port 7633)
+// has the exact same exposure - it also calls connection.write() straight
+// into the same lwIP/WiFi stack, per-byte, with no isolation at all.
+// Deliberately not fixed here too - needs its own dedicated testing pass
+// with that transport actually connected, not bundled into this change
+// untested.
+typedef struct {
+  uint8_t data[WS_TX_BUF_SIZE];
+  size_t len;
+} ws_tx_item_t;
+QueueHandle_t g_ws_tx_queue = NULL;
+
 void ws_tx_flush() {
-  if (ws_tx_len > 0 && ws_client_num >= 0) {
-    wsServer.sendBIN((uint8_t)ws_client_num, ws_tx_buf, ws_tx_len);
+  if (ws_tx_len > 0 && ws_client_num >= 0 && g_ws_tx_queue) {
+    ws_tx_item_t item;
+    memcpy(item.data, ws_tx_buf, ws_tx_len);
+    item.len = ws_tx_len;
+    if (xQueueSend(g_ws_tx_queue, &item, 0) != pdTRUE) {
+      // Queue full (consumer stuck / falling behind) - drop this frame
+      // rather than block the caller, same fail-open policy as every
+      // other queue-fed write path in this codebase.
+    }
   }
   ws_tx_len = 0;
+}
+
+// Drains g_ws_tx_queue - see ws_tx_flush()'s own comment for why this
+// exists as its own dedicated task instead of calling wsServer.sendBIN()
+// directly from whichever task produced the frame.
+void ws_tx_task(void *param) {
+  ws_tx_item_t item;
+  while (true) {
+    if (xQueueReceive(g_ws_tx_queue, &item, portMAX_DELAY) == pdTRUE) {
+      if (ws_client_num >= 0) {
+        wsServer.sendBIN((uint8_t)ws_client_num, item.data, item.len);
+      }
+    }
+  }
 }
 
 void ws_remote_write(uint8_t byte) {
