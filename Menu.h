@@ -1112,6 +1112,16 @@
       menu_draw_popup(text);
     }
 
+    // Per user request, plain confirmation/result banners auto-dismiss
+    // after this long, regardless of outcome - Clear Static IP's "CLEARED"
+    // (WiFi/Ethernet), Messenger's "CLEARED"/"DELETED", and the Messenger
+    // send-result banner (SENT/NOT READY/UNKNOWN DEST/ERROR,
+    // urns_lxmf_send_result_text()). Deliberately not applied to other
+    // error/failure popups ("NOT READY" on Announce Node, "UPDATE
+    // FAILED", ...), which stay up until dismissed - see
+    // menu_draw_popup_timed()'s own comment for that convention.
+    #define ACTION_POPUP_MS 5000
+
     // Draws `text` on the already-open popup (same as menu_draw_popup())
     // and arms it to auto-dismiss after `ms` with no input needed - used
     // for outcomes that don't need acknowledging (e.g. a successful Sync
@@ -2900,6 +2910,7 @@
           staged_wifi_gw[0] = staged_wifi_gw[1] = staged_wifi_gw[2] = staged_wifi_gw[3] = 0;
           staged_wifi_dns[0] = staged_wifi_dns[1] = staged_wifi_dns[2] = staged_wifi_dns[3] = 0;
           menu_open_popup("CLEARED", MENU_STATE_WIFI_LIST);
+          menu_popup_auto_dismiss_at = millis() + ACTION_POPUP_MS;
         } else if (wifi_menu_cursor == WIFI_ITEM_SSID || wifi_menu_cursor == WIFI_ITEM_PSK) {
           // Fresh text-edit session, preloaded from the current staged
           // value, wheel starts at 'a'.
@@ -3007,6 +3018,7 @@
             // eth_apply_addr_config()'s own comment (Ethernet.h).
             eth_apply_addr_config(true);
             menu_open_popup("CLEARED", MENU_STATE_ETH_LIST);
+            menu_popup_auto_dismiss_at = millis() + ACTION_POPUP_MS;
           }
         }
       } else if (menu_state == MENU_STATE_ETH_EDIT) {
@@ -3423,6 +3435,7 @@
               menu_state = MENU_STATE_MSNGR_SEND_RESULT;
             } else {
               menu_open_popup(urns_lxmf_send_result_text(msngr_last_send_result), MENU_STATE_MSNGR_PEER);
+              menu_popup_auto_dismiss_at = millis() + ACTION_POPUP_MS;
             }
           }
         }
@@ -3458,6 +3471,7 @@
           LoRa->unmaskDio0();
           msngr_peer_cursor = 0;
           menu_open_popup("DELETED", MENU_STATE_MSNGR_PEER);
+          menu_popup_auto_dismiss_at = millis() + ACTION_POPUP_MS;
         } else { // CANCEL
           menu_state = MENU_STATE_MSNGR_MSG_DETAIL;
         }
@@ -3473,6 +3487,7 @@
           LoRa->unmaskDio0();
           msngr_peer_cursor = 0;
           menu_open_popup("CLEARED", MENU_STATE_MSNGR_PEER);
+          menu_popup_auto_dismiss_at = millis() + ACTION_POPUP_MS;
         } else { // CANCEL
           menu_state = MENU_STATE_MSNGR_PEER;
         }
@@ -3517,6 +3532,7 @@
               menu_state = MENU_STATE_MSNGR_SEND_RESULT;
             } else {
               menu_open_popup(urns_lxmf_send_result_text(msngr_last_send_result), MENU_STATE_MSNGR_TEXT_ENTRY);
+              menu_popup_auto_dismiss_at = millis() + ACTION_POPUP_MS;
             }
           }
         }
