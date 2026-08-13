@@ -17,34 +17,17 @@
 #include <SPI.h>
 #include "Utilities.h"
 
-// Temporary diagnostic instrumentation (HAS_URNS boards only, see setup())
-// for the ongoing "occasional lockup" investigation - a task watchdog with
-// a deliberately short timeout turns a silent, unbounded freeze into a
-// hard panic with a full backtrace, so the exact frozen function/line can
-// be read off directly instead of inferred from external symptoms (LED
-// colour, timing estimates). Not enabled board-wide since a panic+reboot
-// on a genuinely slow-but-legitimate operation elsewhere would be worse
-// than the hang it's meant to catch - scope this down once root-caused.
 #if MCU_VARIANT == MCU_ESP32
-  #include <esp_task_wdt.h>
   #include <esp_heap_caps.h>
   #include <mbedtls/platform.h>
 
-  // Root cause of tonight's whole "occasional lockup" investigation,
-  // finally: confirmed live via the checkpoint trail + this exact log
-  // line repeating right before every crash - "esp-aes: Failed to
-  // allocate memory" / "[RNS] Could not decrypt Token token" - mbedTLS
-  // (used for every RNS::Link decrypt) failing its own small internal
-  // allocations as internal DIRAM heap gets exhausted (observed as low as
-  // 1.5KB free, from a user-confirmed 92%+ heap utilization). Empirically
-  // confirmed PSRAM *is* already merged into the general allocator
-  // (heap_caps_malloc(200KB, MALLOC_CAP_DEFAULT) succeeds), but ESP-IDF's
-  // own "always internal below this size" threshold keeps small
-  // allocations - exactly what mbedTLS's AES/crypto contexts are - pinned
-  // to internal RAM regardless of PSRAM headroom (8MB, ~4% used per the
-  // user's own Hardware>Memory reading, vs. internal heap at 90%+).
-  // Pointing mbedTLS's own allocator directly at PSRAM sidesteps that
-  // threshold for exactly the allocations that were failing, without
+  // mbedTLS (used for every RNS::Link decrypt) can fail its own small
+  // internal allocations under internal-DIRAM pressure even when PSRAM is
+  // merged into the general allocator - ESP-IDF's own "always internal
+  // below this size" threshold keeps small allocations (mbedTLS's AES/
+  // crypto contexts included) pinned to internal RAM regardless of PSRAM
+  // headroom. Pointing mbedTLS's own allocator directly at PSRAM sidesteps
+  // that threshold for exactly the allocations that were failing, without
   // needing to touch every other allocation site throughout the vendored
   // microReticulum/microLXMF stack.
   void* mbedtls_psram_calloc(size_t n, size_t size) {
@@ -53,208 +36,9 @@
     return p;
   }
   void mbedtls_psram_free(void* p) { heap_caps_free(p); }
-
-  // User confirmed heap is already at ~89% used immediately after a fresh
-  // restart, before any LXMF/message activity - not a runtime leak
-  // accumulating from a healthy baseline, but a boot-time footprint
-  // that's already critical. This traces free internal heap at each major
-  // setup() stage to find which specific subsystem's init is the actual
-  // big consumer, instead of continuing to guess.
-  // psram_free/psram_used added to directly answer "is RNS_CONTAINER_
-  // ALLOCATOR=RNS_PSRAM_ALLOCATOR (platformio.ini) actually landing
-  // anything in PSRAM" - the on-device Memory menu showing 0% PSRAM used
-  // raised the question live. ContainerAllocator::allocate() (vendored
-  // microReticulum, Utilities/Memory.h) does call ps_malloc() correctly
-  // when this allocator is selected, but RNS_USE_FS (also set) means the
-  // bulk PathTable/AnnounceTable/hashlist *record* data is file-backed
-  // (microStore::BasicFileStore, LittleFS) rather than RAM-resident at
-  // all - only smaller/more transient in-memory Bytes/container objects
-  // ever actually go through ps_malloc(), so genuinely near-zero PSRAM
-  // usage at a given instant doesn't necessarily mean the allocator isn't
-  // working, just that URNS's real day-to-day allocations are mostly on
-  // disk already. Tracking free PSRAM at every existing HEAP_TRACE call
-  // site to get real data instead of guessing.
-  #define HEAP_TRACE(label) DEBUG_LOG("[HeapTrace] %s free=%u psram_free=%u psram_used=%u\r\n", label, (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getFreePsram(), (unsigned)(ESP.getPsramSize() - ESP.getFreePsram()))
 #endif
 
-// Same temporary-diagnostic scope as the watchdog below. The checkpoint
-// trail (g_loop_checkpoint/g_checkpoint_snapshot, this file's other
-// top-of-file comment) has landed on a *different* function each crash so
-// far (radio SPI code, the debug-UART heartbeat print, a USB-CDC KISS
-// write) - all plausible victims of a corrupted lock, not necessarily the
-// actual bug site. User confirmed crashes only happen during real LXMF
-// send/receive activity, which fits: something in that processing path
-// could be corrupting the heap, and the crash we actually observe is
-// wherever the corrupted state next gets touched, not where the
-// corruption happened. True heap poisoning (CONFIG_HEAP_POISONING_
-// COMPREHENSIVE) isn't available here - this build uses precompiled
-// Arduino-ESP32/ESP-IDF static libs, not source, so that Kconfig option
-// can't be flipped without rebuilding the whole framework. This is the
-// lighter, already-available substitute: heap_caps_check_integrity_all()
-// walks the allocator's own block-list structure looking for corrupted
-// headers (magic numbers/checksums) - it won't catch damage confined
-// entirely within a buffer's own data (nothing touching adjacent
-// metadata), but it does catch classic overflow-into-the-next-block
-// corruption, and prints a report the moment it's detected rather than
-// whenever the fallout happens to surface. Called right after
-// urns_reticulum.loop()/urns_lxmf_loop() specifically (not just
-// periodically) so a hit is tightly correlated with the LXMF processing
-// that just ran, not diluted by however many other loop() iterations
-// passed since.
 #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
-  void check_heap_integrity(const char* where) {
-    if (!heap_caps_check_integrity_all(true)) {
-      DEBUG_LOG("[HeapCorruption] detected after %s\r\n", where);
-    }
-  }
-#endif
-
-// Same temporary-diagnostic scope/rationale as the watchdog above. Two
-// widened DIO0-masking fixes to sx126x.cpp (see feedback_sx126x_tx_rx_
-// spi_mutex_race memory) both still crashed with loopTask blocked (CPU
-// idle at watchdog panic, not spinning) - meaning the actual contended
-// lock hasn't been directly identified yet, only inferred. The watchdog's
-// own backtrace is useless for this (it captures the *idle* task, not the
-// blocked one). This is a breadcrumb trail instead: a plain global updated
-// at the start of each major operation.
-//
-// REVISED (attempt 2): a separate low-priority FreeRTOS task on the other
-// core, printing every 2s independently of loopTask, was itself a fresh
-// instance of the exact hazard under investigation - a second concurrent
-// Serial0.printf() caller racing the many unguarded plain DEBUG_LOG(...)
-// call sites elsewhere. Reverted that.
-//
-// REVISED (attempt 3): piggy-backing on messenger_heartbeat_process()'s
-// existing print turned out to be useless - the checkpoint is set
-// immediately before that same print reads it back, so every heartbeat
-// line just says "messenger_heartbeat_process", tautologically, telling
-// us nothing about whatever loopTask does *after* that point, which is
-// exactly where every observed freeze happens (heartbeat fires fine, then
-// silence for 20+ seconds before the watchdog trips).
-//
-// Current approach: RTC_NOINIT_ATTR memory survives the watchdog's
-// software reset (RTC_SW_CPU_RST, confirmed via the `rst:0x...` boot
-// banner on every crash so far) even though it doesn't survive a true
-// power-on. Every CHECKPOINT() call copies the string directly into this
-// buffer - cheap, no I/O, no locks needed since only whichever context
-// calls CHECKPOINT() ever writes it, so there's no new concurrency hazard.
-// Nothing reads it live; setup() prints whatever was left over from
-// *before* this boot, right after the reset-reason banner - if that boot
-// was a watchdog panic, this is the exact operation loopTask never
-// returned from.
-//
-// REVISED (attempt 4): a single shared buffer hid the real answer. The
-// first crash caught this way showed snapshot=radio:isr:done - the very
-// last line of the RX interrupt handler - which turned out to be a red
-// herring: an ISR can fire and run to completion independently of whether
-// loopTask itself is already stuck (confirmed: the watchdog panic showed
-// CPU idle, meaning loopTask was blocked, not the ISR), and since ISR and
-// loopTask were sharing one buffer, the ISR's own checkpoints kept
-// overwriting whatever loopTask's true last position was, permanently
-// erasing the evidence. Split into two buffers - one for loopTask's own
-// top-level dispatch (set_checkpoint(), used in this file's loop() and
-// sx126x.cpp's beginPacket()/endPacket() - both task-context, called from
-// tx_queue_handler()) and one for the RX-interrupt chain specifically
-// (set_checkpoint_isr(), used in sx126x.cpp's handleDio0Rise() and this
-// file's receive_callback() malloc/RSSI/queue-send steps - true ISR
-// context, or the manual "missed event" call from endPacket() which is
-// the same code path even though task-context that one time). Printing
-// both on boot shows which one loopTask was actually stuck in, without
-// the other overwriting it.
-#if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
-  #define CHECKPOINT_BUF_LEN 48
-  RTC_NOINIT_ATTR char g_checkpoint_snapshot[CHECKPOINT_BUF_LEN];
-  RTC_NOINIT_ATTR char g_checkpoint_snapshot_isr[CHECKPOINT_BUF_LEN];
-  volatile const char* g_loop_checkpoint = "boot";
-  volatile unsigned long g_last_checkpoint_update_ms = 0;
-  void set_checkpoint(const char* s) {
-    g_loop_checkpoint = s;
-    strncpy(g_checkpoint_snapshot, s, CHECKPOINT_BUF_LEN-1);
-    g_checkpoint_snapshot[CHECKPOINT_BUF_LEN-1] = 0;
-    g_last_checkpoint_update_ms = millis();
-  }
-  void set_checkpoint_isr(const char* s) {
-    strncpy(g_checkpoint_snapshot_isr, s, CHECKPOINT_BUF_LEN-1);
-    g_checkpoint_snapshot_isr[CHECKPOINT_BUF_LEN-1] = 0;
-  }
-
-  // kiss_indicate_channel_stats() (Utilities.h, KISS_STATS_CP macro) used
-  // to run on loopTask directly and share g_checkpoint_snapshot/
-  // set_checkpoint() above, which silently clobbered loopTask's real last
-  // position with its own whenever it fired - its burst of ~14 checkpoint
-  // writes happens fast enough that it usually "won" the race for
-  // whatever the stall monitor/boot print reads as loopTask's last
-  // checkpoint, even when loopTask itself was stuck somewhere else
-  // entirely. On its own dedicated task (housekeeping_task) - briefly
-  // folded onto loopTask itself (housekeeping_poll(), an experiment
-  // matching microReticulum_Firmware's zero-extra-task architecture) but
-  // moved back after that reintroduced a real hang (see housekeeping_
-  // task()'s own comment). Kept its own separate buffer here regardless of
-  // which task it's on - harmless, and avoids re-litigating this same
-  // clobbering risk if the task layout ever changes again. Own buffer,
-  // own function, so the two trails can't step on each other.
-  RTC_NOINIT_ATTR char g_checkpoint_snapshot_kissstats[CHECKPOINT_BUF_LEN];
-  void set_checkpoint_kissstats(const char* s) {
-    strncpy(g_checkpoint_snapshot_kissstats, s, CHECKPOINT_BUF_LEN-1);
-    g_checkpoint_snapshot_kissstats[CHECKPOINT_BUF_LEN-1] = 0;
-  }
-
-  // "Blocking bug, invalidates the whole endeavour" - the checkpoint trail
-  // has now caught loopTask stuck at completely different call sites on
-  // different crashes (sx126x.cpp radio SPI, the debug-UART heartbeat
-  // print, the USB-CDC KISS stats write - even down to a specific byte
-  // index within it) with heap confirmed healthy and BLE/WiFi/WS all
-  // confirmed disconnected. A symptom that can strike literally any
-  // blocking call, unpredictably, points at something more fundamental
-  // than any single driver's own timeout logic - most likely a genuinely
-  // lost wakeup (a task blocked on a semaphore/queue that never gets
-  // signaled) rather than each site failing for its own separate reason.
-  // This catches that directly: a low-priority task on the *other* core
-  // polls for the checkpoint going stale well before the 25s watchdog
-  // would fire, and if so, captures loopTask's actual FreeRTOS state
-  // (blocked/ready/running/etc, not just "watchdog didn't get reset")
-  // into RTC_NOINIT memory - deliberately not touching Serial at all,
-  // since Serial itself might be the very thing that's stuck; printed
-  // safely on the next boot instead.
-  TaskHandle_t g_loop_task_handle = NULL;
-  RTC_NOINIT_ATTR int g_stall_task_state;
-  RTC_NOINIT_ATTR char g_stall_checkpoint[CHECKPOINT_BUF_LEN];
-  RTC_NOINIT_ATTR unsigned long g_stall_detected_uptime_ms;
-  RTC_NOINIT_ATTR bool g_stall_captured;
-  #define STALL_THRESHOLD_MS 10000
-
-  // Kept as its own minimal task even with housekeeping/kiss_tx work
-  // folded onto loopTask directly (see loop()'s own comment for the full
-  // story - matching microReticulum_Firmware's zero-extra-task
-  // architecture). This one specifically must NOT move: its entire
-  // purpose is detecting loopTask itself stalling, which is only possible
-  // from an independent task. No Serial/UART I/O at all (RTC_NOINIT
-  // bookkeeping only). A live crash under this fold (Interrupt WDT
-  // timeout, loopTask stuck at radio:spi:read_return) turned out to be a
-  // real, still-open radio SPI issue, not something caused by the fold
-  // itself (see sx126x.cpp) - being investigated directly there instead
-  // of reverting this.
-  void stall_monitor_task(void *param) {
-    bool captured_this_cycle = false;
-    while (true) {
-      vTaskDelay(pdMS_TO_TICKS(1000));
-      unsigned long now = millis();
-      unsigned long since = now - g_last_checkpoint_update_ms;
-      if (!captured_this_cycle && g_loop_task_handle != NULL && since > STALL_THRESHOLD_MS) {
-        g_stall_task_state = (int)eTaskGetState(g_loop_task_handle);
-        strncpy(g_stall_checkpoint, g_checkpoint_snapshot, CHECKPOINT_BUF_LEN-1);
-        g_stall_checkpoint[CHECKPOINT_BUF_LEN-1] = 0;
-        g_stall_detected_uptime_ms = now;
-        g_stall_captured = true;
-        captured_this_cycle = true;
-      } else if (captured_this_cycle && since < 2000) {
-        // Recovered (or a fresh boot) - clear so the next real stall
-        // gets its own fresh capture instead of being masked by this one.
-        captured_this_cycle = false;
-      }
-    }
-  }
-
   // See update_airtime()'s own comment (this file) for why this exists -
   // moves the one remaining, still-not-fully-explained hang (a Serial.
   // write() call that occasionally never returns, despite USBCDC::
@@ -264,16 +48,14 @@
   // for a report" flag, not a tight loop.
   volatile bool g_kiss_stats_pending = false;
 
-  // housekeeping_task() - back on its own dedicated task, not folded onto
-  // loopTask. It briefly was (matching microReticulum_Firmware's zero-
-  // extra-task architecture, to recover DRAM for BLE) - see loop()'s own
-  // comment for that history - but StallCapture caught loopTask genuinely
-  // blocked here (checkpoint stuck at "housekeeping_poll", CPU sitting
-  // idle, task watchdog firing ~25s later) on real hardware: the same
-  // "Serial.write() occasionally never returns" USBCDC quirk this task was
-  // originally isolated to protect against (see below) is real, not
-  // theoretical - moving it back off loopTask is what actually fixes it,
-  // not a smaller DRAM budget being worth reintroducing this hang for.
+  // housekeeping_task() - its own dedicated task, not folded onto loopTask.
+  // It briefly was (matching microReticulum_Firmware's zero-extra-task
+  // architecture, to recover DRAM for BLE), but that reintroduced a real,
+  // confirmed hang on real hardware: the same "Serial.write() occasionally
+  // never returns" USBCDC quirk this task was originally isolated to
+  // protect against (see below) is real, not theoretical - moving it back
+  // off loopTask is what actually fixes it, not a smaller DRAM budget
+  // being worth reintroducing this hang for.
   unsigned long g_last_kiss_stats_check_ms = 0;
   void housekeeping_task(void *param) {
     for (;;) {
@@ -395,8 +177,8 @@ char sbuf[128];
 void setup() {
   #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
     // The queues need to exist this early, before the very first
-    // DEBUG_LOG() call anywhere below (including HEAP_TRACE right after
-    // this) - see g_debug_log_queue/g_cmd_log_queue (Utilities.h).
+    // DEBUG_LOG() call anywhere below - see g_debug_log_queue/
+    // g_cmd_log_queue (Utilities.h).
     // xQueueSend() doesn't need a consumer running yet; entries just sit
     // queued until housekeeping_task() (this file) starts draining them -
     // started right away below anyway, no real gap in practice.
@@ -412,9 +194,6 @@ void setup() {
     // benefit.
     xTaskCreatePinnedToCore(housekeeping_task, "housekeep", 3072, nullptr, 1, nullptr, 0);
   #endif
-  #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
-    HEAP_TRACE("setup:entry");
-  #endif
   #if HAS_OTA == true
     // Field recovery path for a bad OTA update - must run before anything
     // else in boot (radio/display/network init), see OTA.h.
@@ -429,82 +208,6 @@ void setup() {
     // for the full story - as early as possible, before any RNS::Link
     // decrypt could need it.
     mbedtls_platform_set_calloc_free(mbedtls_psram_calloc, mbedtls_psram_free);
-  #endif
-
-  #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
-    // g_checkpoint_snapshot (RTC_NOINIT, see this file's top-of-file
-    // comment) - print whatever was left over from *before* this boot.
-    // Only actually meaningful after a software reset (e.g. the
-    // watchdog's own RTC_SW_CPU_RST) - a true power-on clears RTC_NOINIT,
-    // so esp_reset_reason() is printed alongside it to tell the two apart.
-    // %.47s (not %s) since RTC_NOINIT content on a genuine first-ever
-    // power-on is uninitialized garbage with no guaranteed null
-    // terminator anywhere in the buffer - bound the read explicitly
-    // rather than risk printf scanning past CHECKPOINT_BUF_LEN.
-    DEBUG_LOG("[LastCheckpoint before this boot] reset_reason=%d loop_snapshot=%.47s isr_snapshot=%.47s kissstats_snapshot=%.47s\r\n",
-      (int)esp_reset_reason(), g_checkpoint_snapshot, g_checkpoint_snapshot_isr, g_checkpoint_snapshot_kissstats);
-
-    // g_stall_* (RTC_NOINIT, see stall_monitor_task's own comment) - if
-    // present, this fired *before* the watchdog did, meaning loopTask was
-    // provably actually blocked (not just slow) at the checkpoint above,
-    // and in which FreeRTOS state specifically. eTaskState: 0=Running,
-    // 1=Ready, 2=Blocked, 3=Suspended, 4=Deleted, 5=Invalid.
-    if (g_stall_captured) {
-      DEBUG_LOG("[StallCapture] loopTask eTaskState=%d at checkpoint=%.47s (uptime_ms=%lu)\r\n",
-        g_stall_task_state, g_stall_checkpoint, g_stall_detected_uptime_ms);
-    } else {
-      DEBUG_LOG("[StallCapture] none\r\n");
-    }
-
-    // One-shot empirical test: is PSRAM actually merged into the general
-    // allocator (MALLOC_CAP_DEFAULT, what plain malloc()/new draw from) or
-    // just sitting there unused as its own separate capability? Internal
-    // DIRAM total is ~340KB and often <30KB free under load (tonight's
-    // whole heap-exhaustion investigation) - a 200KB MALLOC_CAP_DEFAULT
-    // allocation succeeding could only be satisfied from PSRAM, proving
-    // the merge is live; failing proves it isn't (or is blocked by ESP-
-    // IDF's "always internal below this size" threshold, which wouldn't
-    // apply to an allocation this large either way).
-    {
-      void* test_alloc = heap_caps_malloc(200*1024, MALLOC_CAP_DEFAULT);
-      DEBUG_LOG("[PSRAM] 200KB MALLOC_CAP_DEFAULT test: %s (psram_size=%u free_heap=%u)\r\n",
-        test_alloc ? "SUCCEEDED - PSRAM is merged into general heap" : "FAILED - PSRAM NOT merged into general heap",
-        (unsigned)ESP.getPsramSize(), (unsigned)ESP.getFreeHeap());
-      if (test_alloc) { heap_caps_free(test_alloc); }
-    }
-  #endif
-
-  #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
-    // See this file's own top-of-file comment for why this is scoped to
-    // just this board for now. 25s is comfortably above
-    // LORA_MODEM_TIMEOUT_MS (20s, sx126x.h) - the longest single
-    // legitimate blocking wait in the normal TX path - so a real TX
-    // timeout won't false-trigger this, but the multi-minute freezes seen
-    // live tonight will.
-    esp_task_wdt_config_t twdt_config = {
-      .timeout_ms = 25000,
-      .idle_core_mask = 0,
-      .trigger_panic = true,
-    };
-    if (esp_task_wdt_init(&twdt_config) != ESP_OK) {
-      esp_task_wdt_reconfigure(&twdt_config);
-    }
-    esp_task_wdt_add(NULL);
-    DEBUG_LOG("[Watchdog] task watchdog armed, timeout=25s\r\n");
-  #endif
-
-  #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
-    // setup()/loop() both run on the Arduino "loopTask" - safe to capture
-    // here, before loop() ever starts. stall_monitor_task runs on core 0
-    // (away from loopTask on core 1) so it keeps polling even if loopTask
-    // is fully blocked.
-    g_loop_task_handle = xTaskGetCurrentTaskHandle();
-    g_stall_captured = false;
-    // housekeeping_task/kiss_tx_task are created further down (see their
-    // own comments) - stall_monitor_task's job (detecting loopTask
-    // stalling from outside loopTask) is what actually caught the hang
-    // that justified keeping them separate, so it's created here regardless.
-    xTaskCreatePinnedToCore(stall_monitor_task, "stallmon", 2048, nullptr, 1, nullptr, 0);
   #endif
 
   #if MCU_VARIANT == MCU_ESP32
@@ -757,9 +460,6 @@ void setup() {
     disp_ready = display_init();
     update_display();
   #endif
-  #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
-    HEAP_TRACE("after display_init");
-  #endif
 
   #if HAS_RTC == true
     rtc_init();
@@ -824,30 +524,18 @@ void setup() {
       // validate_status() below (hw_ready isn't actually set until then -
       // startRadio() would otherwise always hit its not-ready branch).
       urns_init();
-      HEAP_TRACE("after urns_init");
-      // Temporary direct-Serial0 measurement (bypasses the async DEBUG_LOG
-      // queue that dropped this same line under HEAP_TRACE above during a
-      // logging burst) - see before_lxmf_router's own comment, URNS.h.
-      #if HAS_LXMF == true && HAS_DEBUG_UART == true
-        Serial0.printf("[HeapTrace] after_urns_init_direct free=%u\r\n", (unsigned)ESP.getFreeHeap());
-      #endif
       #if HAS_LXMF == true
         // Messenger app (Messenger.h) - bookmarks/message store/announce
         // handler. Only meaningful once urns_init() actually succeeded
         // (urns_ready) - a mount failure there leaves nothing for this to
         // build on.
         if (urns_ready) messenger_init();
-        HEAP_TRACE("after messenger_init");
       #endif
       // Provisioning.h - local KISS (CMD_PROVISION_REQ/RSP) + RNS-remote
       // (remote.management destination, already enabled above inside
       // urns_init()) config/management. Same urns_ready guard as
       // messenger_init() just above.
       if (urns_ready) provisioning_init();
-      HEAP_TRACE("after provisioning_init");
-      #if HAS_LXMF == true && HAS_DEBUG_UART == true
-        if (!heap_caps_check_integrity_all(true)) { Serial0.print("[HeapCorruption] detected after provisioning_init\r\n"); }
-      #endif
 
       // Final authoritative safety check, run last and regardless of how
       // probe_destination_enabled ended up set - not just the EEPROM
@@ -944,12 +632,6 @@ void setup() {
       bt_init();
       bt_init_ran = true;
     #endif
-    #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
-      HEAP_TRACE("after bt_init");
-      #if HAS_LXMF == true && HAS_DEBUG_UART == true
-        if (!heap_caps_check_integrity_all(true)) { Serial0.print("[HeapCorruption] detected after bt_init\r\n"); }
-      #endif
-    #endif
 
     if (console_active) {
       #if HAS_CONSOLE
@@ -1016,12 +698,6 @@ void setup() {
       #if HAS_ESPNOW == true
         if (espnow_enabled) espnow_init();
       #endif
-      #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
-        HEAP_TRACE("after espnow_init");
-        #if HAS_LXMF == true && HAS_DEBUG_UART == true
-          if (!heap_caps_check_integrity_all(true)) { Serial0.print("[HeapCorruption] detected after espnow_init\r\n"); }
-        #endif
-      #endif
       #if HAS_ETHERNET == true
         eth_speed_mode = EEPROM.read(eeprom_addr(ADDR_CONF_ETHSPD));
         if (eth_speed_mode > ETH_SPEED_OFF) eth_speed_mode = ETH_SPEED_AUTO; // erased EEPROM (0xFF) => default
@@ -1055,9 +731,6 @@ void setup() {
           xTaskCreatePinnedToCore(ws_tx_task, "wstx", 8192, nullptr, 1, nullptr, 0);
         #endif
         ws_remote_init();
-        #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true && HAS_LXMF == true && HAS_DEBUG_UART == true
-          if (!heap_caps_check_integrity_all(true)) { Serial0.print("[HeapCorruption] detected after ws_remote_init\r\n"); }
-        #endif
       #endif
       #if HAS_OTA == true
         // WebServer::begin() (called from ota_server_init()) needs the
@@ -1077,9 +750,6 @@ void setup() {
           if (WiFi.getMode() != WIFI_MODE_NULL || !eth_disabled) { ota_server_init(); }
         #else
           if (WiFi.getMode() != WIFI_MODE_NULL) { ota_server_init(); }
-        #endif
-        #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true && HAS_LXMF == true && HAS_DEBUG_UART == true
-          if (!heap_caps_check_integrity_all(true)) { Serial0.print("[HeapCorruption] detected after ota_server_init\r\n"); }
         #endif
       #endif
       kiss_indicate_reset();
@@ -1113,12 +783,6 @@ void setup() {
   // through to here rather than hard_reset()'ing, so "ready" would be
   // actively misleading exactly when something's actually wrong.
   if (hw_ready) { DEBUG_LOG("RNode ready\r\n"); }
-  #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
-    HEAP_TRACE("setup:end");
-    #if HAS_LXMF == true && HAS_DEBUG_UART == true
-      if (!heap_caps_check_integrity_all(true)) { Serial0.print("[HeapCorruption] detected at setup:end\r\n"); }
-    #endif
-  #endif
 
   #if HAS_URNS == true
     if (urns_enabled) {
@@ -1194,9 +858,6 @@ inline void getPacketData(uint16_t len) {
 }
 
 void ISR_VECT receive_callback(int packet_size) {
-  #if MCU_VARIANT == MCU_ESP32
-    set_checkpoint_isr("radio:isr:receive_callback:entry");
-  #endif
   #if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
     BaseType_t int_mask;
   #endif
@@ -1330,15 +991,11 @@ void ISR_VECT receive_callback(int packet_size) {
     #else
       // Allocate packet struct, but abort if there
       // is not enough memory available.
-      #if MCU_VARIANT == MCU_ESP32
-        set_checkpoint_isr("radio:isr:receive_callback:malloc");
-      #endif
       modem_packet_t *modem_packet = (modem_packet_t*)malloc(sizeof(modem_packet_t) + read_len);
       if(!modem_packet) { memory_low = true; return; }
 
       // Get packet RSSI and SNR
       #if MCU_VARIANT == MCU_ESP32
-        set_checkpoint_isr("radio:isr:receive_callback:packet_rssi_snr");
         modem_packet->snr_raw = LoRa->packetSnrRaw();
         modem_packet->rssi = LoRa->packetRssi(modem_packet->snr_raw);
       #endif
@@ -1348,9 +1005,6 @@ void ISR_VECT receive_callback(int packet_size) {
       // unable to receive the packet.
       modem_packet->len = read_len;
       memcpy(modem_packet->data, pbuf, read_len); read_len = 0;
-      #if MCU_VARIANT == MCU_ESP32
-        set_checkpoint_isr("radio:isr:receive_callback:queue_send");
-      #endif
       // receive_callback() (this function) is shared across every modem
       // driver's _onReceive target, not just sx126x - only sx126x.cpp's
       // own onDio0Rise() was changed to defer to task context
@@ -1367,9 +1021,6 @@ void ISR_VECT receive_callback(int packet_size) {
       if (!queue_ok) {
           free(modem_packet);
       }
-      #if MCU_VARIANT == MCU_ESP32
-        set_checkpoint_isr("radio:isr:receive_callback:done");
-      #endif
     #endif
   }
 }
@@ -1714,61 +1365,21 @@ void update_airtime() {
     longterm_channel_util = (float)longterm_channel_util_sum/(float)AIRTIME_BINS;
 
     #if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
-      #if MCU_VARIANT == MCU_ESP32
-        set_checkpoint("update_airtime:update_csma_parameters");
-      #endif
       update_csma_parameters();
     #endif
 
-    #if MCU_VARIANT == MCU_ESP32
-      // Which branch serial_write() (Utilities.h) will actually take -
-      // user has confirmed no BLE pairing and no WiFi client tonight, but
-      // verify the runtime flags directly rather than trust that by
-      // itself, in case of a stale-state bug (e.g. the known Remote.h
-      // clean-disconnect gap, feedback_wifi_remote_disconnect_gap memory)
-      // leaving wifi_host_is_connected() reporting true regardless.
-      {
-        char cpbuf[CHECKPOINT_BUF_LEN];
-        snprintf(cpbuf, sizeof(cpbuf), "update_airtime:kiss_stats bt=%d wifi=%d ws=%d",
-          (int)bt_state,
-          #if HAS_WIFI
-            (int)wifi_host_is_connected(),
-          #else
-            -1,
-          #endif
-          #if HAS_WIFI
-            (int)ws_host_is_connected()
-          #else
-            -1
-          #endif
-        );
-        set_checkpoint(cpbuf);
-      }
-    #endif
-    // The first-10s-of-uptime skip (added earlier tonight, theorizing a
-    // USB-CDC re-enumeration race) helped with crashes right after a
-    // fresh flash, but this exact call site still hung 45 minutes into an
-    // otherwise-healthy run on a later test - so it isn't only a boot-
-    // time enumeration issue, there's some other still-unidentified
-    // condition that can make Serial.write() (native USB CDC) hang
+    // Some Serial.write() (native USB CDC) calls can occasionally hang
     // despite USBCDC::write()'s own internal timeout logic looking sound
-    // on paper. Still just a signal here, not a direct call - the actual
-    // write happens in housekeeping_task() (this file), on its own
-    // dedicated task, specifically so a hang there can't take loopTask
-    // down with it. Briefly folded onto loopTask itself (an experiment
-    // matching microReticulum_Firmware's zero-extra-task architecture) -
-    // that reintroduced exactly this hang, confirmed live via
-    // StallCapture (loopTask blocked at checkpoint "housekeeping_poll",
-    // task watchdog firing ~25s later) - moved back to its own task.
+    // on paper - not just a call site under active BLE/WiFi/WS traffic;
+    // seen on otherwise-idle runs too. The actual write happens in
+    // housekeeping_task() (this file), on its own dedicated task,
+    // specifically so a hang there can't take loopTask down with it.
     #if MCU_VARIANT == MCU_ESP32
       if (millis() > 10000) {
         g_kiss_stats_pending = true;
       }
     #else
       kiss_indicate_channel_stats();
-    #endif
-    #if MCU_VARIANT == MCU_ESP32
-      set_checkpoint("update_airtime:done");
     #endif
   #endif
 }
@@ -2769,22 +2380,15 @@ void update_modem_status() {
   // genuinely brief, matching what portENTER_CRITICAL is actually for.
   #if MCU_VARIANT == MCU_ESP32
     #if MODEM == SX1262
-      set_checkpoint("update_modem_status:mask_dio0");
       LoRa->maskDio0();
     #endif
-    set_checkpoint("update_modem_status:dcd");
   #endif
   bool carrier_detected = LoRa->dcd();
-  #if MCU_VARIANT == MCU_ESP32
-    set_checkpoint("update_modem_status:current_rssi");
-  #endif
   int new_current_rssi = LoRa->currentRssi();
   #if MCU_VARIANT == MCU_ESP32
     #if MODEM == SX1262
-      set_checkpoint("update_modem_status:unmask_dio0");
       LoRa->unmaskDio0();
     #endif
-    set_checkpoint("update_modem_status:after_unmask");
   #endif
 
   #if MCU_VARIANT == MCU_ESP32
@@ -2867,16 +2471,10 @@ void update_modem_status() {
 
 void check_modem_status() {
   if (millis()-last_status_update >= status_interval_ms) {
-    #if MCU_VARIANT == MCU_ESP32
-      set_checkpoint("check_modem_status:update_modem_status");
-    #endif
     // update_noise_floor() now happens unconditionally at the end of
     // update_modem_status() itself - see that function's own comment for
     // why calling it only here (gated on status_interval_ms) was the bug.
     update_modem_status();
-    #if MCU_VARIANT == MCU_ESP32
-      set_checkpoint("check_modem_status:util_samples");
-    #endif
 
     #if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
       util_samples[dcd_sample] = dcd;
@@ -2895,14 +2493,8 @@ void check_modem_status() {
         if (total_channel_util > longterm_bins[cb]) longterm_bins[cb] = total_channel_util;
         longterm_bins[nb] = 0.0;
 
-        #if MCU_VARIANT == MCU_ESP32
-          set_checkpoint("check_modem_status:update_airtime");
-        #endif
         update_airtime();
       }
-    #endif
-    #if MCU_VARIANT == MCU_ESP32
-      set_checkpoint("check_modem_status:done");
     #endif
   }
 }
@@ -3094,58 +2686,24 @@ void tx_queue_handler() {
 void work_while_waiting() { loop(); }
 
 void loop() {
-  #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
-    esp_task_wdt_reset();
-  #endif
   // housekeeping_task()/kiss_tx_task() (this file) run as their own
   // dedicated FreeRTOS tasks, not folded onto loopTask - see their own
   // comments for why. They briefly were folded here (to recover ~14KB+ of
   // task stack/TCB overhead for BLE's DRAM margin, matching
   // microReticulum_Firmware's zero-extra-task shape) but that reintroduced
-  // a real, confirmed hang: StallCapture caught loopTask blocked exactly at
-  // this point (checkpoint stuck at "housekeeping_poll", CPU idle, task
-  // watchdog firing ~25s later) - the "Serial.write() occasionally never
+  // a real, confirmed hang - the "Serial.write() occasionally never
   // returns" USBCDC quirk these tasks were originally isolated to protect
-  // against. stall_monitor_task (RNode_Firmware.ino) is what caught and
-  // reported it - it stayed a separate task throughout since it can't
-  // detect loopTask stalling from loopTask itself.
+  // against.
   #if HAS_URNS == true
     if (urns_ready) {
-      #if MCU_VARIANT == MCU_ESP32
-        check_heap_integrity("loop:top");
-        set_checkpoint("urns_reticulum.loop");
-      #endif
       urns_reticulum.loop();
-      #if MCU_VARIANT == MCU_ESP32
-        check_heap_integrity("urns_reticulum.loop");
-        set_checkpoint("urns_lxmf_loop");
-      #endif
       urns_lxmf_loop();
-      #if MCU_VARIANT == MCU_ESP32
-        check_heap_integrity("urns_lxmf_loop");
-      #endif
       #if HAS_LXMF == true
-        #if MCU_VARIANT == MCU_ESP32
-          set_checkpoint("messenger_ping_process");
-        #endif
         messenger_ping_process();
-        #if MCU_VARIANT == MCU_ESP32
-          check_heap_integrity("messenger_ping_process");
-        #endif
         messenger_send_process();
-        #if MCU_VARIANT == MCU_ESP32
-          check_heap_integrity("messenger_send_process");
-        #endif
         msngr_send_result_process();
-        #if MCU_VARIANT == MCU_ESP32
-          check_heap_integrity("msngr_send_result_process");
-          set_checkpoint("messenger_heartbeat_process");
-        #endif
         #if HAS_DEBUG_UART == true
           messenger_heartbeat_process();
-          #if MCU_VARIANT == MCU_ESP32
-            check_heap_integrity("messenger_heartbeat_process");
-          #endif
         #endif
       #endif
 
@@ -3162,9 +2720,6 @@ void loop() {
   #endif
 
   if (radio_online) {
-    #if MCU_VARIANT == MCU_ESP32
-      set_checkpoint("radio_online_block");
-    #endif
     #if MCU_VARIANT == MCU_ESP32
       // Drains a DIO0 interrupt flagged by sx126x's onDio0Rise() (see its
       // own comment, sx126x.cpp) - must run every loop() iteration,
@@ -3229,17 +2784,8 @@ void loop() {
 
     #endif
 
-    #if MCU_VARIANT == MCU_ESP32
-      set_checkpoint("tx_queue_handler");
-    #endif
     tx_queue_handler();
-    #if MCU_VARIANT == MCU_ESP32
-      set_checkpoint("check_modem_status");
-    #endif
     check_modem_status();
-    #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
-      check_heap_integrity("check_modem_status");
-    #endif
 
   } else {
     if (hw_ready) {
@@ -3280,9 +2826,6 @@ void loop() {
     }
   }
 
-  #if MCU_VARIANT == MCU_ESP32
-    set_checkpoint("serial_poll");
-  #endif
   #if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
       buffer_serial();
       if (!fifo_isempty(&serialFIFO)) serial_poll();
@@ -3290,23 +2833,11 @@ void loop() {
     if (!fifo_isempty_locked(&serialFIFO)) serial_poll();
   #endif
 
-  #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
-    check_heap_integrity("serial_poll");
-  #endif
   #if HAS_DISPLAY
-    #if MCU_VARIANT == MCU_ESP32
-      set_checkpoint("update_display");
-    #endif
     if (disp_ready && !display_updating) update_display();
-  #endif
-  #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
-    check_heap_integrity("update_display");
   #endif
 
   #if HAS_BUZZER == true
-    #if MCU_VARIANT == MCU_ESP32
-      set_checkpoint("buzzer_update");
-    #endif
     buzzer_update();
   #endif
 
@@ -3319,84 +2850,39 @@ void loop() {
   #endif
 
   #if HAS_BLUETOOTH || HAS_BLE == true
-    #if MCU_VARIANT == MCU_ESP32
-      set_checkpoint("update_bt");
-    #endif
     if (!console_active && bt_ready) update_bt();
   #endif
 
   #if HAS_WIFI
-    #if MCU_VARIANT == MCU_ESP32
-      set_checkpoint("update_wifi");
-    #endif
     if (wifi_initialized) update_wifi();
     if (ws_enabled) update_ws();
   #endif
-  #if MCU_VARIANT == MCU_ESP32
-    set_checkpoint("loop:tail");
-  #endif
-  #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
-    check_heap_integrity("loop:tail");
-  #endif
 
   #if HAS_OTA == true
-    #if MCU_VARIANT == MCU_ESP32
-      set_checkpoint("ota_loop");
-    #endif
     if (!console_active) ota_loop();
   #endif
 
   #if HAS_ESPNOW == true
-    #if MCU_VARIANT == MCU_ESP32
-      set_checkpoint("update_espnow");
-    #endif
     if (espnow_enabled) { update_espnow(); update_espnow_tx(); }
   #endif
 
   #if HAS_GPS == true
-    #if MCU_VARIANT == MCU_ESP32
-      set_checkpoint("gnss_update");
-    #endif
     gnss_update();
   #endif
 
   #if HAS_INPUT
-    #if MCU_VARIANT == MCU_ESP32
-      set_checkpoint("input_read");
-    #endif
     input_read();
   #endif
 
   #if HAS_ENCODER == true
-    #if MCU_VARIANT == MCU_ESP32
-      set_checkpoint("encoder_process");
-    #endif
     encoder_process();
   #endif
   #if HAS_MENU == true
-    #if MCU_VARIANT == MCU_ESP32
-      set_checkpoint("menu_button_process");
-    #endif
     menu_button_process();
-    #if MCU_VARIANT == MCU_ESP32
-      set_checkpoint("menu_timeout_process");
-    #endif
     menu_timeout_process();
     #if HAS_WIFI == true || HAS_ETHERNET == true
-      #if MCU_VARIANT == MCU_ESP32
-        set_checkpoint("menu_popup_process");
-      #endif
       menu_popup_process();
     #endif
-  #endif
-  #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
-    check_heap_integrity("menu_tail");
-  #endif
-  #if MCU_VARIANT == MCU_ESP32
-    set_checkpoint("loop:end");
-  #endif
-  #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
-    check_heap_integrity("loop:end");
   #endif
 
   if (memory_low) {

@@ -445,24 +445,12 @@ void urns_init() {
   // something a real node would ever produce.
 
 #if HAS_LXMF == true
-  // Direct Serial0 write, bypassing the async DEBUG_LOG queue - this is a
-  // one-off measurement, not a permanent log line, and needs to survive
-  // whatever burst of other DEBUG_LOG() traffic is happening around LXMF
-  // construction without risking a silent drop (DEBUG_LOG_QUEUE_DEPTH is
-  // only 16, non-blocking xQueueSend - fails open by dropping, not
-  // blocking, exactly what happened to the queued version of this line).
-  #if HAS_DEBUG_UART == true
-    Serial0.printf("[HeapTrace] before_lxmf_router free=%u\r\n", (unsigned)ESP.getFreeHeap());
-  #endif
   DEBUG_LOG("[URNS] step 15: constructing LXMF router\r\n");
   // No MessageStore yet (Phase 1: hardcoded test destination, no
   // conversation/destination list) - LXMRouter doesn't need one, it's a
   // fully separate opt-in component (confirmed by reading LXMRouter.cpp -
   // it never references MessageStore internally).
   urns_lxmf_router = std::make_shared<LXMF::LXMRouter>(urns_identity, URNS_BASE_PATH "/lxmf", false);
-  #if HAS_DEBUG_UART == true
-    if (!heap_caps_check_integrity_all(true)) { Serial0.print("[HeapCorruption] detected after LXMRouter construction\r\n"); }
-  #endif
   urns_lxmf_router->register_delivery_callback([](LXMF::LXMessage& msg) {
     DEBUG_LOG("[URNS] LXMF RX from %s: %s\r\n", msg.source_hash().toHex().c_str(), msg.content().toString().c_str());
     messenger_on_delivery(msg);
@@ -546,13 +534,7 @@ void urns_lxmf_loop() {
   }
 #if HAS_LXMF == true
   urns_lxmf_router->process_outbound();
-  #if HAS_DEBUG_UART == true
-    if (!heap_caps_check_integrity_all(true)) { Serial0.print("[HeapCorruption] detected after process_outbound\r\n"); }
-  #endif
   urns_lxmf_router->process_inbound();
-  #if HAS_DEBUG_UART == true
-    if (!heap_caps_check_integrity_all(true)) { Serial0.print("[HeapCorruption] detected after process_inbound\r\n"); }
-  #endif
 #endif
   urns_cull_stores();
   LoRa->unmaskDio0();

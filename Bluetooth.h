@@ -263,21 +263,6 @@ char bt_da[BT_DEV_ADDR_LEN];
       #endif
       display_unblank();
       if (bt_state == BT_STATE_OFF) {
-        // Temporary diagnostic - correlate free heap with a real nimble_
-        // port_init() failure to check the memory-pressure hypothesis
-        // (bt_start() alone was previously measured needing ~82KB).
-        // HEAP_TRACE (RNode_Firmware.ino) isn't visible yet at this point
-        // in the include chain (Utilities.h, which pulls this file in,
-        // is #include'd before HEAP_TRACE is #define'd) - same reasoning
-        // as URNS.h's own DEBUG_LOG-not-HEAP_TRACE usage.
-        // internal=X - RNS_CONTAINER_ALLOCATOR=RNS_PSRAM_ALLOCATOR (this
-        // session) merges PSRAM into the general MALLOC_CAP_DEFAULT heap,
-        // so plain getFreeHeap() no longer distinguishes "plenty of PSRAM,
-        // starved for internal DRAM" from genuine overall exhaustion -
-        // and FreeRTOS kernel objects (semaphores/queues, which is exactly
-        // what BLEServer's constructor allocates) can only ever come from
-        // internal DRAM, never PSRAM. Measuring both to tell those apart.
-        DEBUG_LOG("[HeapTrace] bt_start:before_begin free=%u internal=%u\r\n", (unsigned)ESP.getFreeHeap(), (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
         // SerialBT.begin() (BLESerial::begin(), BLESerial.cpp) now returns
         // false instead of crashing when the underlying BLEDevice::init()
         // fails (confirmed live: a WiFi/BLE coexistence race can still make
@@ -287,7 +272,6 @@ char bt_da[BT_DEV_ADDR_LEN];
         // succeeded, so a failed attempt can be retried by pressing again
         // instead of getting stuck showing BT as on with nothing running.
         bool ok = SerialBT.begin(bt_devname);
-        DEBUG_LOG("[HeapTrace] bt_start:after_begin free=%u\r\n", (unsigned)ESP.getFreeHeap());
         if (ok) {
           bt_state = BT_STATE_ON;
           SerialBT.setTimeout(10);
@@ -312,8 +296,8 @@ char bt_da[BT_DEV_ADDR_LEN];
       bt_state = BT_STATE_OFF;
       if (bt_setup_hw()) {
         // Deliberately NOT calling bt_start() here anymore - measured
-        // live (HEAP_TRACE, RNode_Firmware.ino) that it alone accounts
-        // for ~82KB of the ~137KB BLE+ESP-NOW together were consuming
+        // live that it alone accounts for ~82KB of the ~137KB BLE+
+        // ESP-NOW together were consuming
         // out of ~185KB available after display init, leaving only
         // ~30KB for everything else (LXMF/RNS processing, crypto, etc.)
         // - the direct cause of this session's whole crash investigation

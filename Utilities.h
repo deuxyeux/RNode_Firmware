@@ -48,9 +48,9 @@
     // specifically so a hung write there can't take loopTask down with it.
     // Briefly folded onto loopTask itself (an experiment matching
     // microReticulum_Firmware's zero-extra-task architecture) but that
-    // reintroduced exactly this hang, confirmed live via StallCapture (see
-    // housekeeping_task()'s own comment) - moved back to its own task. The
-    // queue still serializes access either way, so no mutex is needed. Fail-
+    // reintroduced exactly this hang (see housekeeping_task()'s own
+    // comment) - moved back to its own task. The queue still serializes
+    // access either way, so no mutex is needed. Fail-
     // open by design: xQueueSend with a 0 wait just drops the line if the
     // queue's full rather than ever blocking the caller - a missed debug
     // line is harmless, an indefinite hang isn't.
@@ -1695,13 +1695,6 @@ void kiss_indicate_lt_alock() {
 	serial_write(FEND);
 }
 
-#if MCU_VARIANT == MCU_ESP32
-  // set_checkpoint (RNode_Firmware.ino) isn't declared yet at this point -
-  // Utilities.h is #include'd near the top of RNode_Firmware.ino, before
-  // that function is defined further down in the same translation unit.
-  extern void set_checkpoint_kissstats(const char* s);
-#endif
-
 void kiss_indicate_channel_stats() {
 	#if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
 		uint16_t ats = (uint16_t)(airtime*100*100);
@@ -1711,40 +1704,20 @@ void kiss_indicate_channel_stats() {
 		uint8_t  crs = (uint8_t)(current_rssi+rssi_offset);
 		uint8_t  nfl = (uint8_t)(noise_floor+rssi_offset);
 		uint8_t  ntf = 0xFF; if (interference_detected) { ntf = (uint8_t)(current_rssi+rssi_offset); }
-		// Byte-level checkpoint counter - this function's own checkpoint
-		// ("update_airtime:kiss_stats") kept showing up as the last
-		// position before a crash even with heap healthy, meaning
-		// something inside here genuinely hangs, not just "eventually
-		// fails" the way a bounded-timeout write would. Narrowing to
-		// exactly which of the 13 individual serial_write()/escaped_
-		// serial_write() calls is the one that never returns.
-		#if MCU_VARIANT == MCU_ESP32
-			// 48 matches CHECKPOINT_BUF_LEN (RNode_Firmware.ino) - can't
-			// reference that macro directly, it's #define'd later in the
-			// same translation unit than this file's own #include point.
-			#define KISS_STATS_CP(n) do { \
-				char cpbuf[48]; \
-				snprintf(cpbuf, sizeof(cpbuf), "kiss_stats:byte%d", n); \
-				set_checkpoint_kissstats(cpbuf); \
-			} while (0)
-		#else
-			#define KISS_STATS_CP(n)
-		#endif
-		KISS_STATS_CP(0);  serial_write(FEND);
-		KISS_STATS_CP(1);  serial_write(CMD_STAT_CHTM);
-		KISS_STATS_CP(2);  escaped_serial_write(ats>>8);
-		KISS_STATS_CP(3);  escaped_serial_write(ats);
-		KISS_STATS_CP(4);  escaped_serial_write(atl>>8);
-		KISS_STATS_CP(5);  escaped_serial_write(atl);
-		KISS_STATS_CP(6);  escaped_serial_write(cls>>8);
-		KISS_STATS_CP(7);  escaped_serial_write(cls);
-		KISS_STATS_CP(8);  escaped_serial_write(cll>>8);
-		KISS_STATS_CP(9);  escaped_serial_write(cll);
-		KISS_STATS_CP(10); escaped_serial_write(crs);
-		KISS_STATS_CP(11); escaped_serial_write(nfl);
-		KISS_STATS_CP(12); escaped_serial_write(ntf);
-		KISS_STATS_CP(13); serial_write(FEND);
-		#undef KISS_STATS_CP
+		serial_write(FEND);
+		serial_write(CMD_STAT_CHTM);
+		escaped_serial_write(ats>>8);
+		escaped_serial_write(ats);
+		escaped_serial_write(atl>>8);
+		escaped_serial_write(atl);
+		escaped_serial_write(cls>>8);
+		escaped_serial_write(cls);
+		escaped_serial_write(cll>>8);
+		escaped_serial_write(cll);
+		escaped_serial_write(crs);
+		escaped_serial_write(nfl);
+		escaped_serial_write(ntf);
+		serial_write(FEND);
 	#endif
 }
 

@@ -1214,17 +1214,6 @@ void LXMRouter::retry_failed_outbound() {
 
 // Packet callback - receive LXMF messages
 void LXMRouter::on_packet(const Bytes& data, const Packet& packet) {
-#if MCU_VARIANT == MCU_ESP32
-	// Chasing the residual per-message heap loss not explained by either
-	// the already-fixed incoming-link idle-timeout race ([[feedback_
-	// incoming_link_idle_timeout_races_pinger]]) or the small, constant
-	// 132-byte leak already found in messenger_on_delivery() (Messenger.
-	// h) - this runs on every message regardless of whether the link
-	// itself is reused, and is where the actual message unpack/decrypt
-	// happens (LXMessage::unpack_from_bytes(), below), so it's the next
-	// most likely place for the rest of it to be.
-	unsigned free_before_on_packet = ESP.getFreeHeap();
-#endif
 	char buf[128];
 	snprintf(buf, sizeof(buf), "Received LXMF message packet (%zu bytes)", data.size());
 	INFO(buf);
@@ -1310,18 +1299,6 @@ void LXMRouter::on_packet(const Bytes& data, const Packet& packet) {
 		snprintf(buf, sizeof(buf), "Failed to unpack LXMF message: %s", e.what());
 		ERROR(buf);
 	}
-#if MCU_VARIANT == MCU_ESP32
-	unsigned free_after_on_packet = ESP.getFreeHeap();
-	char hdbuf[128];
-	snprintf(hdbuf, sizeof(hdbuf), "[HeapDelta] on_packet before=%u after=%u delta=%ld",
-		free_before_on_packet, free_after_on_packet, (long)free_before_on_packet - (long)free_after_on_packet);
-	// NOTICE, not INFO - the runtime log level is RNS::LOG_NOTICE
-	// (Messenger.h, see its own comment on why: the full INFO/TRACE
-	// firehose made the device sluggish under real traffic). INFO()
-	// silently never printed here - this ran on every single message the
-	// whole time this line existed, just invisibly.
-	NOTICE(hdbuf);
-#endif
 }
 
 // Get or establish link to destination
@@ -1670,17 +1647,6 @@ void LXMRouter::on_link_closed(const Link& link) {
 
 // Incoming link established callback (for DIRECT delivery to our destination)
 void LXMRouter::on_incoming_link_established(Link& link) {
-#if MCU_VARIANT == MCU_ESP32
-	// See Messenger.h's messenger_on_delivery() for the matching
-	// downstream measurement - that one showed a small, constant 132-byte
-	// leak, but a much bigger (~1.3KB) per-message loss was happening
-	// somewhere *outside* that window, during a sustained automated-
-	// pinger stress test where every message arrives via a fresh DIRECT-
-	// delivery incoming Link. This is the other major candidate: link
-	// setup/teardown bookkeeping (track_incoming_link()/sweep_incoming_
-	// links(), this file).
-	unsigned free_before_link_setup = ESP.getFreeHeap();
-#endif
 	INFO("Incoming link established from remote peer");
 	char buf[128];
 	snprintf(buf, sizeof(buf), "  Link ID: %s", link.link_id().toHex().c_str());
@@ -1696,13 +1662,6 @@ void LXMRouter::on_incoming_link_established(Link& link) {
 	DEBUG("  Packet and resource callbacks registered for incoming LXMF messages");
 
 	track_incoming_link(link);
-#if MCU_VARIANT == MCU_ESP32
-	unsigned free_after_link_setup = ESP.getFreeHeap();
-	char hdbuf[128];
-	snprintf(hdbuf, sizeof(hdbuf), "[HeapDelta] on_incoming_link_established before=%u after=%u delta=%ld",
-		free_before_link_setup, free_after_link_setup, (long)free_before_link_setup - (long)free_after_link_setup);
-	INFO(hdbuf);
-#endif
 }
 
 // See sweep_incoming_links()'s own comment (LXMRouter.h) for why this

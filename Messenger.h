@@ -368,16 +368,6 @@
   // signature validation, covering senders we haven't directly heard
   // announce ourselves), and sounds the emergency-alert chirp.
   void messenger_on_delivery(LXMF::LXMessage &msg) {
-    #if MCU_VARIANT == MCU_ESP32
-      // User confirmed via a sustained automated stress test that heap
-      // decline correlates with message-receive count, not just elapsed
-      // time - this is the single call site every received message goes
-      // through, so measure exactly how much each one costs and whether
-      // it's recovered, instead of continuing to guess where in the
-      // pipeline (save_message, app_data recall, LXMRouter's own link/
-      // resource handling before this callback even runs) it's going.
-      unsigned free_before = ESP.getFreeHeap();
-    #endif
     if (!urns_message_store) return;
     // No mask/unmask here anymore - this whole call is now nested inside
     // urns_lxmf_loop()'s single outer LoRa->maskDio0()/unmaskDio0() guard
@@ -399,12 +389,6 @@
 
     #if HAS_BUZZER == true
       buzzer_lxmf_rx_melody();
-    #endif
-
-    #if MCU_VARIANT == MCU_ESP32
-      unsigned free_after = ESP.getFreeHeap();
-      DEBUG_LOG("[HeapDelta] on_delivery before=%u after=%u delta=%ld\r\n",
-        free_before, free_after, (long)free_before - (long)free_after);
     #endif
   }
 
@@ -683,40 +667,14 @@
     #define MSNGR_HEARTBEAT_INTERVAL_MS 5000
     unsigned long msngr_heartbeat_last_ms = 0;
 
-    // g_loop_checkpoint (RNode_Firmware.ino) - see its own comment for why
-    // this piggy-backs on the heartbeat's existing single-threaded Serial0
-    // write instead of a separate concurrent printer.
-    #if MCU_VARIANT == MCU_ESP32
-      extern volatile const char* g_loop_checkpoint;
-    #endif
-
+    // A periodic Serial0 line (independent of anything else logging) so a
+    // physical TX LED on the debug UART adapter keeps blinking on a known
+    // cadence while the device is alive.
     void messenger_heartbeat_process() {
       unsigned long now = millis();
       if (now - msngr_heartbeat_last_ms < MSNGR_HEARTBEAT_INTERVAL_MS) return;
       msngr_heartbeat_last_ms = now;
-      #if MCU_VARIANT == MCU_ESP32
-        // DEBUG_LOG() no longer writes to Serial0 from this task directly
-        // (Utilities.h, debug_log_guarded()) - it queues the line for a
-        // dedicated consumer task, so a hung Serial0 write can no longer
-        // block loopTask here the way it was confirmed to do previously.
-        // psram=X/Y confirms whether PSRAM is actually merged into the
-        // general allocator (psramAddToHeap(), esp32-hal-misc.c) or just
-        // sitting there unused - see this session's PSRAM investigation.
-        // radio_online/dcd/airtime_lock/current_rssi/total_channel_util
-        // (Config.h) - user reported the radio visibly stopped sending/
-        // receiving for close to a minute *before* a crash, with no
-        // hang symptom yet during that window (heartbeats kept printing
-        // normally). Tracking these here to see whether the radio was
-        // already reporting a stuck/bad state (e.g. permanently "channel
-        // busy") in the heartbeats leading up to the next such crash,
-        // rather than only learning about it after the fact from a
-        // watchdog panic that doesn't capture any of this.
-        DEBUG_LOG("[Heartbeat] alive, uptime=%lus heap=%u psram_free=%u psram_size=%u radio_online=%d dcd=%d airtime_lock=%d current_rssi=%d total_channel_util=%.2f loc=%s\r\n",
-          now / 1000, (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getFreePsram(), (unsigned)ESP.getPsramSize(),
-          (int)radio_online, (int)dcd, (int)airtime_lock, current_rssi, total_channel_util, g_loop_checkpoint);
-      #else
-        DEBUG_LOG("[Heartbeat] alive, uptime=%lus heap=%u\r\n", now / 1000, (unsigned)ESP.getFreeHeap());
-      #endif
+      DEBUG_LOG("[Heartbeat] alive, uptime=%lus heap=%u\r\n", now / 1000, (unsigned)ESP.getFreeHeap());
     }
   #endif
 
@@ -738,14 +696,8 @@
     // always runs before messenger_init() (RNode_Firmware.ino setup()), so
     // this is already done by the time we get here.
     urns_message_store = new LXMF::MessageStore(URNS_BASE_PATH "/messages");
-    #if HAS_DEBUG_UART == true
-      if (!heap_caps_check_integrity_all(true)) { Serial0.print("[HeapCorruption] detected after MessageStore construction\r\n"); }
-    #endif
     RNS::Transport::register_announce_handler(msngr_announce_handler);
     messenger_bookmarks_load();
-    #if HAS_DEBUG_UART == true
-      if (!heap_caps_check_integrity_all(true)) { Serial0.print("[HeapCorruption] detected after messenger_bookmarks_load\r\n"); }
-    #endif
     DEBUG_LOG("[Messenger] ready, %u bookmark(s) loaded\r\n", (unsigned)msngr_bookmark_count);
   }
 

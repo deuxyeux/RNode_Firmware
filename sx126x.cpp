@@ -13,25 +13,6 @@
   #define ISR_VECT
 #endif
 
-// See RNode_Firmware.ino's own comment (top of file, near g_loop_checkpoint)
-// for the full story - temporary breadcrumb instrumentation for the
-// ongoing lockup investigation, since this file is the leading suspect.
-// Two separate breadcrumb trails (see RNode_Firmware.ino's own comment,
-// near g_checkpoint_snapshot, for why) - CHECKPOINT() for beginPacket()/
-// endPacket(), which only ever run in task context (called from
-// tx_queue_handler() via loopTask), and CHECKPOINT_ISR() for
-// handleDio0Rise(), which is true interrupt context (or the manual
-// "missed event" call from endPacket() - same code path either way).
-#if MCU_VARIANT == MCU_ESP32
-  extern void set_checkpoint(const char* s);
-  extern void set_checkpoint_isr(const char* s);
-  #define CHECKPOINT(s) set_checkpoint(s)
-  #define CHECKPOINT_ISR(s) set_checkpoint_isr(s)
-#else
-  #define CHECKPOINT(s)
-  #define CHECKPOINT_ISR(s)
-#endif
-
 // REVERTED - see feedback_buzzer_update_in_tx_wait_hang memory. Calling
 // Utilities.h's buzzer_update() from inside endPacket()'s busy-wait loop
 // (to keep the buzzer's note timing advancing during a blocking TX) was
@@ -239,7 +220,6 @@ void sx126x::loraMode() {
 }
 
 void sx126x::waitOnBusy() {
-  CHECKPOINT("radio:spi:waitbusy_enter");
   unsigned long time = millis();
   if (_busy != -1) {
     // gpio_get_level(), not digitalRead(), on ESP32 - matches
@@ -265,7 +245,6 @@ void sx126x::waitOnBusy() {
         if (millis() >= (time + 100)) { break; }
     }
   }
-  CHECKPOINT("radio:spi:waitbusy_exit");
 }
 
 void sx126x::executeOpcode(uint8_t opcode, uint8_t *buffer, uint8_t size) {
@@ -278,26 +257,15 @@ void sx126x::executeOpcode(uint8_t opcode, uint8_t *buffer, uint8_t size) {
   digitalWrite(_ss, HIGH);
 }
 
-// TEMPORARY - finer breadcrumbs than executeOpcode() above, since this is
-// the specific call endPacket()'s TX-done poll loop hammers (see
-// RNode_Firmware.ino's g_loop_checkpoint comment) and the crash caught
-// live only narrowed it down to "somewhere in here", not which SPI step.
 void sx126x::executeOpcodeRead(uint8_t opcode, uint8_t *buffer, uint8_t size) {
   waitOnBusy();
-  CHECKPOINT("radio:spi:ss_low");
   digitalWrite(_ss, LOW);
-  CHECKPOINT("radio:spi:begintxn");
   SPI.beginTransaction(_spiSettings);
-  CHECKPOINT("radio:spi:xfer_opcode");
   SPI.transfer(opcode);
-  CHECKPOINT("radio:spi:xfer_dummy");
   SPI.transfer(0x00);
-  CHECKPOINT("radio:spi:xfer_read");
   for (int i = 0; i < size; i++) { buffer[i] = SPI.transfer(0x00); }
-  CHECKPOINT("radio:spi:endtxn");
   SPI.endTransaction();
   digitalWrite(_ss, HIGH);
-  CHECKPOINT("radio:spi:read_return");
 }
 
 void sx126x::writeBuffer(const uint8_t* buffer, size_t size) {
@@ -605,7 +573,6 @@ void sx126x::unmaskDio0() {
     // and service a still-pending event explicitly rather than silently
     // dropping it.
     if (digitalRead(_dio0) == HIGH) {
-      CHECKPOINT_ISR("radio:unmask:missed_event_handleDio0Rise");
       handleDio0Rise();
     }
   }
@@ -617,9 +584,7 @@ int sx126x::beginPacket(int implicitHeader) {
   // between, and endPacket() all do raw SPI. Every beginPacket() call in
   // this codebase is unconditionally followed by an endPacket() (no early
   // returns skip it), so this always gets unmasked there.
-  CHECKPOINT("radio:begin_packet:detach_dio0");
   maskDio0();
-  CHECKPOINT("radio:begin_packet:after_detach");
 
   #if HAS_LORA_PA
     if (lora_pa_model == LORA_PA_GC1109) {
@@ -659,29 +624,23 @@ int sx126x::beginPacket(int implicitHeader) {
     if (_rxen != -1) { digitalWrite(_rxen, LOW); } //Set RXen low at the same time
   #endif
 
-  CHECKPOINT("radio:begin_packet:standby");
   standby();
-  CHECKPOINT("radio:begin_packet:header_mode");
   if (implicitHeader) { implicitHeaderMode(); }
   else { explicitHeaderMode(); }
 
   _payloadLength = 0;
   _fifo_tx_addr_ptr = 0;
-  CHECKPOINT("radio:begin_packet:set_packet_params");
   setPacketParams(_preambleLength, _implicitHeaderMode, _payloadLength, _crcMode);
-  CHECKPOINT("radio:begin_packet:return");
 
   return 1;
 }
 
 int sx126x::endPacket() {
-  CHECKPOINT("radio:end_packet:set_packet_params");
   setPacketParams(_preambleLength, _implicitHeaderMode, _payloadLength, _crcMode);
 
   // RXen already dropped in beginPacket(), alongside TXen going high.
 
   uint8_t timeout[3] = {0}; // Put in single TX mode
-  CHECKPOINT("radio:end_packet:op_tx");
   executeOpcode(OP_TX_6X, timeout, 3);
 
   // DIO0 already masked - see beginPacket()'s own comment. Re-attached
@@ -690,23 +649,18 @@ int sx126x::endPacket() {
   uint8_t buf[2];
   buf[0] = 0x00;
   buf[1] = 0x00;
-  CHECKPOINT("radio:end_packet:first_irq_status_read");
   executeOpcodeRead(OP_GET_IRQ_STATUS_6X, buf, 2);
 
   // Wait for TX done
   bool timed_out = false;
   uint32_t w_timeout = millis()+LORA_MODEM_TIMEOUT_MS;
-  CHECKPOINT("radio:end_packet:tx_poll_loop");
   while ((millis() < w_timeout) && ((buf[1] & IRQ_TX_DONE_MASK_6X) == 0)) {
     buf[0] = 0x00;
     buf[1] = 0x00;
     executeOpcodeRead(OP_GET_IRQ_STATUS_6X, buf, 2);
-    // THE actual root cause of the long-running Interrupt-WDT crash saga
-    // (feedback_sx126x_tx_rx_spi_mutex_race memory) - found via fine-
-    // grained CHECKPOINT()s inside executeOpcodeRead() (see waitOnBusy()/
-    // that function's own comments): every single captured crash's last
-    // checkpoint was "radio:spi:read_return" - the SPI transaction itself
-    // *always* completes cleanly, every time. The hang is in the few
+    // Root cause of a long-running Interrupt-WDT crash saga
+    // (feedback_sx126x_tx_rx_spi_mutex_race memory): the SPI transaction
+    // itself always completes cleanly - the hang was in the few
     // instructions right after, which used to just be yield(). yield()
     // is taskYIELD() - it only asks the scheduler to reconsider; if
     // loopTask is still the highest-priority ready task (normal case),
@@ -725,7 +679,6 @@ int sx126x::endPacket() {
     // IRQ once the radio has actually finished transmitting.
     vTaskDelay(pdMS_TO_TICKS(1));
   }
-  CHECKPOINT("radio:end_packet:tx_poll_done");
 
   if (!(millis() < w_timeout)) { timed_out = true; }
 
@@ -733,12 +686,9 @@ int sx126x::endPacket() {
   uint8_t mask[2];
   mask[0] = 0x00;
   mask[1] = IRQ_TX_DONE_MASK_6X;
-  CHECKPOINT("radio:end_packet:clear_irq");
   executeOpcode(OP_CLEAR_IRQ_STATUS_6X, mask, 2);
 
-  CHECKPOINT("radio:end_packet:attach_dio0");
   unmaskDio0();
-  CHECKPOINT("radio:end_packet:return");
 
   if (timed_out) { return 0; } else { return 1; }
 }
@@ -1160,24 +1110,19 @@ void sx126x::dumpRegisters(Stream& out) {
 // onDio0Rise()'s own comment) - harmless there since ISR_VECT is already
 // a no-op macro on that platform (IRAM_ATTR is ESP32-specific).
 void sx126x::handleDio0Rise() {
-  CHECKPOINT_ISR("radio:isr:irq_status_read");
   uint8_t buf[2];
   buf[0] = 0x00;
   buf[1] = 0x00;
   executeOpcodeRead(OP_GET_IRQ_STATUS_6X, buf, 2);
-  CHECKPOINT_ISR("radio:isr:clear_irq");
   executeOpcode(OP_CLEAR_IRQ_STATUS_6X, buf, 2);
 
   if ((buf[1] & IRQ_PAYLOAD_CRC_ERROR_MASK_6X) == 0) {
     _packetIndex = 0;
     uint8_t rxbuf[2] = {0}; // Read packet length
-    CHECKPOINT_ISR("radio:isr:rx_buffer_status");
     executeOpcodeRead(OP_RX_BUFFER_STATUS_6X, rxbuf, 2);
     int packetLength = rxbuf[0];
-    CHECKPOINT_ISR("radio:isr:onReceive_callback");
     if (_onReceive) { _onReceive(packetLength); }
   }
-  CHECKPOINT_ISR("radio:isr:done");
 }
 
 // Ported from microReticulum_Firmware's sx126x.cpp (their onDio0Rise()/
