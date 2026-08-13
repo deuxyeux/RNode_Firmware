@@ -901,6 +901,41 @@ bool Link::check_establishment_timeout() {
 	return false;
 }
 
+bool Link::check_activity_timeout() {
+	assert(_object);
+	if (_object->_status == Type::Link::STALE) {
+		VERBOSEF("Link timed out for %s", toString().c_str());
+		_object->_status = Type::Link::CLOSED;
+		_object->_teardown_reason = Type::Link::TIMEOUT;
+		link_closed();
+		return true;
+	}
+	if (_object->_status == Type::Link::ACTIVE) {
+		double idle = no_inbound_for();
+		// The original pseudocode transitions ACTIVE->STALE the instant idle
+		// crosses STALE_TIME, sends a final keepalive, then waits
+		// rtt*KEEPALIVE_TIMEOUT_FACTOR+STALE_GRACE more before actually
+		// closing (giving that keepalive's reply a chance to arrive). Since
+		// this is polled rather than a real per-link sleeping thread, fold
+		// that wait directly into the close threshold instead of tracking a
+		// separate "went stale at" timestamp.
+		double close_after = Type::Link::STALE_TIME + (_object->_rtt * Type::Link::KEEPALIVE_TIMEOUT_FACTOR + Type::Link::STALE_GRACE);
+		if (idle >= close_after) {
+			VERBOSEF("Link timed out (idle %.0fs) for %s", idle, toString().c_str());
+			_object->_status = Type::Link::CLOSED;
+			_object->_teardown_reason = Type::Link::TIMEOUT;
+			link_closed();
+			return true;
+		}
+		else if (idle >= Type::Link::KEEPALIVE) {
+			if (_object->_initiator && no_outbound_for() >= Type::Link::KEEPALIVE) {
+				send_keepalive();
+			}
+		}
+	}
+	return false;
+}
+
 /*p TODO
 
 void Link::__watchdog_job() {

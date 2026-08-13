@@ -602,6 +602,12 @@ DestinationEntry empty_destination_entry;
 					// stuck in HANDSHAKE (e.g. a failed Token/HMAC decrypt)
 					// need this too.
 					const_cast<Link&>(link).check_establishment_timeout();
+					// Once a link does reach ACTIVE it lives in this same set
+					// (see register_link()/activate_link() above) — check it
+					// for keepalive/inactivity timeout too, since a peer that
+					// just vanishes (crash, out of range) without a clean
+					// LINKCLOSE would otherwise never be reaped either.
+					const_cast<Link&>(link).check_activity_timeout();
 					if (link.status() == Type::Link::CLOSED) {
 						_active_links.erase(link);
 					}

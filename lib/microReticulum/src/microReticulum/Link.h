@@ -224,6 +224,17 @@ namespace RNS {
 		// link's crypto buffers and resource state forever. Returns true
 		// if the link was just closed by this call.
 		bool check_establishment_timeout();
+		// Companion to check_establishment_timeout() above: ports the
+		// ACTIVE/STALE branches of the same stubbed watchdog pseudocode.
+		// An ACTIVE link that receives a clean LINKCLOSE gets torn down
+		// fine, but one whose peer just vanishes (crash, out of range,
+		// reboot) sits ACTIVE forever otherwise — nothing else in this
+		// port ever re-checks inbound activity on an established link.
+		// Sends a keepalive once idle past Type::Link::KEEPALIVE (if we're
+		// the initiator), then closes once idle past STALE_TIME plus the
+		// RTT-scaled grace window, mirroring the pseudocode's STALE step.
+		// Returns true if the link was just closed by this call.
+		bool check_activity_timeout();
 		// Cooperative pump: iterate this link's incoming/outgoing resources
 		// and tick each Resource::__watchdog_job(). Safe to call from
 		// Transport::jobs() — snapshots both sets before pumping so that a
