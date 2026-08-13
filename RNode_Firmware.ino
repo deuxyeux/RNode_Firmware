@@ -18,6 +18,7 @@
 #include "Utilities.h"
 
 #if MCU_VARIANT == MCU_ESP32
+  #include <esp_task_wdt.h>
   #include <esp_heap_caps.h>
   #include <mbedtls/platform.h>
 
@@ -208,6 +209,27 @@ void setup() {
     // for the full story - as early as possible, before any RNS::Link
     // decrypt could need it.
     mbedtls_platform_set_calloc_free(mbedtls_psram_calloc, mbedtls_psram_free);
+  #endif
+
+  #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
+    // Safety net for the still-open SX1262 SPI task-watchdog stall
+    // (feedback_sx126x_tx_rx_spi_mutex_race memory) - without this, a
+    // loop() stall just sits there silently (unresponsive to input, e.g.
+    // the button no longer dismissing a menu popup) until it happens to
+    // clear on its own, instead of getting cut short by a clean panic +
+    // reboot. 25s is comfortably above LORA_MODEM_TIMEOUT_MS (20s,
+    // sx126x.h) - the longest legitimate single blocking wait in the
+    // normal TX path - so a real max-length TX timeout doesn't
+    // false-trigger it.
+    esp_task_wdt_config_t twdt_config = {
+      .timeout_ms = 25000,
+      .idle_core_mask = 0,
+      .trigger_panic = true,
+    };
+    if (esp_task_wdt_init(&twdt_config) != ESP_OK) {
+      esp_task_wdt_reconfigure(&twdt_config);
+    }
+    esp_task_wdt_add(NULL);
   #endif
 
   #if MCU_VARIANT == MCU_ESP32
@@ -2686,6 +2708,9 @@ void tx_queue_handler() {
 void work_while_waiting() { loop(); }
 
 void loop() {
+  #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
+    esp_task_wdt_reset();
+  #endif
   // housekeeping_task()/kiss_tx_task() (this file) run as their own
   // dedicated FreeRTOS tasks, not folded onto loopTask - see their own
   // comments for why. They briefly were folded here (to recover ~14KB+ of

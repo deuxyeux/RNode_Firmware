@@ -1122,6 +1122,17 @@
     // menu_draw_popup_timed()'s own comment for that convention.
     #define ACTION_POPUP_MS 5000
 
+    // Popup dismissal on a button press doesn't need the usual short-tap
+    // dead zone (MENU_BTN_DOUBLE_TAP_WINDOW-adjacent 200ms, sized to leave
+    // room for double-tap disambiguation) - there's no double-tap behavior
+    // on this screen to protect against, just genuine input vs. debounce
+    // noise (already filtered at the hardware level, button_debounce_delay,
+    // Input.h, 25ms). Per user feedback: reusing the 200ms threshold here
+    // made a quick tap feel like it needed a deliberate half-second hold to
+    // register. This is comfortably above the hardware debounce without
+    // requiring a real hold.
+    #define MENU_POPUP_DISMISS_MIN_MS 50
+
     // Draws `text` on the already-open popup (same as menu_draw_popup())
     // and arms it to auto-dismiss after `ms` with no input needed - used
     // for outcomes that don't need acknowledging (e.g. a successful Sync
@@ -3736,9 +3747,9 @@
         // Not a real navigable screen - a single short tap dismisses it
         // immediately, no need for the usual double-tap-pending wait
         // (there's nothing to go "back" from here) or to wait for a long
-        // press. duration < 200 is still the dead zone below this, same
-        // as everywhere else.
-        if (duration >= 200) {
+        // press. See MENU_POPUP_DISMISS_MIN_MS's own comment for why this
+        // doesn't reuse the normal 200ms short-tap dead zone.
+        if (duration >= MENU_POPUP_DISMISS_MIN_MS) {
           menu_btn_pending = false;
           buzzer_encoder_click_melody();
           menu_state = menu_popup_return_state;
