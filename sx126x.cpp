@@ -572,7 +572,20 @@ void sx126x::unmaskDio0() {
     // edge already happened won't retrigger it on its own, so check for
     // and service a still-pending event explicitly rather than silently
     // dropping it.
-    if (digitalRead(_dio0) == HIGH) {
+    // gpio_get_level(), not digitalRead(), on ESP32 - same reasoning as
+    // waitOnBusy()'s own busy-pin read (see its own comment): digitalRead()
+    // goes through more abstraction than a raw register read, and any
+    // contention there (from display/GNSS/sensor code also doing GPIO
+    // from other contexts) could stall this call - this one is on the hot
+    // path of every beginPacket()/endPacket()/update_modem_status() call
+    // (unmaskDio0() runs at the end of each), so it's called far more
+    // often than the original fix's own motivating case.
+    #if MCU_VARIANT == MCU_ESP32
+      bool dio0_high = gpio_get_level((gpio_num_t)_dio0) == HIGH;
+    #else
+      bool dio0_high = digitalRead(_dio0) == HIGH;
+    #endif
+    if (dio0_high) {
       handleDio0Rise();
     }
   }
