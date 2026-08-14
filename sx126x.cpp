@@ -592,12 +592,25 @@ void sx126x::unmaskDio0() {
 }
 
 int sx126x::beginPacket(int implicitHeader) {
-  // Masked for the entire TX transaction (this call through endPacket()),
-  // not just endPacket()'s done-poll - beginPacket(), the FIFO write in
-  // between, and endPacket() all do raw SPI. Every beginPacket() call in
-  // this codebase is unconditionally followed by an endPacket() (no early
-  // returns skip it), so this always gets unmasked there.
-  maskDio0();
+  // Used to mask DIO0 (detachInterrupt()) for the whole TX transaction
+  // here, re-attaching in endPacket() with a synchronous "catch a missed
+  // edge" check. Removed (2026-08-14): that was a band-aid for a real bug
+  // (feedback_sx126x_tx_rx_spi_mutex_race memory) that's since been fixed
+  // at its actual root - onDio0Rise() (ESP32) no longer does any SPI in
+  // interrupt context at all, it only sets _dio0_pending and returns, so
+  // there's nothing left for a TX-path SPI call to race against. This
+  // masking had become redundant on top of that real fix, and turned out
+  // to be actively harmful: reconfiguring the shared GPIO interrupt
+  // matrix (detachInterrupt()/attachInterrupt()) synchronously around
+  // every single beginPacket()/endPacket() - including the very first
+  // one at boot, moments after onReceive()'s own initial attachInterrupt()
+  // - reliably hung the very first transmit() after a cold boot on real
+  // MeshPoE-S3 hardware, 100% reproducible, regardless of how long the
+  // radio had been idle in RX first. microReticulum_Firmware (the
+  // sibling project several other fixes in this file were ported from)
+  // has no equivalent masking around its beginPacket()/endPacket() at
+  // all - onDio0Rise()/handleDio0IfPending()'s flag-based deferral is the
+  // only protection there too.
 
   #if HAS_LORA_PA
     if (lora_pa_model == LORA_PA_GC1109) {
@@ -656,9 +669,6 @@ int sx126x::endPacket() {
   uint8_t timeout[3] = {0}; // Put in single TX mode
   executeOpcode(OP_TX_6X, timeout, 3);
 
-  // DIO0 already masked - see beginPacket()'s own comment. Re-attached
-  // (with missed-event handling) at the end of this function.
-
   uint8_t buf[2];
   buf[0] = 0x00;
   buf[1] = 0x00;
@@ -700,8 +710,6 @@ int sx126x::endPacket() {
   mask[0] = 0x00;
   mask[1] = IRQ_TX_DONE_MASK_6X;
   executeOpcode(OP_CLEAR_IRQ_STATUS_6X, mask, 2);
-
-  unmaskDio0();
 
   if (timed_out) { return 0; } else { return 1; }
 }

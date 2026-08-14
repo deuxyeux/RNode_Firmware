@@ -2897,16 +2897,17 @@ void loop() {
         #endif
       #endif
 
-      // Tier 2 one-shot smoke test: announce once, a few seconds after
-      // boot so it goes out through the normal CSMA gate instead of
-      // racing radio/queue bring-up. Not a real application behavior -
-      // remove once RX has been confirmed on a second unit.
-      static bool urns_announced = false;
-      if (!urns_announced && millis() > 8000) {
-        urns_announced = true;
-        CP(CP_URNS_ANNOUNCE);
-        urns_announce();
-      }
+      // One-shot: announce the LXMF delivery destination a few seconds
+      // after boot so it goes out through the normal CSMA gate instead of
+      // racing radio/queue bring-up.
+      #if HAS_LXMF == true
+        static bool urns_announced_lxmf = false;
+        if (!urns_announced_lxmf && millis() > 8000) {
+          urns_announced_lxmf = true;
+          CP(CP_URNS_ANNOUNCE);
+          urns_announce_lxmf();
+        }
+      #endif
     }
   #endif
 

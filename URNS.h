@@ -540,24 +540,37 @@ void urns_lxmf_loop() {
   LoRa->unmaskDio0();
 }
 
-// One-shot smoke test (Tier 2) - call once from RNode_Firmware.ino's
-// loop() a few seconds after boot, not from urns_init() itself, so the
-// announce actually goes out through tx_queue_handler()'s normal CSMA
-// gate instead of racing radio bring-up.
-void urns_announce() {
-  if (!urns_ready) return;
-  DEBUG_LOG("[URNS] Announcing destination %s\r\n", urns_destination.hash().toHex().c_str());
-  urns_destination.announce(RNS::bytesFromString("URNS-TEST"));
-
 #if HAS_LXMF == true
-  // Announces the LXMF delivery destination itself, carrying the display
-  // name set above (LXMRouter::announce() builds app_data from
-  // _display_name automatically when no explicit app_data is passed). The
-  // router's own constructor was given announce_at_start=false, so without
-  // this, peers can still receive messages from us (opportunistic delivery
-  // only needs their identity, not the reverse) but never learn our name -
-  // which is exactly the blank/hash-only name field originally reported.
+// One-shot (Tier 2) - call once from RNode_Firmware.ino's loop() a few
+// seconds after boot, not from urns_init() itself, so the announce
+// actually goes out through tx_queue_handler()'s normal CSMA gate instead
+// of racing radio/queue bring-up.
+//
+// Used to fire this and a separate urns_destination.announce("URNS-TEST")
+// smoke-test announce back-to-back in the same call - removed as no
+// longer needed. That was originally suspected as the cause of a
+// 100%-reproducible radio hang on this device's first boot-time
+// transmit(), but that theory didn't hold up: the hang still happened
+// with only this one announce queued, so it was never actually about two
+// packets racing. The real cause was maskDio0()/unmaskDio0() wrapping
+// every beginPacket()/endPacket() call in sx126x.cpp (detachInterrupt()/
+// attachInterrupt() around the GPIO ISR on every single TX, including the
+// very first one at boot) - a band-aid for an SPI-mutex race that was
+// already fixed at its root elsewhere (onDio0Rise() on ESP32 defers all
+// SPI work out of interrupt context via _dio0_pending, so there's nothing
+// left to race). Removed from beginPacket()/endPacket() there; fixed and
+// confirmed stable on real hardware, 2026-08-14 (3+ minutes uptime with
+// no watchdog resets, vs. 100% reproducible hang within seconds before).
+void urns_announce_lxmf() {
+  if (!urns_ready) return;
+  // Announces the LXMF delivery destination, carrying the display name
+  // set above (LXMRouter::announce() builds app_data from _display_name
+  // automatically when no explicit app_data is passed). The router's own
+  // constructor was given announce_at_start=false, so without this, peers
+  // can still receive messages from us (opportunistic delivery only needs
+  // their identity, not the reverse) but never learn our name - which is
+  // exactly the blank/hash-only name field originally reported.
   DEBUG_LOG("[URNS] Announcing LXMF delivery destination (display name: \"%s\")\r\n", urns_lxmf_router->display_name().c_str());
   urns_lxmf_router->announce();
-#endif
 }
+#endif
