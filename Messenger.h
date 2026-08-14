@@ -674,7 +674,22 @@
       unsigned long now = millis();
       if (now - msngr_heartbeat_last_ms < MSNGR_HEARTBEAT_INTERVAL_MS) return;
       msngr_heartbeat_last_ms = now;
-      DEBUG_LOG("[Heartbeat] alive, uptime=%lus heap=%u\r\n", now / 1000, (unsigned)ESP.getFreeHeap());
+      // heap= (ESP.getFreeHeap()) turned out to already equal int_heap=
+      // (MALLOC_CAP_INTERNAL) on every sample - PSRAM isn't merged into the
+      // default allocator pool here, so every plain new/malloc/std::* in
+      // the whole Link/Resource/Bytes object graph lands in the same small
+      // internal-DRAM pool esp-aes's DMA buffers need, regardless of the
+      // mbedtls_psram_calloc redirect (RNode_Firmware.ino) - that redirect
+      // only catches mbedTLS's own calloc/free calls, not general C++
+      // allocation. psram_heap= checks whether PSRAM is even being used
+      // for anything right now.
+      DEBUG_LOG(
+        "[Heartbeat] alive, uptime=%lus heap=%u int_min=%u psram_heap=%u\r\n",
+        now / 1000,
+        (unsigned)ESP.getFreeHeap(),
+        (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
+      );
     }
   #endif
 

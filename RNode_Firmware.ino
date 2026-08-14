@@ -20,7 +20,136 @@
 #if MCU_VARIANT == MCU_ESP32
   #include <esp_task_wdt.h>
   #include <esp_heap_caps.h>
+  #include <esp_system.h>
   #include <mbedtls/platform.h>
+
+  // Printed once at boot (see "RNode starting" below) so a reboot we didn't
+  // witness live still leaves a record of whether it was a plain power-on,
+  // a panic/abort, a watchdog trip, or something else, once the debug UART
+  // capture picks back up on the new boot.
+  const char* esp_reset_reason_str() {
+    switch (esp_reset_reason()) {
+      case ESP_RST_POWERON:   return "POWERON";
+      case ESP_RST_EXT:       return "EXT";
+      case ESP_RST_SW:        return "SW";
+      case ESP_RST_PANIC:     return "PANIC";
+      case ESP_RST_INT_WDT:   return "INT_WDT";
+      case ESP_RST_TASK_WDT:  return "TASK_WDT";
+      case ESP_RST_WDT:       return "WDT";
+      case ESP_RST_DEEPSLEEP: return "DEEPSLEEP";
+      case ESP_RST_BROWNOUT:  return "BROWNOUT";
+      case ESP_RST_SDIO:      return "SDIO";
+      default:                return "UNKNOWN";
+    }
+  }
+
+  // Pinpointing the still-open loopTask task-watchdog stall (see
+  // feedback_sx126x_tx_rx_spi_mutex_race.md / project_sx1262_tx_poll_yield_
+  // fix.md) - a real, uncorrupted capture finally caught one, but the panic
+  // dump only shows both cores already idle by the time it fires (loopTask
+  // had silently blocked and never come back), not where. RTC_NOINIT_ATTR
+  // survives the watchdog's own software reset (unlike regular RAM), so the
+  // last checkpoint loopTask reached survives into the next boot, where it
+  // gets printed once, right after the reset-reason line above - cheap
+  // enough (two word writes, no serial I/O) to bracket every major loop()
+  // section without perturbing the timing that's supposed to be measured.
+  #define CP_MAGIC 0xC0FFEE42
+  // volatile is load-bearing here, not defensive: cp_report_last()'s one
+  // read happens (in this compilation's view of program order) before any
+  // of loop()'s writes below it - the compiler has no way to know a reset
+  // and reboot sits between them, so without volatile it's free to treat
+  // every CP() write as a dead store never observed within this execution,
+  // and reorder/coalesce/drop them. That's almost certainly why the first
+  // real capture reported a checkpoint far older than the last heartbeat
+  // before the crash - not a logic bug in CP() itself, a missing volatile.
+  RTC_NOINIT_ATTR volatile uint32_t g_cp_magic;
+  RTC_NOINIT_ATTR volatile uint16_t g_cp_id;
+  RTC_NOINIT_ATTR volatile uint32_t g_cp_millis;
+
+  enum {
+    CP_NONE = 0,
+    CP_LOOP_TOP,
+    CP_URNS_RETICULUM_LOOP,
+    CP_URNS_LXMF_LOOP,
+    CP_MSNGR_PING,
+    CP_MSNGR_SEND,
+    CP_MSNGR_SEND_RESULT,
+    CP_MSNGR_HEARTBEAT,
+    CP_URNS_ANNOUNCE,
+    CP_DIO0_PENDING,
+    CP_MODEM_QUEUE_DRAIN,
+    CP_TX_QUEUE_HANDLER,
+    CP_CHECK_MODEM_STATUS,
+    CP_LED_STANDBY,
+    CP_SERIAL_BUFFER_POLL,
+    CP_DISPLAY_UPDATE,
+    CP_BUZZER_UPDATE,
+    CP_PMU_UPDATE,
+    CP_VSENSE_UPDATE,
+    CP_BT_UPDATE,
+    CP_WIFI_UPDATE,
+    CP_OTA_LOOP,
+    CP_ESPNOW_UPDATE,
+    CP_GNSS_UPDATE,
+    CP_INPUT_READ,
+    CP_ENCODER_PROCESS,
+    CP_MENU_PROCESS,
+    CP_TXQ_FLUSH_QUEUE,
+    CP_TXQ_POP_QUEUE,
+  };
+
+  const char* cp_name(uint16_t id) {
+    switch (id) {
+      case CP_NONE:                  return "NONE";
+      case CP_LOOP_TOP:              return "loop_top";
+      case CP_URNS_RETICULUM_LOOP:   return "urns_reticulum.loop()";
+      case CP_URNS_LXMF_LOOP:        return "urns_lxmf_loop()";
+      case CP_MSNGR_PING:            return "messenger_ping_process()";
+      case CP_MSNGR_SEND:            return "messenger_send_process()";
+      case CP_MSNGR_SEND_RESULT:     return "msngr_send_result_process()";
+      case CP_MSNGR_HEARTBEAT:       return "messenger_heartbeat_process()";
+      case CP_URNS_ANNOUNCE:         return "urns_announce()";
+      case CP_DIO0_PENDING:          return "handleDio0IfPending()";
+      case CP_MODEM_QUEUE_DRAIN:     return "modem_packet_queue drain";
+      case CP_TX_QUEUE_HANDLER:      return "tx_queue_handler()";
+      case CP_CHECK_MODEM_STATUS:    return "check_modem_status()";
+      case CP_LED_STANDBY:           return "led_indicate_standby()/npset()";
+      case CP_SERIAL_BUFFER_POLL:    return "buffer_serial()/serial_poll()";
+      case CP_DISPLAY_UPDATE:        return "update_display()";
+      case CP_BUZZER_UPDATE:         return "buzzer_update()";
+      case CP_PMU_UPDATE:            return "update_pmu()";
+      case CP_VSENSE_UPDATE:         return "update_vsense()";
+      case CP_BT_UPDATE:             return "update_bt()";
+      case CP_WIFI_UPDATE:           return "update_wifi()/update_ws()";
+      case CP_OTA_LOOP:              return "ota_loop()";
+      case CP_ESPNOW_UPDATE:         return "update_espnow()";
+      case CP_GNSS_UPDATE:           return "gnss_update()";
+      case CP_INPUT_READ:            return "input_read()";
+      case CP_ENCODER_PROCESS:       return "encoder_process()";
+      case CP_MENU_PROCESS:          return "menu_*_process()";
+      case CP_TXQ_FLUSH_QUEUE:       return "tx_queue_handler->flush_queue()";
+      case CP_TXQ_POP_QUEUE:         return "tx_queue_handler->pop_queue()";
+      default:                       return "UNKNOWN";
+    }
+  }
+
+  #define CP(x) do { g_cp_id = (x); g_cp_millis = millis(); } while (0)
+
+  // Call once at boot, right after the reset-reason line - prints where
+  // loopTask was about to go last time, iff this boot followed a reset type
+  // that could plausibly be this stall (panic/watchdog), and the RTC_NOINIT
+  // region actually holds a checkpoint from a real prior boot (not power-on
+  // garbage, guarded by CP_MAGIC).
+  void cp_report_last() {
+    if (g_cp_magic != CP_MAGIC) {
+      g_cp_magic = CP_MAGIC;
+      g_cp_id = CP_NONE;
+      g_cp_millis = 0;
+      DEBUG_LOG("[Boot] no prior checkpoint (cold boot)\r\n");
+      return;
+    }
+    DEBUG_LOG("[Boot] last checkpoint before this boot: %s (id=%u) at millis=%lu\r\n", cp_name(g_cp_id), g_cp_id, (unsigned long)g_cp_millis);
+  }
 
   // mbedTLS (used for every RNS::Link decrypt) can fail its own small
   // internal allocations under internal-DIRAM pressure even when PSRAM is
@@ -37,6 +166,12 @@
     return p;
   }
   void mbedtls_psram_free(void* p) { heap_caps_free(p); }
+#else
+  // CP() is sprinkled through loop() below regardless of MCU_VARIANT (most
+  // of that code is shared across boards) - on non-ESP32 boards there's no
+  // task watchdog stall to chase and no RTC_NOINIT_ATTR checkpoint state to
+  // update, so it's just a no-op here.
+  #define CP(x) do {} while (0)
 #endif
 
 #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
@@ -203,6 +338,11 @@ void setup() {
 
   DEBUG_UART_BEGIN();
   DEBUG_LOG("RNode starting\r\n");
+
+  #if MCU_VARIANT == MCU_ESP32
+    DEBUG_LOG("[Boot] reset reason: %s\r\n", esp_reset_reason_str());
+    cp_report_last();
+  #endif
 
   #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
     // See this file's own top-of-file comment (near mbedtls_psram_calloc)
@@ -1179,6 +1319,7 @@ bool startRadio() {
         return false;
       } else {
         radio_online = true;
+        DEBUG_LOG("[Radio] radio_online=true (startRadio, millis=%lu)\r\n", (unsigned long)millis());
 
         init_channel_stats();
 
@@ -1207,6 +1348,7 @@ bool startRadio() {
       // that the radio was locked, and thus
       // not started
       radio_online = false;
+      DEBUG_LOG("[Radio] radio_online=false (startRadio, locked, millis=%lu)\r\n", (unsigned long)millis());
       kiss_indicate_radiostate();
       led_indicate_warning(3);
       return false;
@@ -1222,6 +1364,7 @@ bool startRadio() {
 void stopRadio() {
   LoRa->end();
   radio_online = false;
+  DEBUG_LOG("[Radio] radio_online=false (stopRadio, millis=%lu)\r\n", (unsigned long)millis());
 }
 
 void update_radio_lock() {
@@ -1260,6 +1403,21 @@ void flush_queue(void) {
 
         transmit(length);
       }
+
+      // Root-caused via CP()/checkpoint instrumentation (2026-08-14): this
+      // loop drains the *entire* backlog in one call, transmitting each
+      // queued packet in turn - the outer loop()'s single esp_task_wdt_
+      // reset() call, once per top-level iteration, doesn't cover it. Under
+      // heavy traffic queue_height can reach the high teens before a flush
+      // is triggered; even without any single transmit() call hanging, that
+      // many back-to-back TX cycles can cumulatively outrun the 25s task
+      // watchdog budget, which then aborts loopTask entirely - confirmed by
+      // two independent captures, both landing here with queue_height in
+      // the 15-18 range right before the trigger. Feed it per packet so a
+      // long-but-legitimate flush is never mistaken for a hang.
+      #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
+        esp_task_wdt_reset();
+      #endif
     }
 
     lora_receive(); if (!LED_DISPLAY_BLANKED) { led_tx_off(); }
@@ -2696,7 +2854,7 @@ void tx_queue_handler() {
             if (cw_wait_passed < cw_wait_target) { return; }                      // Contention window wait time has not yet passed, continue waiting
             else {                                                                // Wait time has passed, flush the queue
               bool should_flush = !lora_limit_rate && !lora_guard_rate;
-              if (should_flush) { flush_queue(); } else { pop_queue(); }
+              if (should_flush) { CP(CP_TXQ_FLUSH_QUEUE); flush_queue(); } else { CP(CP_TXQ_POP_QUEUE); pop_queue(); }
               cw_wait_passed = 0; csma_cw = -1; difs_wait_start = -1; }
           }
         }
@@ -2711,6 +2869,7 @@ void loop() {
   #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
     esp_task_wdt_reset();
   #endif
+  CP(CP_LOOP_TOP);
   // housekeeping_task()/kiss_tx_task() (this file) run as their own
   // dedicated FreeRTOS tasks, not folded onto loopTask - see their own
   // comments for why. They briefly were folded here (to recover ~14KB+ of
@@ -2721,13 +2880,19 @@ void loop() {
   // against.
   #if HAS_URNS == true
     if (urns_ready) {
+      CP(CP_URNS_RETICULUM_LOOP);
       urns_reticulum.loop();
+      CP(CP_URNS_LXMF_LOOP);
       urns_lxmf_loop();
       #if HAS_LXMF == true
+        CP(CP_MSNGR_PING);
         messenger_ping_process();
+        CP(CP_MSNGR_SEND);
         messenger_send_process();
+        CP(CP_MSNGR_SEND_RESULT);
         msngr_send_result_process();
         #if HAS_DEBUG_UART == true
+          CP(CP_MSNGR_HEARTBEAT);
           messenger_heartbeat_process();
         #endif
       #endif
@@ -2739,6 +2904,7 @@ void loop() {
       static bool urns_announced = false;
       if (!urns_announced && millis() > 8000) {
         urns_announced = true;
+        CP(CP_URNS_ANNOUNCE);
         urns_announce();
       }
     }
@@ -2754,8 +2920,10 @@ void loop() {
       // handleDio0IfPending()'s own comment for why this is scoped to
       // sx126x only for now.
       #if MODEM == SX1262
+        CP(CP_DIO0_PENDING);
         LoRa->handleDio0IfPending();
       #endif
+      CP(CP_MODEM_QUEUE_DRAIN);
       modem_packet_t *modem_packet = NULL;
       if(modem_packet_queue && xQueueReceive(modem_packet_queue, &modem_packet, 0) == pdTRUE && modem_packet) {
         host_write_len = modem_packet->len;
@@ -2809,7 +2977,9 @@ void loop() {
 
     #endif
 
+    CP(CP_TX_QUEUE_HANDLER);
     tx_queue_handler();
+    CP(CP_CHECK_MODEM_STATUS);
     check_modem_status();
 
   } else {
@@ -2820,6 +2990,7 @@ void loop() {
         #endif
       } else {
         if (!LED_DISPLAY_BLANKED) {
+          CP(CP_LED_STANDBY);
           #if HAS_ESPNOW == true && HAS_NP == true
             // While a host has actually grabbed vport 1 (espnow_ui_active()),
             // show real ESP-NOW RX/TX activity instead of the idle white
@@ -2851,6 +3022,7 @@ void loop() {
     }
   }
 
+  CP(CP_SERIAL_BUFFER_POLL);
   #if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
       buffer_serial();
       if (!fifo_isempty(&serialFIFO)) serial_poll();
@@ -2859,50 +3031,56 @@ void loop() {
   #endif
 
   #if HAS_DISPLAY
-    if (disp_ready && !display_updating) update_display();
+    if (disp_ready && !display_updating) { CP(CP_DISPLAY_UPDATE); update_display(); }
   #endif
 
   #if HAS_BUZZER == true
+    CP(CP_BUZZER_UPDATE);
     buzzer_update();
   #endif
 
   #if HAS_PMU || IS_ESP32S3
-    if (pmu_ready) update_pmu();
+    if (pmu_ready) { CP(CP_PMU_UPDATE); update_pmu(); }
   #endif
 
   #if HAS_VSENSE == true
+    CP(CP_VSENSE_UPDATE);
     update_vsense();
   #endif
 
   #if HAS_BLUETOOTH || HAS_BLE == true
-    if (!console_active && bt_ready) update_bt();
+    if (!console_active && bt_ready) { CP(CP_BT_UPDATE); update_bt(); }
   #endif
 
   #if HAS_WIFI
-    if (wifi_initialized) update_wifi();
+    if (wifi_initialized) { CP(CP_WIFI_UPDATE); update_wifi(); }
     if (ws_enabled) update_ws();
   #endif
 
   #if HAS_OTA == true
-    if (!console_active) ota_loop();
+    if (!console_active) { CP(CP_OTA_LOOP); ota_loop(); }
   #endif
 
   #if HAS_ESPNOW == true
-    if (espnow_enabled) { update_espnow(); update_espnow_tx(); }
+    if (espnow_enabled) { CP(CP_ESPNOW_UPDATE); update_espnow(); update_espnow_tx(); }
   #endif
 
   #if HAS_GPS == true
+    CP(CP_GNSS_UPDATE);
     gnss_update();
   #endif
 
   #if HAS_INPUT
+    CP(CP_INPUT_READ);
     input_read();
   #endif
 
   #if HAS_ENCODER == true
+    CP(CP_ENCODER_PROCESS);
     encoder_process();
   #endif
   #if HAS_MENU == true
+    CP(CP_MENU_PROCESS);
     menu_button_process();
     menu_timeout_process();
     #if HAS_WIFI == true || HAS_ETHERNET == true
