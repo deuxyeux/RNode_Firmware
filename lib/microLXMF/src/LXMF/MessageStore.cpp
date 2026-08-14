@@ -890,6 +890,20 @@ void MessageStore::trim_conversation_to_retention(const Bytes& peer_hash, size_t
 	}
 	if (evicted.empty()) return;
 
+	// unread_count has no per-message tracking to tell which evicted
+	// messages were actually unread (mark-as-read is a whole-conversation
+	// reset, MessageStore.h - "Mark all messages in conversation as read"),
+	// so there's no way to subtract precisely. But it can never legitimately
+	// exceed message_count - clamping here is both the correct invariant
+	// and self-healing for any earlier drift, not just prevention of new
+	// drift. Without this, unread_count only ever grows (incremented on
+	// every incoming message, MessageStore.cpp ~line 624) since it's never
+	// touched by eviction - a store that outpaces how fast a human reads it
+	// (eg this session's rnode_pinger, 1 msg/min for hours with nobody
+	// opening the conversation) drifts arbitrarily far past the real
+	// message count even though actual storage stays correctly bounded.
+	if (conv.unread_count > conv.message_count) conv.unread_count = conv.message_count;
+
 	// Delete payload files BEFORE committing the shrunk index, not after -
 	// on a critically full filesystem (exactly the case this function
 	// exists to dig out of) even a *smaller* index write can fail: LittleFS
@@ -952,6 +966,12 @@ void MessageStore::trim_global_total(size_t reserve) {
 		if (!oldest || !stalest->info.remove_message_hash(oldest)) break;
 		evicted.push_back(oldest);
 		--total;
+		// See trim_conversation_to_retention()'s own comment on this same
+		// clamp for why - no per-message read tracking to subtract
+		// precisely, but unread_count can never legitimately exceed
+		// message_count, so this both restores the invariant and
+		// self-heals any earlier drift.
+		if (stalest->info.unread_count > stalest->info.message_count) stalest->info.unread_count = stalest->info.message_count;
 	}
 	if (evicted.empty()) return;
 
