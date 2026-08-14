@@ -1617,7 +1617,20 @@ const Bytes Link::decrypt(const Bytes& ciphertext) {
 		return _object->_token->decrypt(ciphertext);
 	}
 	catch (const std::exception& e) {
-		ERRORF("Decryption failed on link %s. The contained exception was: %s", toString().c_str(), e.what());
+		// Investigating whether these failures are genuine RF-layer bit
+		// corruption (should show weak/marginal rssi+snr, or occur on links
+		// where q is low) versus something else - receive() snapshots
+		// rssi/snr/q onto the link from the packet that's about to be
+		// decrypted, before any of its decrypt() calls, so these reflect
+		// *this specific* failing packet's reception quality, not some
+		// stale/unrelated prior packet on the link.
+		ERRORF(
+			"Decryption failed on link %s (rssi=%.1f snr=%.2f q=%.2f token_len=%lu rx=%lu). The contained exception was: %s",
+			toString().c_str(),
+			_object->_rssi, _object->_snr, _object->_q,
+			(unsigned long)ciphertext.size(), (unsigned long)_object->_rx,
+			e.what()
+		);
 		return {Bytes::NONE};
 	}
 }
