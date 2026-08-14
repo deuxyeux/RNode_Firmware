@@ -429,6 +429,38 @@ void Destination::incoming_link_request(const Bytes& data, const Packet& packet)
 	assert(_object);
 	if (_object->_accept_link_requests) {
 TRACE("***** Accepting link request");
+		// A retransmitted LINKREQUEST (e.g. our first proof was lost over a
+		// lossy RF link) would otherwise be treated as a brand new link
+		// attempt: Link::validate_request() unconditionally generates a
+		// fresh ephemeral keypair and sends a fresh proof, and Link::
+		// operator< compares by object pointer (Link.h), not link_id, so
+		// std::set<Link> never recognizes two Link objects as "the same"
+		// just because they share a link_id - both would coexist in
+		// Transport's pending/active sets, wasting a keypair and airtime,
+		// and leaving Transport::inbound()'s linear link_id search
+		// (Transport.cpp) to pick whichever one it hits first in pointer
+		// order for future packets on that link_id. Confirmed happening on
+		// every observed incoming link this session (the sender retries its
+		// LINKREQUEST before seeing our first proof). If a Link for this
+		// link_id is already pending/active, just re-prove it instead -
+		// prove() is idempotent (deterministic given already-fixed key
+		// material) and directly addresses what a genuine retransmission
+		// needs: the peer didn't see our proof the first time.
+		Bytes candidate_link_id = Link::link_id_from_lr_packet(packet);
+		for (auto& existing : Transport::pending_links()) {
+			if (existing.link_id() == candidate_link_id) {
+				NOTICEF("Re-proving retransmitted LINKREQUEST for link_id=%s instead of creating a duplicate Link", candidate_link_id.toHex().c_str());
+				const_cast<Link&>(existing).prove();
+				return;
+			}
+		}
+		for (auto& existing : Transport::active_links()) {
+			if (existing.link_id() == candidate_link_id) {
+				NOTICEF("Re-proving retransmitted LINKREQUEST for link_id=%s instead of creating a duplicate Link", candidate_link_id.toHex().c_str());
+				const_cast<Link&>(existing).prove();
+				return;
+			}
+		}
 		RNS::Link link = Link::validate_request(*this, data, packet);
 		if (link) {
 			try {
