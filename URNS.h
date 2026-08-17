@@ -8,17 +8,34 @@
 // format, web UI assets) - mounting the wrong one here would silently
 // reformat it out from under Console.h.
 //
+// FIXED (local patch, not upstream): this used to go through microStore's
+// UniversalFileSystem, which on any non-nRF52 target (ESP32 included)
+// silently resolves to PosixFileSystem - a raw-POSIX-fd adapter meant for
+// native/desktop testing, not real flash durability. Its FileImpl wraps
+// plain ::open()/::write()/::close()/::fsync() against ESP-IDF's VFS -
+// confirmed live (path table persistence investigation) that this does NOT
+// durably commit LittleFS writes while used the way path_store/known_store
+// use it (one file handle kept open and written across many put() calls):
+// a fresh stat() from a second, independent open showed size=0 immediately
+// after a successful write()+fsync(), and the file was completely gone
+// after a hard reset - even after also closing and reopening the handle
+// after every write. LittleFSFileSystem (below) instead goes through
+// Arduino's own fs::File::write()/flush()/close(), the same durability-
+// tested path every other persistent file in this firmware already relies
+// on (identity, LXMF messages, etc.) - switching path_store/known_store to
+// use it too made entries actually survive a reset.
+//
 // microStore's own PosixFileSystem::init() (its ESP32 branch) hardcodes
 // LittleFS.begin(true, _basepath) with no partition-label argument, which
 // defaults to partition label "spiffs" - i.e. Console's partition, not
 // ours. So LittleFS is mounted here directly, by label, before microStore
-// ever touches it, and PosixFileSystem::init() itself is never called -
-// only its already-POSIX-correct open()/exists()/etc, which operate on
-// whatever path string they're given and don't care who mounted it.
+// ever touches it, and neither adapter's own init() is ever called - only
+// its already-correct open()/exists()/etc, which operate on whatever path
+// string they're given and don't care who mounted it.
 
 #include <LittleFS.h>
 #include <microStore/FileSystem.h>
-#include <microStore/Adapters/UniversalFileSystem.h>
+#include <microStore/Adapters/LittleFSFileSystem.h>
 #include "esp_mac.h"
 
 // Config.h's own #define MTU 508 is a raw, unnamespaced macro that
@@ -207,13 +224,18 @@ bool urns_probe_destination_enabled = false;
 #if HAS_LXMF == true
   #define URNS_LXMF_SEND_OK          0
   #define URNS_LXMF_SEND_NOT_READY   1
-  #define URNS_LXMF_SEND_NO_IDENTITY 2
+  // Identity/path unknown but request_path() has been sent and the message
+  // is parked (see messenger_send_lxmf()/messenger_send_process(), Messenger.
+  // h) - not a failure, Menu.h routes this into MENU_STATE_MSNGR_SEND_RESULT
+  // the same as OK, where msngr_send_state (MSNGR_SEND_RESOLVING) drives the
+  // live "Resolving..." status text.
+  #define URNS_LXMF_SEND_RESOLVING   3
 
   inline const char* urns_lxmf_send_result_text(uint8_t result) {
     switch (result) {
       case URNS_LXMF_SEND_OK:          return "SENT";
       case URNS_LXMF_SEND_NOT_READY:   return "NOT READY";
-      case URNS_LXMF_SEND_NO_IDENTITY: return "UNKNOWN DEST";
+      case URNS_LXMF_SEND_RESOLVING:   return "RESOLVING";
       default:                         return "ERROR";
     }
   }
@@ -363,7 +385,7 @@ void urns_init() {
   }
   DEBUG_LOG("[URNS] step 2: mounted, constructing filesystem adapter\r\n");
 
-  urns_filesystem = microStore::Adapters::UniversalFileSystem(URNS_BASE_PATH);
+  urns_filesystem = microStore::Adapters::LittleFSFileSystem(URNS_BASE_PATH);
   DEBUG_LOG("[URNS] step 3: registering filesystem\r\n");
   RNS::Utilities::OS::register_filesystem(urns_filesystem);
 
@@ -383,6 +405,30 @@ void urns_init() {
   // the full trace.
   DEBUG_LOG("[URNS] step 5: setting storagepath\r\n");
   RNS::Reticulum::storagepath(URNS_BASE_PATH);
+  // FIXED (local patch, not upstream): moved here, before reticulum.start()
+  // (was after it - see the call site removed below). Transport::start()
+  // (triggered by reticulum.start(), just below) is what runs _path_store/
+  // _known_store's init(), which both seed microStore's own independent
+  // clock (microStore::set_time_offset(), see urns_sync_time_from_rtc()'s
+  // own comment for the full dual-clock history) from whatever RNS::
+  // Utilities::OS's offset happens to be *at that moment* - and also runs
+  // sweep() (FileStore.h), which evicts any record whose stored timestamp
+  // looks "in the future" relative to that same clock. With the RTC sync
+  // running after reticulum.start() as it used to, a device that hasn't
+  // yet accumulated a good persisted time offset (e.g. after the many hard
+  // resets this investigation did) starts sweep() with a bogus near-zero
+  // clock, and every real, correctly-persisted record - whose timestamp is
+  // a proper Unix-epoch value from a previous session - looks impossibly
+  // far in the future and gets evicted immediately, before anything ever
+  // gets a chance to read it back. Confirmed live: path_store/index.dat
+  // and seg1.dat both held real, correctly-written, reset-surviving data
+  // (66 and 604 bytes respectively) immediately after boot, yet RNS::
+  // Transport::new_path_table().size() read 0 moments later - sweep()
+  // silently discarding everything load_index() had just loaded. Moving
+  // the sync here means _path_store/_known_store's init() (inside
+  // reticulum.start() below) sees an already-correct clock the very first
+  // time, not just from the second boot onward.
+  urns_sync_time_from_rtc();
   DEBUG_LOG("[URNS] step 6: transport_enabled(%d)\r\n", (int)urns_transport_enabled);
   urns_reticulum.transport_enabled(urns_transport_enabled);
   // Whether Link MTU discovery is attempted - RNode Settings > URNS >
@@ -408,9 +454,8 @@ void urns_init() {
   RNS::Reticulum::probe_destination_enabled(urns_probe_destination_enabled);
   DEBUG_LOG("[URNS] step 7: reticulum.start()\r\n");
   urns_reticulum.start();
-  DEBUG_LOG("[URNS] step 8: reticulum started\r\n");
-
-  urns_sync_time_from_rtc();
+  DEBUG_LOG("[URNS] step 8: reticulum started, path table entries=%u\r\n",
+    (unsigned)RNS::Transport::new_path_table().size());
 
   if (RNS::Utilities::OS::file_exists(URNS_IDENTITY_PATH)) {
     DEBUG_LOG("[URNS] step 9: loading persisted identity\r\n");
@@ -524,19 +569,38 @@ void urns_lxmf_loop() {
   // of this block still had to run after it, so that inner guard is
   // removed now that this single outer one covers the whole pipeline.
   LoRa->maskDio0();
+  // TEMP DIAGNOSTIC (2026-08-17): time each persistence-bearing call to catch
+  // a slow/hanging LittleFS write (compact() on the 512KB path store is the
+  // suspect for the global FreeRTOS tick-death). >40ms is logged; a call that
+  // hangs entirely shows as an "enter" with no matching "took" before a reset.
+  // See project_meshpoe_s3_fem_rewire memory.
+  uint32_t _fs_t0;
   // Drains urns_stage_incoming()'s single-slot staging buffer - the real
   // handle_incoming() call, deliberately moved here (main loop task) out
   // of the DIO0 ISR that used to call it directly. See that function's
   // own comment (above) for why.
   if (urns_rx_pending) {
+    CP(CP_URNS_HANDLE_INCOMING); g_cp_millis = urns_rx_staging_len;
+    DEBUG_LOG("[FS] handle_incoming enter len=%u\r\n", (unsigned)urns_rx_staging_len);
+    _fs_t0 = millis();
     urns_lora_interface.handle_incoming(RNS::Bytes(urns_rx_staging_buf, urns_rx_staging_len));
+    if (millis() - _fs_t0 > 40) DEBUG_LOG("[FS] handle_incoming took %lums\r\n", (unsigned long)(millis() - _fs_t0));
     urns_rx_pending = false;
   }
 #if HAS_LXMF == true
+  CP(CP_URNS_PROCESS_OUTBOUND);
+  _fs_t0 = millis();
   urns_lxmf_router->process_outbound();
+  if (millis() - _fs_t0 > 40) DEBUG_LOG("[FS] process_outbound took %lums\r\n", (unsigned long)(millis() - _fs_t0));
+  CP(CP_URNS_PROCESS_INBOUND);
+  _fs_t0 = millis();
   urns_lxmf_router->process_inbound();
+  if (millis() - _fs_t0 > 40) DEBUG_LOG("[FS] process_inbound took %lums\r\n", (unsigned long)(millis() - _fs_t0));
 #endif
+  CP(CP_URNS_CULL_STORES);
+  _fs_t0 = millis();
   urns_cull_stores();
+  if (millis() - _fs_t0 > 40) DEBUG_LOG("[FS] cull_stores took %lums\r\n", (unsigned long)(millis() - _fs_t0));
   LoRa->unmaskDio0();
 }
 

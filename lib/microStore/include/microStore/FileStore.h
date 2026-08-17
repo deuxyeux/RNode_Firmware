@@ -323,7 +323,15 @@ USTORE_LOG("[ustore] put: storing key=%s ttl=%u, ts=%u with data len %u\n", bin_
 		persist_index_entry(key, key_len, current_segment, offset, ts, ttl);
 //USTORE_LOG("[ustore] put: key %s offset %u\n", bin_str(key, key_len), offset);
 
-		current_offset += sizeof(hdr)+key_len+len+sizeof(c);
+		// FIXED (local patch, not upstream): current_offset must NOT be
+		// incremented here anymore - flush_buffer()'s own close+reopen
+		// (see its comment) already recomputes current_offset via tell()
+		// against the real, just-committed file length. Also incrementing
+		// it here double-counted this record's size, drifting every
+		// subsequent record's start offset further ahead of where its
+		// bytes actually landed - confirmed live: entry #2 in a session
+		// wrote fine but its get() readback failed immediately, while
+		// entry #1 (unaffected by any prior drift) worked.
 
 		compact_if_threshold();
 
@@ -395,11 +403,23 @@ USTORE_LOG("[ustore] get: fetching key %s with data size %u\n", bin_str(key, key
 		char name[USTORE_MAX_FILENAME_LEN];
 		segment_name(e->segment, name);
 
+		// NOTE: an earlier version of this fix tried reading the current
+		// segment through active_file itself (to avoid a second concurrent
+		// handle - see the "concurrent handle" investigation notes on
+		// open_segment()/flush_buffer()), but active_file is now opened
+		// write-only (ModeAppend, not ModeReadAppend - see open_segment()'s
+		// own comment for why) so it can no longer serve reads at all.
+		// Opening a plain short-lived read handle here instead - confirmed
+		// live this doesn't reproduce the concurrent-handle corruption that
+		// affected the old ModeReadAppend active_file, only a same-mode
+		// (both read+write-capable) concurrent pair did.
 		File f = _filesystem.open(name, File::ModeRead);
 		if (!f) {
 			USTORE_LOG("[ustore] get: key %s failed to open file %s\n", bin_str(key, key_len), name);
 			return false;
 		}
+
+		auto cleanup = [&]() { f.close(); };
 
 		f.seek(e->offset, SeekModeSet);
 
@@ -410,7 +430,7 @@ USTORE_LOG("[ustore] get: fetching key %s with data size %u\n", bin_str(key, key
 //USTORE_LOG("[ustore] get: key %s read header of size %u\n", bin_str(key, key_len), len);
 		if (len != sizeof(hdr)) {
 			USTORE_LOG("[ustore] get: key %s header read failed\n", bin_str(key, key_len));
-			f.close();
+			cleanup();
 			return false;
 		}
 
@@ -419,7 +439,7 @@ USTORE_LOG("[ustore] get: fetching key %s with data size %u\n", bin_str(key, key
 			hdr.length > USTORE_MAX_VALUE_LEN)
 		{
 			USTORE_LOG("[ustore] get: key %s has corrupted record\n", bin_str(key, key_len));
-			f.close();
+			cleanup();
 			return false;
 		}
 
@@ -429,14 +449,14 @@ USTORE_LOG("[ustore] get: fetching key %s with data size %u\n", bin_str(key, key
 			size_t read = std::min(hdr.length, *size);
 			if (f.read(out, read) != read) {
 				USTORE_LOG("[ustore] get: key %s value read failed\n", bin_str(key, key_len));
-				f.close();
+				cleanup();
 				return false;
 			}
 		}
 
 		*size = hdr.length;
 
-		f.close();
+		cleanup();
 
 USTORE_LOG("[ustore] get: returning key %s with data length %u\n", bin_str(key, key_len), *size);
 //USTORE_LOG("[ustore] get: %s\n", bin_str((uint8_t*)out, *size));
@@ -545,7 +565,9 @@ USTORE_LOG("[ustore] remove: removing key %s\n", bin_str(key, key_len));
 
 		persist_index_entry(key, key_len, 0xFFFFFFFF, 0);
 
-		current_offset += sizeof(RecordHeader) + key_len + sizeof(RecordCommit);
+		// FIXED (local patch, not upstream): see put()'s identical comment -
+		// flush_buffer()'s own close+reopen already recomputes current_offset
+		// via tell(), so incrementing it again here double-counts.
 
 		compact_if_threshold();
 
@@ -843,10 +865,14 @@ public:
 
 		// Read the value from disk into current_.value. Called lazily by
 		// operator* / operator->. Marked const so it can mutate mutable members.
+		//
+		// NOTE: active_file is opened write-only (ModeAppend, not
+		// ModeReadAppend - see open_segment()'s own comment) so it can't
+		// serve reads at all anymore; always open a plain short-lived read
+		// handle, matching get()'s own current approach.
 		void load_value() const {
 			char name[USTORE_MAX_FILENAME_LEN];
 			store_->segment_name(iv_.segment, name);
-
 			File f = store_->_filesystem.open(name, File::ModeRead);
 			value_loaded_ = true;
 			if (!f) { current_.value.clear(); return; }
@@ -858,6 +884,7 @@ public:
 			current_.value.resize(hdr.length);
 			if (hdr.length > 0)
 				f.read(current_.value.data(), hdr.length);
+
 			f.close();
 		}
 
@@ -935,6 +962,21 @@ private:
 			USTORE_LOG("[ustore] ERROR: flush_buffer short write (%u of %u bytes)\n", (unsigned)written, (unsigned)write_buf_pos);
 		}
 		write_buf_pos = 0;
+		// FIXED (local patch, not upstream): active_file.flush() alone does
+		// not durably commit writes against a hard reset on this ESP32-
+		// Arduino/LittleFS combination - confirmed live: a trivial
+		// isolated write+close+reopen(elsewhere, outside FileStore)
+		// survives resets fine, but active_file - opened once and kept
+		// open across every put() until a segment rotation happens, which
+		// for path/known-store's small write volume can be effectively
+		// never - left data written through it unrecoverable after a
+		// reset even though get()/read-back within the same session
+		// (post the concurrent-handle fix above/in get()) showed it
+		// present and correct right up until the reset. Only close()
+		// appears to reliably commit here, so close and reopen after every
+		// flush instead of relying on flush() alone.
+		active_file.close();
+		open_segment(current_segment);
 		return ok;
 	}
 
@@ -1040,6 +1082,23 @@ USTORE_LOG("[ustore] prune_index_to_max_recs: evicted %lu records to policy_max_
 
 	/* -------- INDEX FILE -------- */
 
+	// FIXED (local patch, not upstream): every write() return value below is
+	// now checked, matching flush_buffer()'s own fix just above. index.dat
+	// has no per-record framing/CRC to resync on (unlike segment records'
+	// RecordHeader/RecordCommit magic), so a single short/failed write here
+	// permanently desyncs every fixed-width field written after it -
+	// load_index() has no way to tell "corrupt tail" from "well-formed next
+	// record" and previously just broke its parse loop and returned success
+	// anyway, silently truncating the recovered index to whatever was
+	// written before the corruption (in the simplest case, just the very
+	// first entry ever persisted) - matching the field symptom of new path
+	// table / known-destination entries never surviving a reboot after the
+	// first one. The underlying data record is unaffected (already flushed
+	// via flush_buffer() before this is called) - only the fast-path index
+	// is at risk - so on any short write here, force a full index rewrite
+	// from the current in-memory _index (which already reflects this call's
+	// insert/remove) instead of leaving a corrupt tail on disk for the next
+	// boot's load_index() to choke on.
 	bool persist_index_entry(const uint8_t* key, uint8_t key_len, uint32_t seg, uint32_t off, uint32_t ts = 0, uint32_t ttl = 0)
 	{
 		if (!index_file) {
@@ -1047,13 +1106,32 @@ USTORE_LOG("[ustore] prune_index_to_max_recs: evicted %lu records to policy_max_
 			return false;
 		}
 
-		index_file.write(&key_len, 1);
-		index_file.write(key, key_len);
-		index_file.write(&seg, 4);
-		index_file.write(&off, 4);
-		index_file.write(&ts, 4);
-		index_file.write(&ttl, 4);
+		bool ok = true;
+		ok = ok && index_file.write(&key_len, 1) == 1;
+		ok = ok && index_file.write(key, key_len) == key_len;
+		ok = ok && index_file.write((const uint8_t*)&seg, 4) == 4;
+		ok = ok && index_file.write((const uint8_t*)&off, 4) == 4;
+		ok = ok && index_file.write((const uint8_t*)&ts, 4) == 4;
+		ok = ok && index_file.write((const uint8_t*)&ttl, 4) == 4;
 		index_file.flush();  // explicit fsync — guarantees entry reaches flash
+
+		if (!ok) {
+			USTORE_LOG("[ustore] ERROR: persist_index_entry short write - rewriting index file from memory\n");
+			char iname[USTORE_MAX_FILENAME_LEN]; index_name(iname);
+			index_file.close();
+			_filesystem.remove(iname);
+			write_index_bulk();
+			open_index_for_append();
+			return false;
+		}
+
+		// FIXED (local patch, not upstream): same non-durable-flush() gap as
+		// flush_buffer() (see its own comment) - index_file is opened once
+		// and kept open across every put()/remove(), so flush() alone
+		// leaves each entry unrecoverable after a hard reset. Close and
+		// reopen so every entry is actually durable.
+		index_file.close();
+		open_index_for_append();
 
 		return true;
 	}
@@ -1088,6 +1166,19 @@ USTORE_LOG("[ustore] prune_index_to_max_recs: evicted %lu records to policy_max_
 		return true;
 	}
 
+	// FIXED (local patch, not upstream): distinguishes a clean end-of-file
+	// (the read of the next record's key_len byte returns 0 - nothing more
+	// was ever written) from a genuinely corrupt/short record (any read
+	// after that returns fewer bytes than the fixed-width field needs -
+	// e.g. a persist_index_entry() write that was interrupted partway
+	// through). Previously both cases just `break`d the loop and this
+	// function unconditionally returned true, so init() (see just below)
+	// never took its `rebuild_index_from_segments()` fallback - a
+	// partially-corrupted index.dat was treated as a fully successful load,
+	// silently truncating recovery to whatever was written before the
+	// corruption even though the actual segment/data files (and thus a
+	// full rescan) still had everything. Now returns false on a corrupt
+	// tail so the caller falls back to the full segment rescan instead.
 	bool load_index()
 	{
 		char name[USTORE_MAX_FILENAME_LEN];
@@ -1096,6 +1187,7 @@ USTORE_LOG("[ustore] prune_index_to_max_recs: evicted %lu records to policy_max_
 		File f = _filesystem.open(name, File::ModeRead);
 		if (!f) return false;
 
+		bool corrupt = false;
 		while(true)
 		{
 			uint8_t key_len;
@@ -1103,15 +1195,16 @@ USTORE_LOG("[ustore] prune_index_to_max_recs: evicted %lu records to policy_max_
 			uint32_t seg;
 			uint32_t off;
 
-			if(f.read(&key_len, 1) != 1) break;
-			if(key_len > USTORE_MAX_KEY_LEN) break;
-			if(f.read(key, key_len) != key_len) break;
-			if(f.read(&seg, 4) != 4) break;
-			if(f.read(&off, 4) != 4) break;
+			size_t n = f.read(&key_len, 1);
+			if (n == 0) break;  // clean EOF between records
+			if (n != 1 || key_len > USTORE_MAX_KEY_LEN) { corrupt = true; break; }
+			if (f.read(key, key_len) != key_len) { corrupt = true; break; }
+			if (f.read(&seg, 4) != 4) { corrupt = true; break; }
+			if (f.read(&off, 4) != 4) { corrupt = true; break; }
 			uint32_t ts = 0;
-			if(f.read(&ts, 4) != 4) break;
+			if (f.read(&ts, 4) != 4) { corrupt = true; break; }
 			uint32_t ttl = 0;
-			if(f.read(&ttl, 4) != 4) break;
+			if (f.read(&ttl, 4) != 4) { corrupt = true; break; }
 
 			// seg==0xFFFFFFFF is a deletion sentinel written by remove()
 			if(seg==0xFFFFFFFF)
@@ -1121,6 +1214,11 @@ USTORE_LOG("[ustore] prune_index_to_max_recs: evicted %lu records to policy_max_
 		}
 
 		f.close();
+
+		if (corrupt) {
+			USTORE_LOG("[ustore] load_index: index file corrupt/truncated mid-record - falling back to full segment rescan\n");
+			return false;
+		}
 
 		return true;
 	}
@@ -1203,7 +1301,17 @@ USTORE_LOG("[ustore] Closing active file\n");
 		segment_name(id,name);
 
 USTORE_LOG("[ustore] open_segment: opening active file: %s\n", name);
-		active_file = _filesystem.open(name, File::ModeReadAppend);
+		// FIXED (local patch, not upstream): ModeReadAppend ("a+") writes
+		// never survive a hard reset on this ESP32-Arduino/LittleFS
+		// combination even with an explicit close() - confirmed live via
+		// an isolated boot-counter test opened the same way: two
+		// consecutive resets both read back the SAME stale pre-write
+		// value, while an identical test using plain ModeAppend ("a")
+		// survives every reset correctly. active_file only ever needs to
+		// be written to (get()/iterator open their own short-lived read
+		// handle for the current segment - see their own comments) so
+		// there's no read requirement forcing "a+" here.
+		active_file = _filesystem.open(name, File::ModeAppend);
 		if (!active_file) {
 			USTORE_LOG("[ustore] ERROR: Failed to open active file: %s\n", name);
 			return false;

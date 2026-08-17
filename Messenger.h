@@ -401,10 +401,22 @@
   // back. Only one send is tracked at a time (the UI only ever has one
   // send in flight - Text Entry/preset actions are the only ways to
   // trigger a send, and both leave the peer screen while pending).
-  #define MSNGR_SEND_IDLE      0
-  #define MSNGR_SEND_PENDING   1 // enqueued, awaiting delivery proof
-  #define MSNGR_SEND_DELIVERED 2
-  #define MSNGR_SEND_TIMEOUT   3 // no proof within MSNGR_SEND_DELIVERY_TIMEOUT_MS
+  #define MSNGR_SEND_IDLE       0
+  #define MSNGR_SEND_PENDING    1 // enqueued, awaiting delivery proof
+  #define MSNGR_SEND_DELIVERED  2
+  #define MSNGR_SEND_TIMEOUT    3 // no proof within MSNGR_SEND_DELIVERY_TIMEOUT_MS
+  // Identity::recall() came up empty (this node has never received/relayed
+  // an announce from this peer, so it has neither their identity nor a
+  // path - both only ever arrive via an announce). Rather than failing
+  // outright, request_path() has been sent and the message content is
+  // parked in msngr_send_pending_content until either an identity shows up
+  // (some node forwards a cached announce back as a PATH_RESPONSE) or
+  // MSNGR_SEND_RESOLVE_TIMEOUT_MS elapses. Same shape as messenger_ping_
+  // start()/_process()'s own MSNGR_PING_RESOLVING, which already does this
+  // for the path-only case - this covers path+identity together, since a
+  // recall() failure means neither is known yet.
+  #define MSNGR_SEND_RESOLVING  4
+  #define MSNGR_SEND_UNRESOLVED 5 // no identity within MSNGR_SEND_RESOLVE_TIMEOUT_MS
   // Generous - OPPORTUNISTIC delivery's proof has to travel from the
   // recipient back to us, potentially multiple LoRa hops each way, with
   // no guaranteed path warm already. PacketReceipt's own auto-computed
@@ -413,18 +425,44 @@
   // will the Messenger screen wait before giving up on this specific
   // send", same reasoning as MSNGR_PING_PATH_TIMEOUT_MS/LINK_TIMEOUT_MS.
   #define MSNGR_SEND_DELIVERY_TIMEOUT_MS 60000
-  // How long the terminal Delivered/No Confirmation result stays on
-  // screen before auto-returning to the peer screen with no input needed -
-  // same auto-dismiss convention as the Announce/GPS-Sync/NTP-Sync popups
-  // (Menu.h's menu_popup_process()), just implemented locally here since
-  // this is a dedicated live-status screen (MENU_STATE_MSNGR_SEND_RESULT),
-  // not the generic MENU_STATE_STATUS_POPUP.
+  // LXMRouter::PATH_REQUEST_WAIT (LXMRouter.h) is the library's own
+  // considered value for "how long a path request needs on LoRa" (its
+  // comment: "Python: 7s, but LoRa needs more RX window") - matched here
+  // rather than messenger_ping's own shorter MSNGR_PING_PATH_TIMEOUT_MS
+  // (10s, path-only) since this also has to wait for a full relayed
+  // announce (path+identity), not just a path table entry.
+  #define MSNGR_SEND_RESOLVE_TIMEOUT_MS 15000
+  // How long the terminal Delivered/No Confirmation/Unknown Destination
+  // result stays on screen before auto-returning to the peer screen with
+  // no input needed - same auto-dismiss convention as the Announce/GPS-
+  // Sync/NTP-Sync popups (Menu.h's menu_popup_process()), just implemented
+  // locally here since this is a dedicated live-status screen
+  // (MENU_STATE_MSNGR_SEND_RESULT), not the generic MENU_STATE_STATUS_POPUP.
   #define MSNGR_SEND_RESULT_POPUP_MS 3000
+  // Matches Menu.h's MSNGR_TEXT_ENTRY_MAX_LEN - can't reference that
+  // constant directly, Menu.h is #include'd after this file (see
+  // messenger_send_process()'s own comment on the same layering split).
+  #define MSNGR_SEND_CONTENT_MAX_LEN 140
 
   uint8_t msngr_send_state = MSNGR_SEND_IDLE;
   RNS::Bytes msngr_send_message_hash;
   unsigned long msngr_send_started_ms = 0;
-  unsigned long msngr_send_result_at_ms = 0; // set when state becomes DELIVERED/TIMEOUT
+  unsigned long msngr_send_result_at_ms = 0; // set when state becomes DELIVERED/TIMEOUT/UNRESOLVED
+  // Valid only while msngr_send_state == MSNGR_SEND_RESOLVING - the send
+  // that's parked waiting for messenger_send_process() to find out whether
+  // Identity::recall() ever comes good.
+  RNS::Bytes msngr_send_pending_dest_hash;
+  char msngr_send_pending_content[MSNGR_SEND_CONTENT_MAX_LEN + 1];
+  unsigned long msngr_send_resolve_started_ms = 0;
+  // Set by messenger_send_lxmf_resolved() whenever it actually saves a new
+  // outgoing message - consumed by Menu.h's msngr_send_result_process()
+  // (polled from loop() same as this file's own messenger_send_process())
+  // to refresh the on-screen peer cache. A single mechanism for both the
+  // immediate (identity already known) and deferred (post-RESOLVING) send
+  // paths, since the latter completes from inside this file where Menu.h's
+  // messenger_refresh_peer_cache() isn't visible yet (same layering split
+  // as msngr_send_result_process() itself).
+  bool msngr_send_needs_cache_refresh = false;
 
   // Registered via LXMRouter::register_delivered_callback() (URNS.h) -
   // fires once for every outbound message this router gets delivery proof
@@ -450,10 +488,52 @@
   // MENU_STATE_MSNGR_SEND_RESULT screen's own auto-dismiss (Menu.h) is
   // what actually navigates away once msngr_send_result_at_ms is old
   // enough - this function only owns the PENDING->DELIVERED/TIMEOUT edge.
+  // The actual build-and-enqueue tail, factored out of messenger_send_lxmf()
+  // so both the immediate path (identity already known) and the deferred
+  // one (messenger_send_process() below, once Identity::recall() finally
+  // comes good after a RESOLVING wait) can share it. dest_identity is
+  // passed in rather than re-recalled since both callers already have it
+  // in hand. Defined before messenger_send_process() since that function
+  // calls it.
+  void messenger_send_lxmf_resolved(const RNS::Bytes &dest_hash, RNS::Identity &dest_identity, const char *content) {
+    RNS::Destination dest(dest_identity, RNS::Type::Destination::OUT, RNS::Type::Destination::SINGLE, "lxmf", "delivery");
+    LXMF::LXMessage msg(dest, urns_lxmf_router->delivery_destination(), RNS::bytesFromString(content),
+      RNS::Bytes(), LXMF::Type::Message::OPPORTUNISTIC);
+    urns_lxmf_router->handle_outbound(msg);
+    // See messenger_on_delivery()'s own comment (this file) for why -
+    // same flash-I/O-vs-DIO0-ISR hazard.
+    LoRa->maskDio0();
+    bool send_saved = urns_message_store->save_message(msg);
+    LoRa->unmaskDio0();
+    if (!send_saved) {
+      DEBUG_LOG("[Messenger] send: save_message failed for %s\r\n", msg.hash().toHex().c_str());
+    }
+    msngr_send_needs_cache_refresh = true;
+
+    // Start delivery-proof tracking - see its own declaration above for
+    // why the UI can't just show "Sent" here: handle_outbound() only
+    // enqueued/transmitted the packet, static_proof_callback() (LXMRouter.
+    // cpp) fires later, asynchronously, if and when the recipient's proof
+    // makes it back.
+    msngr_send_message_hash = msg.hash();
+    msngr_send_state = MSNGR_SEND_PENDING;
+    msngr_send_started_ms = millis();
+
+    DEBUG_LOG("[Messenger] send: queued message to %s\r\n", dest_hash.toHex().c_str());
+  }
+
   void messenger_send_process() {
     if (msngr_send_state == MSNGR_SEND_PENDING) {
       if (millis() - msngr_send_started_ms > MSNGR_SEND_DELIVERY_TIMEOUT_MS) {
         msngr_send_state = MSNGR_SEND_TIMEOUT;
+        msngr_send_result_at_ms = millis();
+      }
+    } else if (msngr_send_state == MSNGR_SEND_RESOLVING) {
+      RNS::Identity dest_identity = RNS::Identity::recall(msngr_send_pending_dest_hash);
+      if (dest_identity) {
+        messenger_send_lxmf_resolved(msngr_send_pending_dest_hash, dest_identity, msngr_send_pending_content);
+      } else if (millis() - msngr_send_resolve_started_ms > MSNGR_SEND_RESOLVE_TIMEOUT_MS) {
+        msngr_send_state = MSNGR_SEND_UNRESOLVED;
         msngr_send_result_at_ms = millis();
       }
     }
@@ -476,33 +556,28 @@
 
     RNS::Identity dest_identity = RNS::Identity::recall(dest_hash);
     if (!dest_identity) {
-      DEBUG_LOG("[Messenger] send: no known identity for %s\r\n", dest_hash.toHex().c_str());
-      return URNS_LXMF_SEND_NO_IDENTITY;
+      // Neither identity nor path is known - this node has never received/
+      // relayed an announce from this peer (both only ever arrive via one,
+      // see project_path_table_persistence_fix memory's sibling
+      // investigation for why an inbound LXMF message alone never teaches
+      // either). request_path() asks the mesh instead of failing outright -
+      // any node that still has this peer's announce cached answers with a
+      // PATH_RESPONSE, which is processed exactly like a fresh announce
+      // (populates both identity and path together). The actual message is
+      // parked in msngr_send_pending_content and built once
+      // messenger_send_process() sees recall() succeed, or abandoned after
+      // MSNGR_SEND_RESOLVE_TIMEOUT_MS.
+      DEBUG_LOG("[Messenger] send: no known identity for %s, requesting path\r\n", dest_hash.toHex().c_str());
+      RNS::Transport::request_path(dest_hash);
+      msngr_send_pending_dest_hash = dest_hash;
+      strncpy(msngr_send_pending_content, content, MSNGR_SEND_CONTENT_MAX_LEN);
+      msngr_send_pending_content[MSNGR_SEND_CONTENT_MAX_LEN] = 0;
+      msngr_send_state = MSNGR_SEND_RESOLVING;
+      msngr_send_resolve_started_ms = millis();
+      return URNS_LXMF_SEND_RESOLVING;
     }
 
-    RNS::Destination dest(dest_identity, RNS::Type::Destination::OUT, RNS::Type::Destination::SINGLE, "lxmf", "delivery");
-    LXMF::LXMessage msg(dest, urns_lxmf_router->delivery_destination(), RNS::bytesFromString(content),
-      RNS::Bytes(), LXMF::Type::Message::OPPORTUNISTIC);
-    urns_lxmf_router->handle_outbound(msg);
-    // See messenger_on_delivery()'s own comment (this file) for why -
-    // same flash-I/O-vs-DIO0-ISR hazard.
-    LoRa->maskDio0();
-    bool send_saved = urns_message_store->save_message(msg);
-    LoRa->unmaskDio0();
-    if (!send_saved) {
-      DEBUG_LOG("[Messenger] send: save_message failed for %s\r\n", msg.hash().toHex().c_str());
-    }
-
-    // Start delivery-proof tracking - see its own declaration above for
-    // why the UI can't just show "Sent" here: handle_outbound() only
-    // enqueued/transmitted the packet, static_proof_callback() (LXMRouter.
-    // cpp) fires later, asynchronously, if and when the recipient's proof
-    // makes it back.
-    msngr_send_message_hash = msg.hash();
-    msngr_send_state = MSNGR_SEND_PENDING;
-    msngr_send_started_ms = millis();
-
-    DEBUG_LOG("[Messenger] send: queued message to %s\r\n", dest_hash.toHex().c_str());
+    messenger_send_lxmf_resolved(dest_hash, dest_identity, content);
     return URNS_LXMF_SEND_OK;
   }
 
@@ -523,7 +598,12 @@
   #define MSNGR_PING_ESTABLISHING 2 // Link constructed, LINKREQUEST sent, awaiting proof
   #define MSNGR_PING_SUCCESS      3
   #define MSNGR_PING_TIMEOUT      4
-  #define MSNGR_PING_NO_IDENTITY  5 // mirrors URNS_LXMF_SEND_NO_IDENTITY
+  // Despite the name, now only reachable via !urns_ready - a genuinely
+  // missing identity/path goes through MSNGR_PING_RESOLVING instead (see
+  // messenger_ping_start()'s own comment). Kept as a distinct state/name
+  // rather than renamed, to avoid touching every existing reference for a
+  // condition that still means exactly "can't even attempt this yet".
+  #define MSNGR_PING_NO_IDENTITY  5
   #define MSNGR_PING_FAILED       6 // link closed for a reason other than our own timeout
 
   // Generous budgets - this can easily be a multi-hop LoRa round trip.
@@ -587,22 +667,34 @@
 
   // Kicks off a ping to dest_hash - called from Menu.h when the Ping
   // action is confirmed on MENU_STATE_MSNGR_PEER. Non-blocking: this only
-  // starts path resolution (or the link itself, if a path's already
-  // known) - messenger_ping_process() carries it the rest of the way, and
-  // MENU_STATE_MSNGR_PING_RESULT's own draw code just reads
+  // starts path/identity resolution (or the link itself, if both are
+  // already known) - messenger_ping_process() carries it the rest of the
+  // way, and MENU_STATE_MSNGR_PING_RESULT's own draw code just reads
   // msngr_ping_state/msngr_ping_rtt fresh on every redraw.
+  //
+  // FIXED (local patch, not upstream): used to fail immediately with
+  // MSNGR_PING_NO_IDENTITY whenever Identity::recall() came up empty,
+  // before request_path() ever got a chance to run - same bug as
+  // messenger_send_lxmf() had (see project_messenger_reply_unknown_
+  // identity_fix memory for the full mechanism: identity and path are
+  // both only ever learned together, via an announce/PATH_RESPONSE, never
+  // from anything else). Now requests a path unconditionally whenever
+  // either is missing - messenger_ping_process()'s own RESOLVING check
+  // waits on Identity::recall() rather than has_path() specifically for
+  // the same reason (whichever one request_path() actually resolves,
+  // both arrive together).
   void messenger_ping_start(const RNS::Bytes &dest_hash) {
     msngr_ping_target_hash = dest_hash;
     msngr_ping_rtt = 0.0;
     msngr_ping_teardown_pending = false;
     msngr_ping_link = RNS::Link({RNS::Type::NONE});
 
-    if (!urns_ready || !RNS::Identity::recall(dest_hash)) {
+    if (!urns_ready) {
       msngr_ping_state = MSNGR_PING_NO_IDENTITY;
       return;
     }
 
-    if (RNS::Transport::has_path(dest_hash)) {
+    if (RNS::Identity::recall(dest_hash) && RNS::Transport::has_path(dest_hash)) {
       messenger_ping_issue_link();
     } else {
       RNS::Transport::request_path(dest_hash);
@@ -636,7 +728,12 @@
     }
 
     if (msngr_ping_state == MSNGR_PING_RESOLVING) {
-      if (RNS::Transport::has_path(msngr_ping_target_hash)) {
+      // Identity::recall() rather than has_path() - see messenger_ping_
+      // start()'s own comment for why: both arrive together via the same
+      // announce/PATH_RESPONSE, and identity is the more fundamental of
+      // the two blockers (messenger_ping_issue_link() needs it to even
+      // construct the outbound Destination).
+      if (RNS::Identity::recall(msngr_ping_target_hash)) {
         messenger_ping_issue_link();
       } else if (millis() - msngr_ping_phase_started_ms > MSNGR_PING_PATH_TIMEOUT_MS) {
         msngr_ping_state = MSNGR_PING_TIMEOUT;
@@ -690,6 +787,15 @@
         (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
         (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
       );
+      // One-shot path table size report, a few seconds into uptime - fires
+      // through this function's own direct-Serial0 DEBUG_LOG call (not
+      // RNS::logf()'s queued path, which drops lines under the boot-time
+      // burst urns_init() itself produces).
+      static bool path_table_boot_logged = false;
+      if (!path_table_boot_logged) {
+        path_table_boot_logged = true;
+        DEBUG_LOG("[URNS] path table entries at boot: %u\r\n", (unsigned)RNS::Transport::new_path_table().size());
+      }
     }
   #endif
 

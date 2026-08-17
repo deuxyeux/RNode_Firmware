@@ -1309,14 +1309,22 @@
 
     // Polled from loop() (RNode_Firmware.ino, alongside messenger_send_
     // process() itself) - auto-returns to MENU_STATE_MSNGR_PEER once a
-    // terminal Delivered/No Confirmation result has been shown for
-    // MSNGR_SEND_RESULT_POPUP_MS, no input needed. Lives here rather than
-    // in Messenger.h's messenger_send_process() because menu_state/
-    // MENU_STATE_MSNGR_PEER aren't visible yet at that file's point in the
-    // include chain (Menu.h is #include'd after it) - see messenger_send_
-    // process()'s own comment.
+    // terminal Delivered/No Confirmation/Unknown Destination result has
+    // been shown for MSNGR_SEND_RESULT_POPUP_MS, no input needed. Also
+    // consumes msngr_send_needs_cache_refresh (Messenger.h) - set whenever
+    // messenger_send_lxmf_resolved() actually saves a new outgoing message,
+    // whether that happened immediately (identity already known) or later,
+    // asynchronously, once a RESOLVING wait completes - either way this is
+    // the first point after that save where messenger_refresh_peer_cache()
+    // is visible (Menu.h is #include'd after Messenger.h, same layering
+    // reason this whole function lives here instead of there).
     void msngr_send_result_process() {
-      if ((msngr_send_state == MSNGR_SEND_DELIVERED || msngr_send_state == MSNGR_SEND_TIMEOUT) &&
+      if (msngr_send_needs_cache_refresh) {
+        msngr_send_needs_cache_refresh = false;
+        messenger_refresh_peer_cache(msngr_active_peer_hash);
+      }
+      if ((msngr_send_state == MSNGR_SEND_DELIVERED || msngr_send_state == MSNGR_SEND_TIMEOUT ||
+           msngr_send_state == MSNGR_SEND_UNRESOLVED) &&
           menu_state == MENU_STATE_MSNGR_SEND_RESULT &&
           millis() - msngr_send_result_at_ms > MSNGR_SEND_RESULT_POPUP_MS) {
         menu_state = MENU_STATE_MSNGR_PEER;
@@ -3432,16 +3440,17 @@
             // MSNGR_PEER_ACTION_SEND_HI/BYE/SOS are 0/1/2, same order as
             // MSNGR_PRESETS (Messenger.h) - index straight through.
             msngr_last_send_result = messenger_send_lxmf(msngr_active_peer_hash, MSNGR_PRESETS[action]);
-            if (msngr_last_send_result == URNS_LXMF_SEND_OK) {
-              // A new (outgoing) message was just saved - refresh the
-              // cache so it shows up without having to leave and re-enter
-              // this screen. Actual delivery is still pending at this
-              // point (messenger_send_lxmf() only enqueued/transmitted it) -
-              // MENU_STATE_MSNGR_SEND_RESULT's own draw code reads
-              // msngr_send_state live and shows "Sending..." until
-              // messenger_on_delivered()/messenger_send_process() (Messenger.h)
-              // resolve it to Delivered or No Confirmation.
-              messenger_refresh_peer_cache(msngr_active_peer_hash);
+            if (msngr_last_send_result == URNS_LXMF_SEND_OK || msngr_last_send_result == URNS_LXMF_SEND_RESOLVING) {
+              // A new (outgoing) message was just saved (OK) - or identity/
+              // path is still being resolved and nothing exists to show yet
+              // (RESOLVING, see messenger_send_lxmf()'s own comment,
+              // Messenger.h) - either way MENU_STATE_MSNGR_SEND_RESULT's own
+              // draw code reads msngr_send_state live and shows the right
+              // status text ("Resolving..."/"Sending..."/etc). The cache
+              // refresh itself is polled (msngr_send_result_process() below)
+              // rather than called here directly, since the RESOLVING path
+              // only actually saves a message later, asynchronously, from
+              // inside Messenger.h where this function isn't visible yet.
               msngr_send_result_cursor = 1; // default BACK - see its own declaration
               menu_state = MENU_STATE_MSNGR_SEND_RESULT;
             } else {
@@ -3536,8 +3545,12 @@
             // hand-off as the preset Send: Hi/Bye/SOS actions - see that
             // branch's own comment.
             msngr_last_send_result = messenger_send_lxmf(msngr_active_peer_hash, msngr_text_entry_buf);
-            if (msngr_last_send_result == URNS_LXMF_SEND_OK) {
-              messenger_refresh_peer_cache(msngr_active_peer_hash);
+            if (msngr_last_send_result == URNS_LXMF_SEND_OK || msngr_last_send_result == URNS_LXMF_SEND_RESOLVING) {
+              // RESOLVING already has its own copy of this text (msngr_send_
+              // pending_content, Messenger.h) independent of this buffer -
+              // clear it here same as OK, since the send has meaningfully
+              // started either way (see the preset-Send branch's own comment
+              // above for why cache refresh isn't called directly here).
               msngr_text_entry_buf[0] = 0;
               msngr_send_result_cursor = 1; // default BACK - see its own declaration
               menu_state = MENU_STATE_MSNGR_SEND_RESULT;
@@ -3562,11 +3575,17 @@
           menu_state = MENU_STATE_MSNGR_PEER;
         }
       } else if (menu_state == MENU_STATE_MSNGR_SEND_RESULT) {
-        // Row 0 (status) is read-only - only BACK does anything. Unlike
-        // Ping there's nothing to tear down (the packet's already gone
-        // out over the air either way) - just stop watching for this
-        // send's proof so a late-arriving one doesn't affect whatever the
-        // screen shows next time it's opened for a different send.
+        // Row 0 (status) is read-only - only BACK does anything. If the
+        // packet's already gone out (PENDING/DELIVERED/TIMEOUT) there's
+        // nothing to tear down, same as Ping - this just stops watching
+        // for this send's proof so a late-arriving one doesn't affect
+        // whatever the screen shows next time it's opened for a different
+        // send. If still RESOLVING (waiting on identity/path -
+        // messenger_send_lxmf()/_process(), Messenger.h), setting state
+        // back to IDLE here doubles as a real cancel: nothing's been sent
+        // yet in that case, and messenger_send_process() only acts on
+        // MSNGR_SEND_RESOLVING, so the parked message is simply abandoned
+        // rather than firing off later without the user watching.
         if (msngr_send_result_cursor == 1) {
           msngr_send_state = MSNGR_SEND_IDLE;
           menu_state = MENU_STATE_MSNGR_PEER;
@@ -5192,11 +5211,11 @@
         char valbufs[2][24];
         char status_buf[24];
         switch (msngr_ping_state) {
-          case MSNGR_PING_RESOLVING:    snprintf(status_buf, sizeof(status_buf), "Resolving path..."); break;
+          case MSNGR_PING_RESOLVING:    snprintf(status_buf, sizeof(status_buf), "Resolving..."); break;
           case MSNGR_PING_ESTABLISHING: snprintf(status_buf, sizeof(status_buf), "Pinging..."); break;
           case MSNGR_PING_SUCCESS:      snprintf(status_buf, sizeof(status_buf), "RTT: %.0f ms", msngr_ping_rtt * 1000.0); break;
           case MSNGR_PING_TIMEOUT:      snprintf(status_buf, sizeof(status_buf), "Timed Out"); break;
-          case MSNGR_PING_NO_IDENTITY:  snprintf(status_buf, sizeof(status_buf), "No Identity"); break;
+          case MSNGR_PING_NO_IDENTITY:  snprintf(status_buf, sizeof(status_buf), "Not Ready"); break;
           case MSNGR_PING_FAILED:       snprintf(status_buf, sizeof(status_buf), "Link Failed"); break;
           default:                      snprintf(status_buf, sizeof(status_buf), "..."); break;
         }
@@ -5222,10 +5241,12 @@
         char valbufs[2][24];
         char status_buf[24];
         switch (msngr_send_state) {
-          case MSNGR_SEND_PENDING:   snprintf(status_buf, sizeof(status_buf), "Sending..."); break;
-          case MSNGR_SEND_DELIVERED: snprintf(status_buf, sizeof(status_buf), "Delivered"); break;
-          case MSNGR_SEND_TIMEOUT:   snprintf(status_buf, sizeof(status_buf), "No Confirmation"); break;
-          default:                   snprintf(status_buf, sizeof(status_buf), "..."); break;
+          case MSNGR_SEND_RESOLVING:  snprintf(status_buf, sizeof(status_buf), "Resolving..."); break;
+          case MSNGR_SEND_PENDING:    snprintf(status_buf, sizeof(status_buf), "Sending..."); break;
+          case MSNGR_SEND_DELIVERED:  snprintf(status_buf, sizeof(status_buf), "Delivered"); break;
+          case MSNGR_SEND_TIMEOUT:    snprintf(status_buf, sizeof(status_buf), "No Confirmation"); break;
+          case MSNGR_SEND_UNRESOLVED: snprintf(status_buf, sizeof(status_buf), "Unknown Destination"); break;
+          default:                    snprintf(status_buf, sizeof(status_buf), "..."); break;
         }
         labels[0] = status_buf;
         valbufs[0][0] = 0;

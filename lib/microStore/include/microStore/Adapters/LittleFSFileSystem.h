@@ -99,6 +99,29 @@ protected:
 			return true;
 		}
 
+		// FIXED (local patch, not upstream): Arduino's own VFSFileImpl
+		// (vfs_api.cpp) unconditionally prepends its filesystem's _mountpoint
+		// to whatever path it's given - "%s%s", mountpoint, fpath - so it
+		// expects paths RELATIVE to the mount, not fully-qualified ones. This
+		// codebase's convention (Reticulum::_storagepath-prefixed paths, e.g.
+		// "/urns/path_store/seg0.dat") is already fully-qualified/absolute -
+		// the right convention for a raw-POSIX adapter (whose ::open() needs
+		// the real VFS path), and the one every other store/adapter in this
+		// tree assumes. Confirmed live: without this stripping, LittleFS.
+		// begin(true, "/urns", ...)'s mount turned every one of our already-
+		// absolute paths into "/urns/urns/...", and fopen() failed for
+		// literally everything (identity, known_store, path_store, time
+		// offset, destination table) the moment this adapter was wired in.
+		// Strip our own basepath (the SAME "/urns" LittleFS.begin() was
+		// mounted with, since URNS.h constructs this adapter with
+		// URNS_BASE_PATH) so Arduino's own re-prepend lands back on the
+		// original, correct path.
+		inline const char* relpath(const char* path) const {
+			size_t n = strlen(_basepath);
+			if (n > 0 && strncmp(path, _basepath, n) == 0) return path + n;
+			return path;
+		}
+
 		inline virtual bool init(bool reformatOnFail = true) override {
 			USTORE_LOG("[ustore] Initializing LittleFSFileSystem\n");
 			// Initialize LittleFS
@@ -157,7 +180,7 @@ protected:
 					return {};
 			}
 			// CBA Using copy constructor to obtain File*
-			fs::File* file = new fs::File(LittleFS.open(path, pmode));
+			fs::File* file = new fs::File(LittleFS.open(relpath(path), pmode));
 			if (file == nullptr || !(*file)) {
 				return {};
 			}
@@ -166,30 +189,30 @@ protected:
 
 
 		inline virtual bool exists(const char* path) override {
-			return LittleFS.exists(path);
+			return LittleFS.exists(relpath(path));
 		}
 
 		inline virtual bool remove(const char* path) override {
-			return LittleFS.remove(path);
+			return LittleFS.remove(relpath(path));
 		}
 
 		inline virtual bool rename(const char* from_path, const char* to_path) override {
-			return LittleFS.rename(from_path, to_path);
+			return LittleFS.rename(relpath(from_path), relpath(to_path));
 		}
 
 		inline virtual bool mkdir(const char* path) override {
-			if (!LittleFS.mkdir(path)) return false;
+			if (!LittleFS.mkdir(relpath(path))) return false;
 			return true;
 		}
 
 		inline virtual bool rmdir(const char* path) override {
-			if (!LittleFS.rmdir(path)) return false;
+			if (!LittleFS.rmdir(relpath(path))) return false;
 			return true;
 		}
 
 
 		virtual bool isDirectory(const char* path) override {
-			fs::File file = LittleFS.open(path, FILE_READ);
+			fs::File file = LittleFS.open(relpath(path), FILE_READ);
 			if (file) {
 				bool is_directory = file.isDirectory();
 				file.close();
@@ -200,7 +223,7 @@ protected:
 
 		virtual std::list<std::string> listDirectory(const char* path, Callbacks::DirectoryListing callback = nullptr) override {
 			std::list<std::string> files;
-			fs::File root = LittleFS.open(path);
+			fs::File root = LittleFS.open(relpath(path));
 			if (!root) {
 				return files;
 			}
