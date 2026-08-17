@@ -111,38 +111,20 @@ bool ws_host_is_connected() { return ws_state == WS_STATE_CONNECTED; }
 // Deliberately not fixed here too - needs its own dedicated testing pass
 // with that transport actually connected, not bundled into this change
 // untested.
-typedef struct {
-  uint8_t data[WS_TX_BUF_SIZE];
-  size_t len;
-} ws_tx_item_t;
-QueueHandle_t g_ws_tx_queue = NULL;
-
+// ws_tx_task() (formerly its own dedicated FreeRTOS task, pinned to core
+// 0, draining a queue this function fed) removed 2026-08-15 - ws_tx_flush()
+// now calls wsServer.sendBIN() directly, synchronously, matching
+// microReticulum_Firmware's zero-extra-task architecture (testing/ruling
+// out a cross-core data race as this session's stack-canary crash cause -
+// see loop()'s own comment, RNode_Firmware.ino, for the full trail).
+// Reintroduces the original "large stack needed at the wsServer.sendBIN()
+// call site" risk this task/queue split existed to isolate - accepted as
+// a known tradeoff for this test, not something newly missed.
 void ws_tx_flush() {
-  if (ws_tx_len > 0 && ws_client_num >= 0 && g_ws_tx_queue) {
-    ws_tx_item_t item;
-    memcpy(item.data, ws_tx_buf, ws_tx_len);
-    item.len = ws_tx_len;
-    if (xQueueSend(g_ws_tx_queue, &item, 0) != pdTRUE) {
-      // Queue full (consumer stuck / falling behind) - drop this frame
-      // rather than block the caller, same fail-open policy as every
-      // other queue-fed write path in this codebase.
-    }
+  if (ws_tx_len > 0 && ws_client_num >= 0) {
+    wsServer.sendBIN((uint8_t)ws_client_num, ws_tx_buf, ws_tx_len);
   }
   ws_tx_len = 0;
-}
-
-// Drains g_ws_tx_queue - see ws_tx_flush()'s own comment for why this
-// exists as its own dedicated task instead of calling wsServer.sendBIN()
-// directly from whichever task produced the frame.
-void ws_tx_task(void *param) {
-  ws_tx_item_t item;
-  while (true) {
-    if (xQueueReceive(g_ws_tx_queue, &item, portMAX_DELAY) == pdTRUE) {
-      if (ws_client_num >= 0) {
-        wsServer.sendBIN((uint8_t)ws_client_num, item.data, item.len);
-      }
-    }
-  }
 }
 
 void ws_remote_write(uint8_t byte) {

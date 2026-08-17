@@ -2350,7 +2350,7 @@ void draw_stat_area() {
         #if HAS_GPS == true
           draw_gps_icon(41, st_box_y0, stat_area_land);
         #endif
-        #if BOARD_MODEL == BOARD_MESHPOE_S3
+        #if BOARD_MODEL == BOARD_MESHPOE_S3 && HAS_ETHERNET
           draw_eth_icon(21, st_box_y1, stat_area_land);
         #elif HAS_ESPNOW == true
           draw_espnow_icon(21, st_box_y1, stat_area_land);
@@ -2504,7 +2504,7 @@ void draw_stat_area() {
       #if HAS_GPS == true
         draw_gps_icon(41, st_box_y0);
       #endif
-      #if BOARD_MODEL == BOARD_MESHPOE_S3
+      #if BOARD_MODEL == BOARD_MESHPOE_S3 && HAS_ETHERNET
         draw_eth_icon(21, st_box_y1);
       #elif HAS_ESPNOW == true
         draw_espnow_icon(21, st_box_y1);
@@ -2637,7 +2637,7 @@ void draw_stat_area() {
       draw_cable_icon(3, 8);
       draw_bt_icon(3, 30);
       draw_lora_icon(45, 8);
-      #if BOARD_MODEL == BOARD_MESHPOE_S3
+      #if BOARD_MODEL == BOARD_MESHPOE_S3 && HAS_ETHERNET
         draw_eth_icon(45, 30);
       #elif HAS_ESPNOW == true
         draw_espnow_icon(45, 30);

@@ -62,11 +62,24 @@ namespace RNS { namespace Cryptography {
 		static inline void inplace_unpad(Bytes& data, size_t bs = BLOCKSIZE) {
 			size_t len = data.size();
 			//DEBUGF("PKCS7::unpad: len: %lu", len);
+			// Malformed/corrupted ciphertext (garbage key, bit-flipped channel,
+			// truncated packet) decrypts to garbage plaintext, whose "padding"
+			// byte is then attacker/channel-controlled, not a real pad length -
+			// reject empty input outright (data[-1] below would already
+			// underflow len-1) rather than reading past the buffer.
+			if (len == 0) {
+				throw std::runtime_error("Cannot unpad, empty data");
+			}
 			// read last byte which is pad length
 			//pad = data[-1]
 			size_t padlen = (size_t)data.data()[data.size()-1];
 			//DEBUGF("PKCS7::unpad: pad len: %lu", padlen);
-			if (padlen > bs) {
+			// padlen > len (not just padlen > bs) is possible for the same
+			// garbage-plaintext reason above - len-padlen below is a size_t
+			// subtraction, so an unchecked padlen > len silently underflows
+			// into a huge value and turns a bad packet into a multi-GB
+			// Bytes::resize() call instead of a clean rejection.
+			if (padlen > bs || padlen > len) {
 				throw std::runtime_error("Cannot unpad, invalid padding length of " + std::to_string(padlen) + " bytes");
 			}
 			// truncate data to strip padding

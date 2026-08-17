@@ -3,6 +3,37 @@
 
 #include "Boards.h"
 
+#if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
+  #include <esp_task_wdt.h>
+#endif
+
+// Reuses RNode_Firmware.ino's own RTC_NOINIT_ATTR checkpoint globals (see
+// its own big comment on why RTC_NOINIT_ATTR/volatile matter here) so a
+// crash inside this file's endPacket() poll loop survives into the next
+// boot's "[Boot] last checkpoint before this boot" line same as every
+// other checkpoint - just declared extern here since this is a separate
+// translation unit from the .ino. Raw numeric IDs (not RNode_Firmware.
+// ino's own enum, which isn't visible here) in a range (2000+) chosen to
+// never collide with that enum's own small integer range - cp_name()
+// (RNode_Firmware.ino) has matching cases for these exact values.
+#if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
+  extern volatile uint16_t g_cp_id;
+  extern volatile uint32_t g_cp_millis;
+  #define SXCP(x) do { g_cp_id = (x); g_cp_millis = millis(); } while (0)
+#else
+  #define SXCP(x) do {} while (0)
+#endif
+#define CP_SX_POLL_BEFORE_READ  2001
+#define CP_SX_POLL_AFTER_READ   2002
+#define CP_SX_POLL_BEFORE_DELAY 2003
+#define CP_SX_POLL_AFTER_FEED   2004
+#define CP_SX_ENDPKT_SETPARAMS_BEFORE 2005
+#define CP_SX_ENDPKT_SETPARAMS_AFTER  2006
+#define CP_SX_ENDPKT_TXOP_BEFORE      2007
+#define CP_SX_ENDPKT_TXOP_AFTER       2008
+#define CP_SX_ENDPKT_FIRSTREAD_BEFORE 2009
+#define CP_SX_ENDPKT_FIRSTREAD_AFTER  2010
+
 #if MODEM == SX1262
 #include "sx126x.h"
 
@@ -586,18 +617,49 @@ void sx126x::unmaskDio0() {
       bool dio0_high = digitalRead(_dio0) == HIGH;
     #endif
     if (dio0_high) {
-      handleDio0Rise();
+      // FIXED (2026-08-15, checkpoint-instrumentation root cause): used to
+      // call handleDio0Rise() directly here, synchronously, from inside
+      // whatever call chain unmaskDio0() itself is nested in - and
+      // unmaskDio0() runs at the very end of endPacket(), so a packet
+      // arriving during a TX (masked window) triggered a full RX handling
+      // chain (handleDio0Rise() -> _onReceive() -> receive_callback() ->
+      // malloc()/memcpy()/xQueueSend()) nested on top of an already-deep
+      // loop()->tx_queue_handler()->flush_queue()->transmit()->endPacket()
+      // stack - far deeper than this RX path is ever exercised from its
+      // normal, shallow call site (handleDio0IfPending(), called directly
+      // from loop()). Confirmed via CP() checkpoint instrumentation this
+      // session that every observed crash (a stack-canary watchpoint hit,
+      // i.e. a wild write from a real ROM memcpy call - matching receive_
+      // callback()'s own memcpy() exactly) landed inside endPacket(), and
+      // that raising RNS::loglevel() to LOG_TRACE (adding much more stack
+      // depth to that same already-too-deep chain) made it crash almost
+      // immediately instead of intermittently - consistent with a stack
+      // overflow, not a logic bug in the RX handling itself. Deferring via
+      // the same _dio0_pending flag onDio0Rise() itself uses lets
+      // handleDio0IfPending() process it from loop()'s normal, safe depth
+      // on the next iteration instead - a few hundred microseconds of
+      // added latency, not a correctness change.
+      _dio0_pending = true;
     }
   }
 }
 
 int sx126x::beginPacket(int implicitHeader) {
-  // Masked for the entire TX transaction (this call through endPacket()),
-  // not just endPacket()'s done-poll - beginPacket(), the FIFO write in
-  // between, and endPacket() all do raw SPI. Every beginPacket() call in
-  // this codebase is unconditionally followed by an endPacket() (no early
-  // returns skip it), so this always gets unmasked there.
-  maskDio0();
+  // MIGRATION (2026-08-15): stopped masking DIO0 around the whole TX
+  // transaction here (and unmasking at the end of endPacket()) - matches
+  // microReticulum_Firmware upstream's own driver, which has never masked
+  // around beginPacket()/endPacket() at all. Safe now that unmaskDio0()'s
+  // "catch a missed edge" logic (still used elsewhere, e.g.
+  // update_modem_status()) defers via _dio0_pending instead of processing
+  // synchronously (see that function's own comment) - the one thing
+  // masking here protected against, a full reentrant RX-handling chain
+  // nested inside the TX call stack, can no longer happen regardless of
+  // whether the interrupt was ever detached in the first place. See git
+  // history/memory for the long trail: this exact masking was previously
+  // both added (as a genuine fix for a since-independently-resolved SPI
+  // race) and removed (ab56269, for causing a 100%-reproducible boot
+  // hang) and restored (63fc6da, when that removal turned out to also
+  // regress normal-operation stability) before landing here for good.
 
   #if HAS_LORA_PA
     if (lora_pa_model == LORA_PA_GC1109) {
@@ -649,20 +711,23 @@ int sx126x::beginPacket(int implicitHeader) {
 }
 
 int sx126x::endPacket() {
+  SXCP(CP_SX_ENDPKT_SETPARAMS_BEFORE);
   setPacketParams(_preambleLength, _implicitHeaderMode, _payloadLength, _crcMode);
+  SXCP(CP_SX_ENDPKT_SETPARAMS_AFTER);
 
   // RXen already dropped in beginPacket(), alongside TXen going high.
 
   uint8_t timeout[3] = {0}; // Put in single TX mode
+  SXCP(CP_SX_ENDPKT_TXOP_BEFORE);
   executeOpcode(OP_TX_6X, timeout, 3);
-
-  // DIO0 already masked - see beginPacket()'s own comment. Re-attached
-  // (with missed-event handling) at the end of this function.
+  SXCP(CP_SX_ENDPKT_TXOP_AFTER);
 
   uint8_t buf[2];
   buf[0] = 0x00;
   buf[1] = 0x00;
+  SXCP(CP_SX_ENDPKT_FIRSTREAD_BEFORE);
   executeOpcodeRead(OP_GET_IRQ_STATUS_6X, buf, 2);
+  SXCP(CP_SX_ENDPKT_FIRSTREAD_AFTER);
 
   // Wait for TX done
   bool timed_out = false;
@@ -670,7 +735,9 @@ int sx126x::endPacket() {
   while ((millis() < w_timeout) && ((buf[1] & IRQ_TX_DONE_MASK_6X) == 0)) {
     buf[0] = 0x00;
     buf[1] = 0x00;
+    SXCP(CP_SX_POLL_BEFORE_READ);
     executeOpcodeRead(OP_GET_IRQ_STATUS_6X, buf, 2);
+    SXCP(CP_SX_POLL_AFTER_READ);
     // Root cause of a long-running Interrupt-WDT crash saga
     // (feedback_sx126x_tx_rx_spi_mutex_race memory): the SPI transaction
     // itself always completes cleanly - the hang was in the few
@@ -690,7 +757,24 @@ int sx126x::endPacket() {
     // of added polling latency here doesn't touch on-air packet timing
     // at all - it only affects how promptly software notices the DONE
     // IRQ once the radio has actually finished transmitting.
+    SXCP(CP_SX_POLL_BEFORE_DELAY);
     vTaskDelay(pdMS_TO_TICKS(1));
+    SXCP(CP_SX_POLL_AFTER_FEED);
+    // FIXED (2026-08-15): this loop can legitimately run for up to the
+    // full LORA_MODEM_TIMEOUT_MS (20s) on its own, but nothing inside it
+    // ever fed the task watchdog (25s timeout) - only flush_queue()'s
+    // *outer* loop does that, once per fully-completed packet (see its
+    // own comment, RNode_Firmware.ino). If any of the loopTask budget was
+    // already spent before this specific transmit() call (LXMF/crypto
+    // processing, a previous packet in the same flush, etc.), a single
+    // slow-but-legitimate TX-done wait here - not a bug in itself, just
+    // real radio/RF timing - can push the *cumulative* time since the
+    // last feed past 25s and trip the watchdog, with the checkpoint
+    // landing right here every time regardless of what actually made
+    // this particular TX slow.
+    #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
+      esp_task_wdt_reset();
+    #endif
   }
 
   if (!(millis() < w_timeout)) { timed_out = true; }
@@ -700,8 +784,6 @@ int sx126x::endPacket() {
   mask[0] = 0x00;
   mask[1] = IRQ_TX_DONE_MASK_6X;
   executeOpcode(OP_CLEAR_IRQ_STATUS_6X, mask, 2);
-
-  unmaskDio0();
 
   if (timed_out) { return 0; } else { return 1; }
 }

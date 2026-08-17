@@ -15,34 +15,17 @@
 
 #include <Arduino.h>
 #include <SPI.h>
-#include "Utilities.h"
+#include "Config.h"
 
+// Checkpoint (CP()) infrastructure lives here, before "Utilities.h" is
+// included below, specifically so headers Utilities.h pulls in (URNS.h)
+// can call CP() too - they used to only be reachable from this file's own
+// later code (all previous CP() call sites were inside loop() itself,
+// naturally after this block), but bracketing urns_lxmf_loop() (URNS.h)
+// needs it earlier. Only the enum/macro/globals move up here; cp_name()/
+// cp_report_last() (which need DEBUG_LOG, from Utilities.h) stay below,
+// after Utilities.h's own include.
 #if MCU_VARIANT == MCU_ESP32
-  #include <esp_task_wdt.h>
-  #include <esp_heap_caps.h>
-  #include <esp_system.h>
-  #include <mbedtls/platform.h>
-
-  // Printed once at boot (see "RNode starting" below) so a reboot we didn't
-  // witness live still leaves a record of whether it was a plain power-on,
-  // a panic/abort, a watchdog trip, or something else, once the debug UART
-  // capture picks back up on the new boot.
-  const char* esp_reset_reason_str() {
-    switch (esp_reset_reason()) {
-      case ESP_RST_POWERON:   return "POWERON";
-      case ESP_RST_EXT:       return "EXT";
-      case ESP_RST_SW:        return "SW";
-      case ESP_RST_PANIC:     return "PANIC";
-      case ESP_RST_INT_WDT:   return "INT_WDT";
-      case ESP_RST_TASK_WDT:  return "TASK_WDT";
-      case ESP_RST_WDT:       return "WDT";
-      case ESP_RST_DEEPSLEEP: return "DEEPSLEEP";
-      case ESP_RST_BROWNOUT:  return "BROWNOUT";
-      case ESP_RST_SDIO:      return "SDIO";
-      default:                return "UNKNOWN";
-    }
-  }
-
   // Pinpointing the still-open loopTask task-watchdog stall (see
   // feedback_sx126x_tx_rx_spi_mutex_race.md / project_sx1262_tx_poll_yield_
   // fix.md) - a real, uncorrupted capture finally caught one, but the panic
@@ -96,7 +79,51 @@
     CP_MENU_PROCESS,
     CP_TXQ_FLUSH_QUEUE,
     CP_TXQ_POP_QUEUE,
+    CP_URNS_HANDLE_INCOMING,
+    CP_URNS_PROCESS_OUTBOUND,
+    CP_URNS_PROCESS_INBOUND,
+    CP_URNS_CULL_STORES,
+    CP_TX_BEGIN_PACKET,
+    CP_TX_WRITE_LOOP,
+    CP_TX_END_PACKET,
+    CP_TX_DONE,
+    CP_TXQ_FLUSH_COPY,
+    CP_TXQ_FLUSH_TRANSMIT,
+    CP_TXQ_FLUSH_RECEIVE,
   };
+
+  #define CP(x) do { g_cp_id = (x); g_cp_millis = millis(); } while (0)
+#else
+  #define CP(x) do {} while (0)
+#endif
+
+#include "Utilities.h"
+
+#if MCU_VARIANT == MCU_ESP32
+  #include <esp_task_wdt.h>
+  #include <esp_heap_caps.h>
+  #include <esp_system.h>
+  #include <mbedtls/platform.h>
+
+  // Printed once at boot (see "RNode starting" below) so a reboot we didn't
+  // witness live still leaves a record of whether it was a plain power-on,
+  // a panic/abort, a watchdog trip, or something else, once the debug UART
+  // capture picks back up on the new boot.
+  const char* esp_reset_reason_str() {
+    switch (esp_reset_reason()) {
+      case ESP_RST_POWERON:   return "POWERON";
+      case ESP_RST_EXT:       return "EXT";
+      case ESP_RST_SW:        return "SW";
+      case ESP_RST_PANIC:     return "PANIC";
+      case ESP_RST_INT_WDT:   return "INT_WDT";
+      case ESP_RST_TASK_WDT:  return "TASK_WDT";
+      case ESP_RST_WDT:       return "WDT";
+      case ESP_RST_DEEPSLEEP: return "DEEPSLEEP";
+      case ESP_RST_BROWNOUT:  return "BROWNOUT";
+      case ESP_RST_SDIO:      return "SDIO";
+      default:                return "UNKNOWN";
+    }
+  }
 
   const char* cp_name(uint16_t id) {
     switch (id) {
@@ -129,11 +156,30 @@
       case CP_MENU_PROCESS:          return "menu_*_process()";
       case CP_TXQ_FLUSH_QUEUE:       return "tx_queue_handler->flush_queue()";
       case CP_TXQ_POP_QUEUE:         return "tx_queue_handler->pop_queue()";
+      case CP_URNS_HANDLE_INCOMING:  return "urns_lxmf_loop->handle_incoming()";
+      case CP_URNS_PROCESS_OUTBOUND: return "urns_lxmf_loop->process_outbound()";
+      case CP_URNS_PROCESS_INBOUND:  return "urns_lxmf_loop->process_inbound()";
+      case CP_URNS_CULL_STORES:      return "urns_lxmf_loop->urns_cull_stores()";
+      case CP_TX_BEGIN_PACKET:       return "transmit()->beginPacket()";
+      case CP_TX_WRITE_LOOP:         return "transmit()->write loop";
+      case CP_TX_END_PACKET:         return "transmit()->endPacket()";
+      case CP_TX_DONE:               return "transmit()->done";
+      case CP_TXQ_FLUSH_COPY:        return "flush_queue()->copy tbuf";
+      case CP_TXQ_FLUSH_TRANSMIT:    return "flush_queue()->transmit()";
+      case CP_TXQ_FLUSH_RECEIVE:     return "flush_queue()->lora_receive()";
+      case 2001:                     return "sx126x::endPacket()->poll:before_read";
+      case 2002:                     return "sx126x::endPacket()->poll:after_read";
+      case 2003:                     return "sx126x::endPacket()->poll:before_delay";
+      case 2004:                     return "sx126x::endPacket()->poll:after_feed";
+      case 2005:                     return "sx126x::endPacket()->setPacketParams:before";
+      case 2006:                     return "sx126x::endPacket()->setPacketParams:after";
+      case 2007:                     return "sx126x::endPacket()->OP_TX_6X:before";
+      case 2008:                     return "sx126x::endPacket()->OP_TX_6X:after";
+      case 2009:                     return "sx126x::endPacket()->firstread:before";
+      case 2010:                     return "sx126x::endPacket()->firstread:after";
       default:                       return "UNKNOWN";
     }
   }
-
-  #define CP(x) do { g_cp_id = (x); g_cp_millis = millis(); } while (0)
 
   // Call once at boot, right after the reset-reason line - prints where
   // loopTask was about to go last time, iff this boot followed a reset type
@@ -166,12 +212,6 @@
     return p;
   }
   void mbedtls_psram_free(void* p) { heap_caps_free(p); }
-#else
-  // CP() is sprinkled through loop() below regardless of MCU_VARIANT (most
-  // of that code is shared across boards) - on non-ESP32 boards there's no
-  // task watchdog stall to chase and no RTC_NOINIT_ATTR checkpoint state to
-  // update, so it's just a no-op here.
-  #define CP(x) do {} while (0)
 #endif
 
 #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
@@ -184,37 +224,38 @@
   // for a report" flag, not a tight loop.
   volatile bool g_kiss_stats_pending = false;
 
-  // housekeeping_task() - its own dedicated task, not folded onto loopTask.
-  // It briefly was (matching microReticulum_Firmware's zero-extra-task
-  // architecture, to recover DRAM for BLE), but that reintroduced a real,
-  // confirmed hang on real hardware: the same "Serial.write() occasionally
-  // never returns" USBCDC quirk this task was originally isolated to
-  // protect against (see below) is real, not theoretical - moving it back
-  // off loopTask is what actually fixes it, not a smaller DRAM budget
-  // being worth reintroducing this hang for.
+  // housekeeping_poll() - formerly housekeeping_task(), its own dedicated
+  // FreeRTOS task pinned to core 0. Folded back onto loopTask 2026-08-15,
+  // called once per loop() iteration instead of looping internally with
+  // its own 50ms blocking queue wait (changed to a single non-blocking
+  // pass per call, matching loop()'s own polling style) - see loop()'s
+  // own call site comment for the full reasoning (testing/ruling out a
+  // cross-core data race as this session's stack-canary crash cause,
+  // matching microReticulum_Firmware's zero-extra-task architecture).
+  // Reintroduces the original "Serial.write() occasionally never returns"
+  // risk this task existed to isolate loopTask from - accepted as a known
+  // tradeoff for this test, not something newly missed.
   unsigned long g_last_kiss_stats_check_ms = 0;
-  void housekeeping_task(void *param) {
-    for (;;) {
-      char debug_buf[DEBUG_LOG_MSG_LEN];
-      if (xQueueReceive(g_debug_log_queue, debug_buf, pdMS_TO_TICKS(50)) == pdTRUE) {
-        Serial0.print(debug_buf);
-      }
-      char cmd_buf[CMD_LOG_MSG_LEN];
-      if (xQueueReceive(g_cmd_log_queue, cmd_buf, 0) == pdTRUE) {
-        serial_write(FEND);
-        serial_write(CMD_LOG);
-        size_t len = strnlen(cmd_buf, CMD_LOG_MSG_LEN);
-        for (size_t i = 0; i < len; i++) { escaped_serial_write(cmd_buf[i]); }
-        serial_write(FEND);
-      }
+  void housekeeping_poll() {
+    char debug_buf[DEBUG_LOG_MSG_LEN];
+    if (xQueueReceive(g_debug_log_queue, debug_buf, 0) == pdTRUE) {
+      Serial0.print(debug_buf);
+    }
+    char cmd_buf[CMD_LOG_MSG_LEN];
+    if (xQueueReceive(g_cmd_log_queue, cmd_buf, 0) == pdTRUE) {
+      serial_write(FEND);
+      serial_write(CMD_LOG);
+      size_t len = strnlen(cmd_buf, CMD_LOG_MSG_LEN);
+      for (size_t i = 0; i < len; i++) { escaped_serial_write(cmd_buf[i]); }
+      serial_write(FEND);
+    }
 
-      unsigned long now = millis();
-      if (now - g_last_kiss_stats_check_ms >= 500) {
-        g_last_kiss_stats_check_ms = now;
-        if (g_kiss_stats_pending) {
-          g_kiss_stats_pending = false;
-          kiss_indicate_channel_stats();
-        }
+    unsigned long now = millis();
+    if (now - g_last_kiss_stats_check_ms >= 500) {
+      g_last_kiss_stats_check_ms = now;
+      if (g_kiss_stats_pending) {
+        g_kiss_stats_pending = false;
+        kiss_indicate_channel_stats();
       }
     }
   }
@@ -255,58 +296,13 @@ volatile bool serial_buffering = false;
   static xQueueHandle modem_packet_queue = NULL;
 #endif
 
-#if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
-  // kiss_tx_task() - back on its own dedicated task, not folded onto
-  // loopTask (see housekeeping_task()'s own comment for why - the same
-  // "Serial.write() occasionally never returns" hang applies here too, and
-  // this is the highest-frequency Serial-writing call site in the firmware
-  // (actual received-packet delivery over KISS), so if anything it's the
-  // higher-risk of the two to leave on loopTask. Blocks indefinitely on the
-  // queue instead of polling - unlike loop(), a dedicated task can afford
-  // to block waiting for a packet that may never come.
-  //
-  // Deliberately does NOT also move urns_stage_incoming() here - that's a
-  // plain bounded memcpy into a single-slot staging buffer, still done
-  // synchronously on loopTask right where modem_packet is dequeued (this
-  // file's loop()) before ownership is handed to g_kiss_tx_queue below; see
-  // URNS.h's own comment on urns_stage_incoming for why that side stays on
-  // loopTask. The two are independent - only the actual host write moves.
-  QueueHandle_t g_kiss_tx_queue = NULL;
-  void kiss_tx_task(void *param) {
-    for (;;) {
-    modem_packet_t *mp = NULL;
-    if (xQueueReceive(g_kiss_tx_queue, &mp, portMAX_DELAY) == pdTRUE && mp) {
-      uint8_t rssi_val = (uint8_t)(mp->rssi + rssi_offset);
-      #if HAS_ESPNOW == true
-        kiss_select_interface(0);
-      #endif
-      serial_write(FEND); serial_write(CMD_STAT_RSSI); escaped_serial_write(rssi_val); serial_write(FEND);
-      #if HAS_ESPNOW == true
-        kiss_select_interface(0);
-      #endif
-      serial_write(FEND); serial_write(CMD_STAT_SNR); escaped_serial_write((uint8_t)mp->snr_raw); serial_write(FEND);
-
-      packet_rx_count++;
-      serial_write(FEND);
-      serial_write(CMD_DATA);
-      for (uint16_t i = 0; i < mp->len; i++) {
-        uint8_t byte = mp->data[i];
-        if (byte == FEND) { serial_write(FESC); byte = TFEND; }
-        if (byte == FESC) { serial_write(FESC); byte = TFESC; }
-        serial_write(byte);
-      }
-      serial_write(FEND);
-      #if HAS_BLE
-        bt_flush();
-      #endif
-
-      free(mp);
-      mp = NULL;
-    }
-    }
-  }
-#endif
-
+// kiss_tx_task() (formerly its own dedicated FreeRTOS task, pinned to
+// core 0) removed 2026-08-15 - folded back into loop() itself (see that
+// call site's own comment) to match microReticulum_Firmware's zero-extra-
+// task architecture, testing/ruling out a cross-core data race as the
+// cause of this session's stack-canary crash investigation. Reintroduces
+// the original "Serial.write() occasionally never returns" risk this task
+// existed to isolate - accepted as a known tradeoff for this test.
 
 char sbuf[128];
 
@@ -314,21 +310,11 @@ void setup() {
   #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
     // The queues need to exist this early, before the very first
     // DEBUG_LOG() call anywhere below - see g_debug_log_queue/
-    // g_cmd_log_queue (Utilities.h).
-    // xQueueSend() doesn't need a consumer running yet; entries just sit
-    // queued until housekeeping_task() (this file) starts draining them -
-    // started right away below anyway, no real gap in practice.
+    // g_cmd_log_queue (Utilities.h). xQueueSend() doesn't need a consumer
+    // running yet; entries just sit queued until housekeeping_poll()
+    // (this file, called from loop()) starts draining them.
     g_debug_log_queue = xQueueCreate(DEBUG_LOG_QUEUE_DEPTH, DEBUG_LOG_MSG_LEN);
     g_cmd_log_queue = xQueueCreate(CMD_LOG_QUEUE_DEPTH, CMD_LOG_MSG_LEN);
-    // Stack measured empirically at ~2032B used (see memory) - sized with
-    // headroom, not guessed from scratch. Internal-RAM stack, not PSRAM -
-    // see bt_start()'s own ble_networking_conflict() comment: BLE and
-    // WiFi/Ethernet are now mutually exclusive on HAS_URNS boards, so this
-    // ~3KB no longer needs to compete with BLE's own margin, and there's
-    // no need to take on PSRAM-backed-stack's open question (does it race
-    // safely against flash writes on the other core?) for no remaining
-    // benefit.
-    xTaskCreatePinnedToCore(housekeeping_task, "housekeep", 3072, nullptr, 1, nullptr, 0);
   #endif
   #if HAS_OTA == true
     // Field recovery path for a bad OTA update - must run before anything
@@ -528,16 +514,6 @@ void setup() {
 
   #if PLATFORM == PLATFORM_ESP32 || PLATFORM == PLATFORM_NRF52
     modem_packet_queue = xQueueCreate(MODEM_QUEUE_SIZE, sizeof(modem_packet_t*));
-  #endif
-  #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
-    // See kiss_tx_task()'s own comment (this file) for why this exists.
-    // Created before radio bring-up, well before any packet could arrive.
-    g_kiss_tx_queue = xQueueCreate(MODEM_QUEUE_SIZE, sizeof(modem_packet_t*));
-    // Stack measured empirically at ~1044B used (see memory) - sized with
-    // headroom, not guessed from scratch. Internal-RAM stack - see
-    // housekeeping_task's own task-creation comment (above, this file) for
-    // why this isn't PSRAM-backed.
-    xTaskCreatePinnedToCore(kiss_tx_task, "kisstx", 2048, nullptr, 1, nullptr, 0);
   #endif
 
   // Set chip select, reset and interrupt
@@ -885,13 +861,6 @@ void setup() {
         // needs to be reachable out of the box for browser-based tools).
         if (ws_en_raw == WS_ENABLE_BYTE) ws_enabled = true;
         else if (ws_en_raw == WS_DISABLE_BYTE) ws_enabled = false;
-        // See ws_tx_flush()'s own comment (WebSocketRemote.h) for why this
-        // exists - created before ws_remote_init() so the queue exists no
-        // matter how soon a client could connect.
-        #if MCU_VARIANT == MCU_ESP32
-          g_ws_tx_queue = xQueueCreate(2, sizeof(ws_tx_item_t));
-          xTaskCreatePinnedToCore(ws_tx_task, "wstx", 8192, nullptr, 1, nullptr, 0);
-        #endif
         ws_remote_init();
       #endif
       #if HAS_OTA == true
@@ -1396,11 +1365,13 @@ void flush_queue(void) {
       uint16_t length = fifo16_pop(&packet_lengths);
 
       if (length >= MIN_L && length <= MTU) {
+        CP(CP_TXQ_FLUSH_COPY); g_cp_millis = length;
         for (uint16_t i = 0; i < length; i++) {
           uint16_t pos = (start+i)%CONFIG_QUEUE_SIZE;
           tbuf[i] = packet_queue[pos];
         }
 
+        CP(CP_TXQ_FLUSH_TRANSMIT); g_cp_millis = length;
         transmit(length);
       }
 
@@ -1420,6 +1391,7 @@ void flush_queue(void) {
       #endif
     }
 
+    CP(CP_TXQ_FLUSH_RECEIVE);
     lora_receive(); if (!LED_DISPLAY_BLANKED) { led_tx_off(); }
   }
 
@@ -1556,7 +1528,7 @@ void update_airtime() {
     // specifically so a hang there can't take loopTask down with it.
     #if MCU_VARIANT == MCU_ESP32
       if (millis() > 10000) {
-        g_kiss_stats_pending = true;
+        // g_kiss_stats_pending = true;
       }
     #else
       kiss_indicate_channel_stats();
@@ -1573,13 +1545,22 @@ void transmit(uint16_t size) {
       uint8_t header  = random(256) & 0xF0;
       if (size > SINGLE_MTU - HEADER_L) { header = header | FLAG_SPLIT; }
 
+      // TEMP DIAGNOSTIC (2026-08-17): characterize each TX to localize the
+      // endPacket() TX-poll hang. A "[TX] start" with no matching "[TX] end"
+      // before a reboot means the hang is inside endPacket() for that packet.
+      // See project_meshpoe_s3_fem_rewire memory.
+      DEBUG_LOG("[TX] start size=%u split=%d\r\n", (unsigned)size, (header & FLAG_SPLIT) ? 1 : 0);
+
+      CP(CP_TX_BEGIN_PACKET); g_cp_millis = size;
       LoRa->beginPacket();
       LoRa->write(header); written++;
 
+      CP(CP_TX_WRITE_LOOP); g_cp_millis = size;
       for (uint16_t i=0; i < size; i++) {
         LoRa->write(tbuf[i]); written++;
 
         if (written == 255 && isSplitPacket(header)) {
+          CP(CP_TX_END_PACKET); g_cp_millis = written;
           if (!LoRa->endPacket()) {
             kiss_indicate_error(ERROR_MODEM_TIMEOUT);
             kiss_indicate_error(ERROR_TXFAILED);
@@ -1588,19 +1569,25 @@ void transmit(uint16_t size) {
           }
 
           add_airtime(written);
+          CP(CP_TX_BEGIN_PACKET); g_cp_millis = size;
           LoRa->beginPacket();
           LoRa->write(header);
           written = 1;
         }
       }
 
-      if (!LoRa->endPacket()) {
+      CP(CP_TX_END_PACKET); g_cp_millis = written;
+      uint32_t _tx_t0 = millis();
+      int _tx_ok = LoRa->endPacket();
+      DEBUG_LOG("[TX] end written=%u ok=%d dur=%lums\r\n", (unsigned)written, _tx_ok, (unsigned long)(millis() - _tx_t0));
+      if (!_tx_ok) {
         kiss_indicate_error(ERROR_MODEM_TIMEOUT);
         kiss_indicate_error(ERROR_TXFAILED);
         led_indicate_error(5);
         hard_reset();
       }
 
+      CP(CP_TX_DONE);
       add_airtime(written);
 
     } else {
@@ -2870,14 +2857,20 @@ void loop() {
     esp_task_wdt_reset();
   #endif
   CP(CP_LOOP_TOP);
-  // housekeeping_task()/kiss_tx_task() (this file) run as their own
-  // dedicated FreeRTOS tasks, not folded onto loopTask - see their own
-  // comments for why. They briefly were folded here (to recover ~14KB+ of
-  // task stack/TCB overhead for BLE's DRAM margin, matching
-  // microReticulum_Firmware's zero-extra-task shape) but that reintroduced
-  // a real, confirmed hang - the "Serial.write() occasionally never
-  // returns" USBCDC quirk these tasks were originally isolated to protect
-  // against.
+  // housekeeping_task()/kiss_tx_task()/ws_tx_task() used to run as their
+  // own dedicated FreeRTOS tasks, pinned to core 0, alongside loopTask on
+  // core 1 - folded back here 2026-08-15 to match microReticulum_
+  // Firmware's zero-extra-task architecture exactly, testing/ruling out a
+  // genuine cross-core data race as the cause of this session's stack-
+  // canary memory-corruption crash investigation (see git history/memory
+  // for the trail - every single-task-reentrancy theory tried was
+  // eventually disproven by direct hardware testing). This reintroduces
+  // the original, already-diagnosed "Serial.write() occasionally never
+  // returns" USBCDC risk these tasks existed to isolate loopTask from -
+  // an accepted, known tradeoff for this test, not something newly missed.
+  #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
+    housekeeping_poll();
+  #endif
   #if HAS_URNS == true
     if (urns_ready) {
       CP(CP_URNS_RETICULUM_LOOP);
@@ -2932,22 +2925,36 @@ void loop() {
         last_snr_raw   = modem_packet->snr_raw;
         memcpy(&pbuf, modem_packet->data, modem_packet->len);
 
-        // Same as kiss_write_packet()'s own call (RNode_Firmware.ino) -
-        // kept here, synchronous, on loopTask, since this is a bounded
-        // memcpy into a single-slot staging buffer, not a Serial write.
-        // See kiss_tx_task()'s own comment for why the actual KISS write
-        // is deferred through a queue rather than done inline here.
-        #if HAS_URNS == true
-          if (urns_ready) { urns_stage_incoming(pbuf, host_write_len); }
-        #endif
+        // ARCHITECTURE CHANGE (2026-08-15): this used to hand modem_packet
+        // off to a dedicated kiss_tx_task() (its own FreeRTOS task, pinned
+        // to core 0) instead of writing it out here directly - see this
+        // session's own investigation trail for why: after an extremely
+        // long debugging session chasing an intermittent stack-canary
+        // memory-corruption crash inside the radio TX path that resisted
+        // every single-task-reentrancy theory tried, the remaining
+        // untested variable was the *scheduling architecture* itself -
+        // this firmware ran 3 extra FreeRTOS tasks genuinely in parallel
+        // on a second core (housekeeping_task/kiss_tx_task/ws_tx_task, all
+        // pinned to core 0) alongside loopTask (core 1, where all the
+        // radio/SPI code lives), a real difference from microReticulum_
+        // Firmware's architecture, which runs everything - LXMF, KISS
+        // writes, radio handling - synchronously on a single task/core
+        // with no extra tasks at all. Folded back onto loopTask here,
+        // matching that model exactly (and its own loop()'s own call
+        // order: stat_rssi/stat_snr indicators, then kiss_write_packet(),
+        // which itself does urns_stage_incoming()/packet_rx_count++/
+        // bt_flush() internally - no need to duplicate any of that here),
+        // to test/rule out a genuine cross-core data race as the root
+        // cause. This reintroduces the original, already-diagnosed reason
+        // kiss_tx_task existed in the first place - Serial.write() (inside
+        // kiss_write_packet() below) occasionally never returning on this
+        // USBCDC stack - as a known, accepted tradeoff for this test, not
+        // something newly missed. last_rssi/last_snr_raw already set above.
+        kiss_indicate_stat_rssi();
+        kiss_indicate_stat_snr();
+        kiss_write_packet();
 
-        // Hand ownership of modem_packet straight to the g_kiss_tx_queue
-        // instead of freeing it here and calling kiss_indicate_stat_rssi()/
-        // kiss_indicate_stat_snr()/kiss_write_packet() synchronously - see
-        // kiss_tx_task()'s own comment (this file) for why.
-        if (g_kiss_tx_queue && xQueueSend(g_kiss_tx_queue, &modem_packet, 0) != pdTRUE) {
-          free(modem_packet); // queue full (consumer stuck?) - drop rather than leak
-        }
+        free(modem_packet);
         modem_packet = NULL;
       }
 

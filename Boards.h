@@ -297,6 +297,12 @@
       #define HAS_BLE true
       #define HAS_WIFI true
       #define HAS_ESPNOW true
+      // TEMPORARY DIAGNOSTIC (2026-08-17): forced false to rule Ethernet out
+      // as a contributor to the endPacket() TX-poll Interrupt-WDT/stack-canary
+      // crash (checkpoint sx126x::endPacket()->poll, ~every few min on an
+      // announce). The W5500 runs on its own SPI bus + IRQ (pin_eth_int) next
+      // to the radio's SPI/DIO0 ISR - disabling it isolates whether that
+      // interaction is involved. Restore to true once ruled in/out.
       #define HAS_ETHERNET true
       // Disabled on this branch (meshpoe-s3-urns) - same reasoning as
       // MeshAdventurer-S3's own HAS_CONSOLE false above: the button-hold
@@ -311,14 +317,21 @@
       #define HAS_CONSOLE false
       // Network OTA firmware updates (OTA.h) - see BUILD_NUMBER's own
       // comment above for why that fallback lives outside this board block.
-      #define HAS_OTA true
+      #define HAS_OTA false
       #define HAS_EEPROM true
       #define HAS_BUSY true
       #define HAS_INPUT true
       #define HAS_TCXO true
       #define MODEM SX1262
-      #define DIO2_AS_RF_SWITCH true
-      #define HAS_RF_SWITCH_RX_TX false
+      // FEM: EBYTE E22P-868M30S. RFEN (pin_rxen, GPIO39) is held HIGH
+      // continuously (merged LNA+PA enable - see beginPacket()'s MeshPoE
+      // special case in sx126x.cpp), and TXEN (pin_txen, GPIO40) is driven
+      // directly by the MCU - HIGH to transmit, LOW to receive - so DIO2 is
+      // NOT used as the RF switch on this board. (Was true, with GPIO40 left
+      // at -1 on the theory it had to be bridged to DIO2 on-module; testing
+      // the direct-drive topology per the module's actual TXEN/RFEN wiring.)
+      #define DIO2_AS_RF_SWITCH false
+      #define HAS_RF_SWITCH_RX_TX true
       #define HAS_LORA_LNA true
       #define LORA_LNA_GAIN  17
       #define LORA_LNA_GVT   12
@@ -338,13 +351,13 @@
       const int pin_reset = 3;
       const int pin_busy = 2;
       const int pin_dio = 1;
-      // GPIO40 is wired to the E22P-868M30S module's TXEN pin, but on this
-      // module TXEN must be bridged to DIO2 (on the module itself) to work -
-      // it's not meant to be MCU-driven like the older non-P E22's TXEN.
-      // Leaving it at -1 means sx126x.cpp never touches it. GPIO39 (RXEN
-      // below) is this module's merged RFEN (LNA+PA enable) and is handled
-      // as a special case in sx126x.cpp's beginPacket()/endPacket() instead.
-      const int pin_txen = -1;
+      // GPIO40 is the E22P-868M30S module's TXEN pin, driven directly by the
+      // MCU (DIO2_AS_RF_SWITCH is false above): HIGH to transmit, LOW to
+      // receive - see rxAntEnable()/beginPacket() in sx126x.cpp. GPIO39
+      // (RXEN below) is this module's merged RFEN (LNA+PA enable), held HIGH
+      // continuously whenever the radio is active - the beginPacket() special
+      // case for BOARD_MESHPOE_S3 keeps it from being dropped on TX.
+      const int pin_txen = 40;
       const int pin_rxen = 39;
       const int pin_tcxo_enable = -1;
 
@@ -1860,14 +1873,14 @@
   // Whether the buzzer defaults to enabled at first boot (before the user
   // has ever touched Sound in the menu) - see sound_enabled, Utilities.h.
   #ifndef SOUND_ENABLED_DEFAULT
-    #define SOUND_ENABLED_DEFAULT true
+    #define SOUND_ENABLED_DEFAULT false
   #endif
 
   // Whether the GNSS receiver defaults to enabled at first boot (before the
   // user has ever touched Enabled on the Settings menu's GNSS page) - see
   // gnss_enabled, GNSS.h.
   #ifndef GNSS_ENABLED_DEFAULT
-    #define GNSS_ENABLED_DEFAULT true
+    #define GNSS_ENABLED_DEFAULT false
   #endif
 
   #ifndef VSENSE_DIVIDER_RATIO_DEFAULT

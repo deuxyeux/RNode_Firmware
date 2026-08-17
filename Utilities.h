@@ -1387,6 +1387,36 @@ int8_t  led_standby_direction = 0;
 	#endif
 #endif
 
+// Non-blocking host write to the native USB-CDC KISS port. Root cause of the
+// MeshPoE-S3 global tick-death (2026-08-17): the native USB-CDC Serial.write()
+// blocks indefinitely when its TX FIFO is full and no host is draining the
+// port. Since kiss_tx now runs on loopTask (RNode_Firmware.ino, folded off its
+// old dedicated task), that hang stops loopTask feeding the FreeRTOS tick,
+// killing scheduling device-wide (INT_WDT/TASK_WDT reset at a random
+// checkpoint). Worst on ARDUINO_USB_MODE=1 (hardware USB-Serial/JTAG CDC)
+// boards like MeshPoE-S3 - which is exactly why it crashes there but not on
+// MeshAdventurer-S3 (TinyUSB CDC, times out instead of blocking) despite
+// identical code. Guard: write only when the FIFO has room; if it stays full
+// past a short bound, latch "host gone" and drop bytes instantly until it
+// drains again. A standalone node with nothing reading its KISS port thus
+// never hangs, while an actively-reading host still gets whole frames.
+#if MCU_VARIANT == MCU_ESP32
+static bool kiss_host_tx_stalled = false;
+#endif
+static inline void kiss_serial_put(uint8_t byte) {
+	#if MCU_VARIANT == MCU_ESP32
+		if (Serial.availableForWrite() < 1) {
+			if (kiss_host_tx_stalled) { return; }
+			uint32_t start = millis();
+			while (Serial.availableForWrite() < 1) {
+				if ((millis() - start) >= 5) { kiss_host_tx_stalled = true; return; }
+			}
+		}
+		kiss_host_tx_stalled = false;
+	#endif
+	Serial.write(byte);
+}
+
 void serial_write(uint8_t byte) {
 	#if HAS_BLUETOOTH || HAS_BLE == true
 		if (bt_state != BT_STATE_CONNECTED) {
@@ -1396,13 +1426,13 @@ void serial_write(uint8_t byte) {
 				else if (wifi_host_is_connected()) { wifi_remote_write(byte); }
 				else if (ws_host_is_connected())   { ws_remote_write(byte); }
 				#endif
-				else                               { Serial.write(byte); }
+				else                               { kiss_serial_put(byte); }
 			#elif HAS_WIFI
 				if (wifi_host_is_connected())      { wifi_remote_write(byte); }
 				else if (ws_host_is_connected())   { ws_remote_write(byte); }
-				else                               { Serial.write(byte); }
+				else                               { kiss_serial_put(byte); }
 			#else
-				Serial.write(byte);
+				kiss_serial_put(byte);
 			#endif
 		} else {
 			SerialBT.write(byte);
@@ -1414,7 +1444,7 @@ void serial_write(uint8_t byte) {
       #endif
 		}
 	#else
-		Serial.write(byte);
+		kiss_serial_put(byte);
 	#endif
 }
 

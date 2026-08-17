@@ -101,15 +101,15 @@ public:
 
   bool isKCT8103L() { return _kct8103l; }
 
-  // See sx126x.cpp's own comment (near beginPacket()) for the full story -
-  // any task-context SPI access to the radio needs these bracketing it,
-  // not just the TX path. Public so update_modem_status() (RNode_Firmware.
-  // ino)'s dcd()/currentRssi() calls can use them too. Now largely
-  // belt-and-suspenders since onDio0Rise() (see handleDio0IfPending()'s
-  // own comment) no longer does any SPI work from interrupt context at
-  // all - kept rather than pulled out in the same change that added the
-  // real fix, since they're harmless and this masking effort was already
-  // applied comprehensively across every task-context SPI call site.
+  // Kept as available, callable methods (used by update_modem_status(),
+  // RNode_Firmware.ino, around its own dcd()/currentRssi() calls) even
+  // though - as of this migration to match microReticulum_Firmware
+  // upstream's driver structure (2026-08-15) - beginPacket()/endPacket()
+  // no longer call these themselves. onDio0Rise() (see handleDio0IfPending()'s
+  // own comment) never does SPI work from true interrupt context on
+  // ESP32/nRF52, so there is nothing left for a task-context SPI call to
+  // race - masking around the TX path specifically was this session's own
+  // now-abandoned experiment, not upstream's design.
   void maskDio0();
   void unmaskDio0();
 
