@@ -13,11 +13,13 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-// Network OTA firmware updates - MeshPoE-S3 only (HAS_OTA, Boards.h). This
-// is a test-board feature: MeshPoE-S3 is PoE/Ethernet-deployed and likely to
-// end up mounted somewhere without easy physical access, so the trigger
-// surface is a browser-reachable page (http://<device-ip>:OTA_WEB_PORT/)
-// rather than the on-device button menu.
+// Network OTA firmware updates - HAS_OTA boards only (Boards.h; currently
+// just MeshAdventurer-S3 - MeshPoE-S3 originally had this too but it's
+// disabled there, see HAS_CONSOLE's own comment on that board's block).
+// Originally written for MeshPoE-S3 specifically (PoE/Ethernet-deployed,
+// likely to end up mounted somewhere without easy physical access, hence a
+// browser-reachable page rather than the on-device button menu) but the
+// same reasoning applies to any HAS_OTA board.
 //
 // Two ways to install a new image, both writing into the *inactive* OTA
 // partition (default_16MB.csv, app0/app1 - see Makefile) so a failed update
@@ -53,8 +55,17 @@
 #endif
 
 #define OTA_WEB_PORT 8080
-#define OTA_VERSION_URL "https://flasher.rns.moscow/firmware/classic/latest/rnode_firmware_meshpoe_s3.version"
-#define OTA_BIN_URL     "https://flasher.rns.moscow/firmware/classic/latest/rnode_firmware_meshpoe_s3.bin"
+// Board-specific (OTA_BOARD_NAME, Boards.h - every HAS_OTA board defines
+// its own) - these used to be a single hardcoded "meshpoe_s3" name shared
+// by every HAS_OTA board regardless of which one was actually compiling,
+// so any other HAS_OTA board's update check/pull silently used MeshPoE-S3's
+// version number and binary instead of its own. Points through latest/ (a
+// stable alias re-pointed at whichever release is current, not a specific
+// version), so a compiled-in URL keeps working across future releases
+// without needing a reflash just to update the URL itself - see the OTA/
+// subdirectory under each classic/<version>/ release directory.
+#define OTA_VERSION_URL "https://flasher.rns.moscow/firmware/classic/latest/OTA/rnode_firmware_" OTA_BOARD_NAME ".version"
+#define OTA_BIN_URL     "https://flasher.rns.moscow/firmware/classic/latest/OTA/rnode_firmware_" OTA_BOARD_NAME ".bin"
 #define OTA_HTTP_TIMEOUT_MS 15000
 
 // Build identity used for update comparisons - deliberately separate from
@@ -205,7 +216,13 @@ void ota_handle_root() {
   String page = "<!doctype html><html><head><title>RNode Firmware Update</title>";
   page += "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"></head><body>";
   page += "<h1>RNode Firmware Update</h1>";
-  page += "<p>RNode Firmware version: " + ota_current_version() + "<br>Build: " + String(BUILD_NUMBER) + "</p>";
+  // BUILD_NUMBER==0 means this build didn't come through the Makefile/
+  // platformio.ini's git-commit-count injection at all (see BUILD_NUMBER's
+  // own fallback, Boards.h) - unknown, not a real build 0, so the line is
+  // omitted rather than showing a misleading "Build: 0".
+  page += "<p>RNode Firmware version: " + ota_current_version();
+  if (BUILD_NUMBER != 0) page += "<br>Build: " + String(BUILD_NUMBER);
+  page += "</p>";
   page += "<h2>Check server for an update</h2>";
   page += "<button onclick=\"check()\">Check for Update</button> ";
   page += "<button onclick=\"install()\">Install Latest</button>";

@@ -291,18 +291,26 @@
       // handling (lib/microLXMF/src/LXMF/LXMessage.cpp) - fixed there, not
       // something to work around by leaving this feature off.
       #define HAS_LXMF true
+      #undef HAS_DISPLAY
       #define HAS_DISPLAY true
+      #undef HAS_NP
       #define HAS_NP true
       #define HAS_BLUETOOTH false
+      #undef HAS_BLE
       #define HAS_BLE true
+      #undef HAS_WIFI
       #define HAS_WIFI true
+      #undef HAS_ESPNOW
       #define HAS_ESPNOW true
-      // TEMPORARY DIAGNOSTIC (2026-08-17): forced false to rule Ethernet out
-      // as a contributor to the endPacket() TX-poll Interrupt-WDT/stack-canary
-      // crash (checkpoint sx126x::endPacket()->poll, ~every few min on an
-      // announce). The W5500 runs on its own SPI bus + IRQ (pin_eth_int) next
-      // to the radio's SPI/DIO0 ISR - disabling it isolates whether that
-      // interaction is involved. Restore to true once ruled in/out.
+      // Was forced false 2026-08-17 to rule Ethernet out as a contributor to
+      // the endPacket() TX-poll Interrupt-WDT/stack-canary crash (checkpoint
+      // sx126x::endPacket()->poll, ~every few min on an announce) - the W5500
+      // runs on its own SPI bus + IRQ (pin_eth_int) next to the radio's SPI/
+      // DIO0 ISR. Ruled out (feedback_meshpoe_s3_ethernet_not_the_crash
+      // memory: "HAS_ETHERNET off still crashes") - the actual cause was
+      // fixed separately (b39cb958, deferred DIO0 RX handling out of the TX
+      // call stack), so this is back to true.
+      #undef HAS_ETHERNET
       #define HAS_ETHERNET true
       // Disabled on this branch (meshpoe-s3-urns) - same reasoning as
       // MeshAdventurer-S3's own HAS_CONSOLE false above: the button-hold
@@ -317,11 +325,24 @@
       #define HAS_CONSOLE false
       // Network OTA firmware updates (OTA.h) - see BUILD_NUMBER's own
       // comment above for why that fallback lives outside this board block.
-      #define HAS_OTA false
+      // Was forced false alongside HAS_ETHERNET above in the same 2026-08-18
+      // TX-crash isolation sweep (b39cb958), but never had its own "restore
+      // me" marker - that crash is fixed now (same commit), so re-enabled.
+      // This was the original MeshPoE-S3-only OTA implementation before
+      // MeshAdventurer-S3 got its own; needs its own OTA_BOARD_NAME now that
+      // OTA_VERSION_URL/OTA_BIN_URL (OTA.h) are built per board instead of a
+      // single hardcoded name.
+      #undef HAS_OTA
+      #define HAS_OTA true
+      #define OTA_BOARD_NAME "meshpoe_s3"
+      #undef HAS_EEPROM
       #define HAS_EEPROM true
       #define HAS_BUSY true
+      #undef HAS_INPUT
       #define HAS_INPUT true
+      #undef HAS_TCXO
       #define HAS_TCXO true
+      #undef MODEM
       #define MODEM SX1262
       // FEM: EBYTE E22P-868M30S. RFEN (pin_rxen, GPIO39) is held HIGH
       // continuously (merged LNA+PA enable - see beginPacket()'s MeshPoE
@@ -332,6 +353,7 @@
       // the direct-drive topology per the module's actual TXEN/RFEN wiring.)
       #define DIO2_AS_RF_SWITCH false
       #define HAS_RF_SWITCH_RX_TX true
+      #undef HAS_LORA_LNA
       #define HAS_LORA_LNA true
       #define LORA_LNA_GAIN  17
       #define LORA_LNA_GVT   12
@@ -401,11 +423,16 @@
       // explicitly rather than silently losing it now that the default
       // flipped.
       #define HAS_LXMF true
+      #undef HAS_DISPLAY
       #define HAS_DISPLAY true
+      #undef HAS_NP
       #define HAS_NP true
       #define HAS_BLUETOOTH false
+      #undef HAS_BLE
       #define HAS_BLE true
+      #undef HAS_WIFI
       #define HAS_WIFI true
+      #undef HAS_ESPNOW
       #define HAS_ESPNOW true
       // Disabled - the button-hold-triggered web console (Console.h) calls
       // bt_stop() before starting on HAS_BLUETOOTH||HAS_BLE boards, and on
@@ -419,14 +446,25 @@
       // comment (Boards.h global-defaults block) for why that fallback
       // isn't duplicated per board. WiFi-only here (no HAS_ETHERNET on this
       // board) - OTA.h's network-up check already covers WiFi-only boards.
+      #undef HAS_OTA
       #define HAS_OTA true
+      // Board-specific identity for OTA_VERSION_URL/OTA_BIN_URL (OTA.h) -
+      // every HAS_OTA board defines its own, so those URLs are built per
+      // board instead of a single hardcoded name shared (and silently
+      // wrong) across all of them.
+      #define OTA_BOARD_NAME "meshadventurer_s3"
+      #undef HAS_EEPROM
       #define HAS_EEPROM true
       #define HAS_BUSY true
+      #undef HAS_INPUT
       #define HAS_INPUT true
+      #undef HAS_TCXO
       #define HAS_TCXO true
+      #undef MODEM
       #define MODEM SX1262
       #define DIO2_AS_RF_SWITCH true
       #define HAS_RF_SWITCH_RX_TX false
+      #undef HAS_LORA_LNA
       #define HAS_LORA_LNA true
       #define LORA_LNA_GAIN  17
       #define LORA_LNA_GVT   12
@@ -2016,6 +2054,24 @@
 
   #ifndef NP_M
     #define NP_M 0.15
+  #endif
+
+  // OTA firmware updates (OTA.h) fundamentally depend on a real, comparable
+  // BUILD_NUMBER - ota_get_target_build_info()'s update check is
+  // *newer_out = remote_build > BUILD_NUMBER, and with BUILD_NUMBER stuck
+  // at its unset fallback (0, see BUILD_NUMBER's own comment above) there's
+  // no way to tell a genuine build 0 from "the git-commit-count injection
+  // never ran" - every remote build would look newer, and downgrade
+  // protection would be meaningless. Rather than ship that, OTA is
+  // disabled outright and compiled out entirely. This has to run down
+  // here, after every #elif BOARD_MODEL branch above, not next to
+  // BUILD_NUMBER's own fallback near the top of this file - that runs
+  // before BOARD_MESHADVENTURER_S3's own "#undef HAS_OTA / #define
+  // HAS_OTA true", which would just re-override an early false right back
+  // to true.
+  #if BUILD_NUMBER == 0
+    #undef HAS_OTA
+    #define HAS_OTA false
   #endif
 
 #endif
