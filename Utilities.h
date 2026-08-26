@@ -200,6 +200,8 @@ bool sound_enabled = SOUND_ENABLED_DEFAULT;
 #endif
 void db_conf_save(uint8_t val);
 void di_conf_save(uint8_t dint);
+int lora_txp_max();
+void eeprom_conf_save();
 void snd_conf_save(bool is_enabled);
 void wr_conf_save(uint8_t mode);
 void drot_conf_save(uint8_t val);
@@ -455,7 +457,7 @@ uint8_t boot_vector = 0x00;
   	uint8_t rs[] = { 0x00, 0x00, 0x00 };
   	uint8_t gs[] = { 0x10, 0x08, 0x00 };
   	uint8_t bs[] = { 0x00, 0x08, 0x10 };
-  	for (int i = 0; i < 1*sizeof(rs); i++) {
+  	for (size_t i = 0; i < sizeof(rs); i++) {
 	  	npset(rs[i%sizeof(rs)], gs[i%sizeof(gs)], bs[i%sizeof(bs)]);
 	  	delay(33);
 	  	npset(0x00, 0x00, 0x00);
@@ -2176,6 +2178,28 @@ int map_modem_output_to_target_power(int modem_output_dbm) {
 	return target_tx_power;
 }
 
+// Board/modem TX power ceiling - same bounds CMD_TXPOWER's own KISS handler
+// (RNode_Firmware.ino) clamps against, extracted here so the URNS Radio
+// settings menu (Menu.h) can't drift from what a connected host is allowed
+// to set.
+int lora_txp_max() {
+	#if MODEM == SX1262
+		#if HAS_LORA_PA
+			return PA_MAX_OUTPUT;
+		#else
+			return 22;
+		#endif
+	#elif MODEM == SX1280
+		#if HAS_PA
+			return 20;
+		#else
+			return 13;
+		#endif
+	#else
+		return 20;
+	#endif
+}
+
 void setTXPower() {
 	if (radio_online) {
 		int mapped_lora_txp = map_target_power_to_modem_output(lora_txp);
@@ -2981,7 +3005,7 @@ inline void fifo_push(FIFOBuffer *f, unsigned char c) {
   if (f->tail == f->end) {
     f->tail = f->begin;
   } else {
-    f->tail++;
+    f->tail = f->tail + 1;
   }
 }
 
@@ -2990,7 +3014,9 @@ inline unsigned char fifo_pop(FIFOBuffer *f) {
     f->head = f->begin;
     return *(f->end);
   } else {
-    return *(f->head++);
+    unsigned char *p = f->head;
+    f->head = f->head + 1;
+    return *p;
   }
 }
 
@@ -3033,7 +3059,9 @@ static inline unsigned char fifo_pop_locked(FIFOBuffer *f) {
 */
 
 inline void fifo_init(FIFOBuffer *f, unsigned char *buffer, size_t size) {
-  f->head = f->tail = f->begin = buffer;
+  f->begin = buffer;
+  f->tail = buffer;
+  f->head = buffer;
   f->end = buffer + size;
 }
 
@@ -3063,7 +3091,7 @@ inline void fifo16_push(FIFOBuffer16 *f, uint16_t c) {
   if (f->tail == f->end) {
     f->tail = f->begin;
   } else {
-    f->tail++;
+    f->tail = f->tail + 1;
   }
 }
 
@@ -3072,7 +3100,9 @@ inline uint16_t fifo16_pop(FIFOBuffer16 *f) {
     f->head = f->begin;
     return *(f->end);
   } else {
-    return *(f->head++);
+    uint16_t *p = f->head;
+    f->head = f->head + 1;
+    return *p;
   }
 }
 
@@ -3117,7 +3147,9 @@ static inline size_t fifo16_pop_locked(FIFOBuffer16 *f) {
 */
 
 inline void fifo16_init(FIFOBuffer16 *f, uint16_t *buffer, uint16_t size) {
-  f->head = f->tail = f->begin = buffer;
+  f->begin = buffer;
+  f->tail = buffer;
+  f->head = buffer;
   f->end = buffer + size;
 }
 

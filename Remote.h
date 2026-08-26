@@ -186,8 +186,8 @@ void wifi_remote_reconnect() {
 void wifi_remote_close_all() {
   // wifi_dbg("Close all"); // TODO: Remove debug
   if (connection) { connection.stop(); }
-  WiFiClient client = remote_listener.available();
-  while (client) { client.stop(); client = remote_listener.available(); }
+  WiFiClient client = remote_listener.accept();
+  while (client) { client.stop(); client = remote_listener.accept(); }
   wr_state = WR_STATE_ON;
 }
 
@@ -214,7 +214,7 @@ bool wifi_remote_available() {
       return false;
     }
   } else {
-    WiFiClient client = remote_listener.available();
+    WiFiClient client = remote_listener.accept();
     if (!client) { return false; }
     else {
       #if HAS_WIFI

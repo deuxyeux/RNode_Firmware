@@ -154,9 +154,6 @@ void calculate_region_hash(unsigned long long start, unsigned long long end, uin
     // this function calculates the hash digest of a region of memory,
     // currently it is only designed to work for the application region
     uint8_t chunk[CHUNK_SIZE] = {0};
-
-    // to store potential last chunk of program
-    uint8_t chunk_next[CHUNK_SIZE] = {0};
     nRFCrypto_Hash hash;
 
     hash.begin(CRYS_HASH_SHA256_mode);

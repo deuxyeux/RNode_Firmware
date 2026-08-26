@@ -217,7 +217,7 @@ float pmu_temperature = PMU_TEMP_MIN-1;
 
 uint32_t last_pmu_update = 0;
 uint8_t pmu_target_pps = 1;
-int pmu_update_interval = 1000/pmu_target_pps;
+uint32_t pmu_update_interval = 1000/pmu_target_pps;
 uint8_t pmu_charged_ascertain = 0;
 uint8_t pmu_rc = 0;
 uint8_t pmu_sc = 0;

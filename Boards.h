@@ -860,16 +860,25 @@
 
     #elif BOARD_MODEL == BOARD_HELTEC32_V4
       #define IS_ESP32S3 true
+      #undef HAS_DISPLAY
       #define HAS_DISPLAY true
       #define HAS_BLUETOOTH false
+      #undef HAS_BLE
       #define HAS_BLE true
+      #undef HAS_WIFI
       #define HAS_WIFI true
+      #undef HAS_PMU
       #define HAS_PMU true
       #define HAS_CONSOLE true
+      #undef HAS_EEPROM
       #define HAS_EEPROM true
+      #undef HAS_INPUT
       #define HAS_INPUT true
+      #undef HAS_SLEEP
       #define HAS_SLEEP true
+      #undef HAS_LORA_PA
       #define HAS_LORA_PA true
+      #undef HAS_LORA_LNA
       #define HAS_LORA_LNA true
       #define PIN_WAKEUP GPIO_NUM_0
       #define WAKEUP_LEVEL 0
@@ -923,7 +932,9 @@
         const int pin_led_tx = 35;
       #endif
 
+      #undef MODEM
       #define MODEM SX1262
+      #undef HAS_TCXO
       #define HAS_TCXO true
       const int pin_tcxo_enable = -1;
       #define HAS_BUSY true
@@ -1374,18 +1385,26 @@
       const int pin_led_tx = PIN_LED_RED;
 
     #elif BOARD_MODEL == BOARD_HELTEC_T114
+      #undef MODEM
       #define MODEM SX1262
       #define HAS_EEPROM false
+      #undef HAS_DISPLAY
       #define HAS_DISPLAY true
       #define HAS_BLUETOOTH false
+      #undef HAS_BLE
       #define HAS_BLE true
       #define HAS_CONSOLE false
+      #undef HAS_PMU
       #define HAS_PMU true
+      #undef HAS_NP
       #define HAS_NP true
       #define HAS_SD false
+      #undef HAS_TCXO
       #define HAS_TCXO true
       #define HAS_BUSY true
+      #undef HAS_INPUT
       #define HAS_INPUT true
+      #undef HAS_SLEEP
       #define HAS_SLEEP true
 
       // RNode Settings menu (Menu.h), button-only navigation (tap = next,
@@ -1508,18 +1527,25 @@
       const int DISPLAY_RST = PIN_T114_TFT_RST;
 
     #elif BOARD_MODEL == BOARD_HELTEC_T096
+      #undef MODEM
       #define MODEM SX1262
       #define HAS_EEPROM false
+      #undef HAS_DISPLAY
       #define HAS_DISPLAY true
       #define HAS_BLUETOOTH false
+      #undef HAS_BLE
       #define HAS_BLE true
       #define HAS_CONSOLE false
+      #undef HAS_PMU
       #define HAS_PMU true
       #define HAS_NP false
       #define HAS_SD false
+      #undef HAS_TCXO
       #define HAS_TCXO true
       #define HAS_BUSY true
+      #undef HAS_INPUT
       #define HAS_INPUT true
+      #undef HAS_SLEEP
       #define HAS_SLEEP true
 
       // RNode Settings menu (Menu.h), button-only navigation (tap = next,
@@ -1540,7 +1566,9 @@
       #define BLE_MANUFACTURER "Heltec"
       #define BLE_MODEL "T096"
 
+      #undef HAS_LORA_PA
       #define HAS_LORA_PA true
+      #undef HAS_LORA_LNA
       #define HAS_LORA_LNA true
       #define OCP_TUNED 0x38
       #define LORA_PA_MODEL LORA_PA_KCT8103L
@@ -1775,6 +1803,7 @@
       //Confused with the pin numbers??
       //https://github.com/pdcook/nRFMicro-Arduino-Core/blob/a83161e619da8668f726b52578a3dd89c1ef5956/variants/nice_nano/variant.h#L59
 
+      #undef HAS_DISPLAY
       #define HAS_DISPLAY true
       #define I2C_SDA 8 //P1.04
       #define I2C_SCL 7 //P0.11

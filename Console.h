@@ -18,9 +18,25 @@
 #include <WiFi.h>
 #include <WebServer.h>
 
-#include "SD.h"
+// Was unconditional - HAS_SD is false on every board (no board currently
+// wires up an SD card slot at all, WTracker V2 included), so this #include
+// was always dead weight. Genuinely broke a real build though: PlatformIO's
+// LDF text-scans #include lines rather than evaluating the preprocessor, so
+// it still resolved this against a registry - once a board's other deps
+// (e.g. Adafruit ST7735/ST7789, Adafruit SSD1306) are in the mix, it can
+// resolve to an AVR-oriented "SD" package whose own Sd2PinMap.h hard-errors
+// with "Architecture or board not supported" on ESP32-S3 (confirmed on
+// [env:heltec_wtracker_v2], platformio.ini) - excluding it via lib_ignore
+// instead (as done for [env:tdeck]) turned out to be board-fragile in the
+// same way (worked there, broke differently on heltec_wtracker_v2's
+// slightly different dependency set). Gating the #include itself removes
+// the ambiguity for every board at once, present and future, rather than
+// re-fighting LDF's resolution per board.
+#if HAS_SD
+  #include "SD.h"
+#endif
 #include "SPI.h"
-  
+
 #if HAS_SD
   SPIClass *spi = NULL;
 #endif

@@ -13,18 +13,18 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-// Boards.h must come first: ROM.h's ADDR_CONF_GNSS branches on MCU_VARIANT
-// (#if MCU_VARIANT == MCU_NRF52 ... #elif MCU_VARIANT == MCU_ESP32), which
-// Boards.h defines. Both MCU_VARIANT and MCU_NRF52/MCU_ESP32 are undefined
-// in a #if before Boards.h has run, and undefined identifiers become 0 in
-// #if expressions - so with ROM.h included first (the previous order
-// here), that comparison was always "0 == 0", always true, and
-// ADDR_CONF_GNSS silently always resolved to the nRF52 branch's value
-// (0x00) even on ESP32, where it's meant to be 256. Confirmed empirically
-// with cpp -P against the real files. Boards.h itself has no #if depending
-// on any ROM.h macro (its one reference, EEPROM_OFFSET's
-// EEPROM_SIZE-EEPROM_RESERVED, is a deferred token substitution that
-// resolves fine regardless of order), so this swap is safe.
+// Boards.h must come first, historically because ROM.h's ADDR_CONF_GNSS
+// used to branch on MCU_VARIANT (#if MCU_VARIANT == MCU_NRF52 ... #elif
+// MCU_VARIANT == MCU_ESP32), which Boards.h defines - getting the order
+// backwards left MCU_VARIANT/MCU_NRF52/MCU_ESP32 undefined (0 in a #if
+// expression) and silently always resolved to the nRF52 branch. That
+// branch is gone now (ADDR_CONF_GNSS/ADDR_CONF_GNSS_INTERVAL are plain
+// eeprom_addr()-offset bytes, same as every other ADDR_CONF_* setting -
+// see ROM.h's own comment for why the raw-byte scheme this replaced was
+// unsafe on nRF52 regardless of include order), but Boards.h before ROM.h
+// is kept anyway since nothing requires reordering it back and
+// EEPROM_OFFSET's EEPROM_SIZE-EEPROM_RESERVED (Boards.h/ROM.h) resolves
+// fine either way as a deferred token substitution.
 #include "Boards.h"
 #include "ROM.h"
 
@@ -186,8 +186,8 @@
 	#define LORA_GUARD_THRESHOLD_BPS   14E3
 	#define LORA_FAST_GUARD_MS         48
 	long lora_preamble_symbols      =  LORA_PREAMBLE_SYMBOLS_MIN;
-	long lora_preamble_time_ms      =  0;
-	long lora_header_time_ms        =  0;
+	unsigned long lora_preamble_time_ms =  0;
+	unsigned long lora_header_time_ms   =  0;
 	float lora_symbol_time_ms       =  0.0;
 	float lora_symbol_rate          =  0.0;
 	float lora_us_per_byte          =  0.0;

@@ -158,7 +158,11 @@ void init_ethernet() {
         pin_eth_int,
         pin_eth_rst,
         eth_spi,
-        20000000
+        // ETH::begin()'s last param is spi_freq_mhz (uint8_t, MHz - not Hz).
+        // 20000000 silently truncated to 0 here (20000000 % 256 == 0),
+        // effectively passing an unset/zero SPI clock instead of the
+        // intended 20MHz.
+        20
     );
     // Must come after ETH.begin(), the opposite ordering from the speed/
     // duplex setters above - see eth_apply_addr_config() above.

@@ -406,8 +406,8 @@ int sx128x::endPacket() {
 }
 
 unsigned long preamble_detected_at = 0;
-extern long lora_preamble_time_ms;
-extern long lora_header_time_ms;
+extern unsigned long lora_preamble_time_ms;
+extern unsigned long lora_header_time_ms;
 bool false_preamble_detected = false;
 bool sx128x::dcd() {
   uint8_t buf[2] = {0}; executeOpcodeRead(OP_GET_IRQ_STATUS_8X, buf, 2);
