@@ -3298,7 +3298,7 @@ void draw_disp_area() {
             disp_area.drawLine(vbase+7, 37+19, vbase+8, 37+19, SSD1306_BLACK);
             disp_area.drawLine(vbase+7, 37+20, vbase+8, 37+20, SSD1306_BLACK);
 
-            // "-BBB" suffix: last 3 digits of BUILD_NUMBER, same bm_n_uh
+            // "-BBBB" suffix: last 4 digits of BUILD_NUMBER, same bm_n_uh
             // digit font as MAJ.MIN above, right after MIN_VERS. Separator
             // mark uses the same 2x2 dot technique as the MAJ/MIN decimal
             // point above (a plain drawFastHLine wasn't visible here)
@@ -3307,7 +3307,10 @@ void draw_disp_area() {
             // git-commit-count injection at all (see BUILD_NUMBER's own
             // fallback, Boards.h) - unknown, not a real build 0, so the
             // suffix is skipped entirely rather than showing a misleading
-            // "-000".
+            // "-0000". Widened from 3 to 4 digits now that the git-commit-
+            // count build number has crossed 999 - the vbase/vpitch shift
+            // above already left room for this on OLEDs, and color LCDs have
+            // plenty of spare canvas width either way.
             if (BUILD_NUMBER != 0) {
               int16_t min_end = vbase + vpitch*2+vgap + 8;
               disp_area.drawLine(min_end-1, 37+19, min_end+0, 37+19, SSD1306_BLACK);
@@ -3317,10 +3320,10 @@ void draw_disp_area() {
               // bitmap overwriting the dot's right pixel (see prior note -
               // that's what shaved it to 1px wide before a gap existed).
               int16_t bbase = min_end+3;
-              long build_num = ((long)BUILD_NUMBER) % 1000;
-              char *b_str = (char*)malloc(3+1);
-              sprintf(b_str, "%03ld", build_num);
-              for (int i = 0; i < 3; i++) {
+              long build_num = ((long)BUILD_NUMBER) % 10000;
+              char *b_str = (char*)malloc(4+1);
+              sprintf(b_str, "%04ld", build_num);
+              for (int i = 0; i < 4; i++) {
                 uint8_t numeric = b_str[i]-48; uint8_t bm_offset = numeric*5;
                 int16_t dxp = bbase+i*8;
                 disp_area.drawBitmap(dxp, 37+16, bm_n_uh+bm_offset, 8, 5, SSD1306_WHITE, SSD1306_BLACK);

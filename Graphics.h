@@ -720,6 +720,20 @@ const unsigned char bm_hg_high [] PROGMEM = {
 #define MENU_ICON_W_BACK       9
 #define MENU_ICON_W_INBOX      19
 #define MENU_ICON_W_ETHERNET   11
+#define MENU_ICON_W_LED_BRIGHTNESS 9
+
+const unsigned char bm_menu_icon_led_brightness [] PROGMEM = {
+  0x00, 0x00,
+  0x49, 0x00,
+  0x2a, 0x00,
+  0x00, 0x00,
+  0x1c, 0x00,
+  0x22, 0x00,
+  0x41, 0x00,
+  0x41, 0x00,
+  0x7f, 0x00,
+  0x00, 0x00,
+};
 
 const unsigned char bm_menu_icon_brightness [] PROGMEM = {
   0x00, 0x00,

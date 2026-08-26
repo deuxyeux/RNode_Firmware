@@ -198,6 +198,14 @@ bool sound_enabled = SOUND_ENABLED_DEFAULT;
   // regardless of this setting.
   bool encoder_enabled = false;
 #endif
+#if HAS_NP == true
+  // Same reasoning as buzzer_pin/pin_encoder_up above - declared here (not
+  // down with the rest of the NeoPixel code) so Menu.h, #include'd further
+  // down in this same file, can already see it.
+  uint8_t np_intensity = (uint8_t)(NP_M * 255.0f);
+  void led_set_intensity(uint8_t intensity);
+  void np_int_conf_save(uint8_t p_int);
+#endif
 void db_conf_save(uint8_t val);
 void di_conf_save(uint8_t dint);
 int lora_txp_max();
@@ -415,10 +423,13 @@ uint8_t boot_vector = 0x00;
   uint8_t npg = 0;
   uint8_t npb = 0;
   float npi = NP_M;
+  // np_intensity (raw 0-255 form of npi) is declared further up in this
+  // file, before Menu.h's #include - see that declaration's comment.
   bool pixels_started = false;
 
   void led_set_intensity(uint8_t intensity) {
   	npi = (float)intensity/255.0;
+  	np_intensity = intensity;
   }
 
   void led_init() {

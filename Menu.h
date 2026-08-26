@@ -251,6 +251,17 @@
     #define MENU_NEXT_IDX_S 3
   #endif
 
+  #if HAS_NP == true
+    // NeoPixel intensity scalar (led_set_intensity()/np_intensity,
+    // Utilities.h) - scales the existing RX/TX colors down, doesn't change
+    // them. Grouped with the other optional-hardware rows (Sound, Encoder)
+    // right after Sound.
+    #define MENU_ITEM_NEOPIXEL_BRIGHTNESS MENU_NEXT_IDX_S
+    #define MENU_NEXT_IDX_SN (MENU_NEXT_IDX_S + 1)
+  #else
+    #define MENU_NEXT_IDX_SN MENU_NEXT_IDX_S
+  #endif
+
   #if HAS_ENCODER == true
     // Whether a physical encoder is actually populated - some boards have
     // it PCB-provisioned but optionally installed (MeshAdventurer-S3), or
@@ -259,10 +270,10 @@
     // HAS_ENCODER capability flag. Only changes the on-screen footer hint
     // (turn/press vs tap/hold) - the encoder itself is always serviced
     // regardless, same as before this existed.
-    #define MENU_ITEM_ENCODER MENU_NEXT_IDX_S
-    #define MENU_NEXT_IDX_SE  (MENU_NEXT_IDX_S + 1)
+    #define MENU_ITEM_ENCODER MENU_NEXT_IDX_SN
+    #define MENU_NEXT_IDX_SE  (MENU_NEXT_IDX_SN + 1)
   #else
-    #define MENU_NEXT_IDX_SE MENU_NEXT_IDX_S
+    #define MENU_NEXT_IDX_SE MENU_NEXT_IDX_SN
   #endif
 
   #if HAS_LXMF == true
@@ -1319,6 +1330,11 @@
     }
   #endif
 
+  #if HAS_NP == true
+    uint8_t staged_np_brightness = 0;   // 0-255, scales existing NeoPixel colors
+    uint8_t live_np_brightness   = 0;   // same live-preview-baseline role as live_display_brightness
+  #endif
+
   uint8_t staged_display_timeout    = 0;   // seconds, 0-255, 0 = OFF
   uint8_t staged_display_brightness = 0;   // 0-255, raw SSD1306 contrast
   uint8_t staged_display_rotation   = 0;   // 0-3 = 0/90/180/270 degrees
@@ -2290,6 +2306,10 @@
     staged_display_timeout    = display_blanking_enabled ? (uint8_t)(display_blanking_timeout / 1000) : 0;
     staged_display_brightness = display_intensity;
     live_display_brightness   = display_intensity;
+    #if HAS_NP == true
+      staged_np_brightness = np_intensity;
+      live_np_brightness   = np_intensity;
+    #endif
     #if HAS_BUZZER == true
       staged_sound_enabled = sound_enabled;
     #endif
@@ -2401,6 +2421,15 @@
       display_intensity = staged_display_brightness;
       di_conf_save(staged_display_brightness);
     }
+    #if HAS_NP == true
+      if (staged_np_brightness != live_np_brightness) {
+        // Same "compare against the live-preview baseline, not the current
+        // value" reasoning as Brightness above - led_set_intensity() may
+        // already have applied staged_np_brightness live on confirm.
+        led_set_intensity(staged_np_brightness);
+        np_int_conf_save(staged_np_brightness);
+      }
+    #endif
     #if HAS_BUZZER == true
       if (staged_sound_enabled != sound_enabled) {
         snd_conf_save(staged_sound_enabled);
@@ -2698,6 +2727,9 @@
     // menu_confirm_select()), unlike every other field - undo that here so
     // an unsaved preview doesn't linger after the menu gives up on it.
     display_intensity = live_display_brightness;
+    #if HAS_NP == true
+      led_set_intensity(live_np_brightness);
+    #endif
     menu_state  = MENU_STATE_CLOSED;
     menu_cursor = 0;
     display_unblank();
@@ -2761,6 +2793,11 @@
       #if HAS_BUZZER == true
         else if (menu_edit_field == MENU_ITEM_SOUND) {
           staged_sound_enabled = !staged_sound_enabled;
+        }
+      #endif
+      #if HAS_NP == true
+        else if (menu_edit_field == MENU_ITEM_NEOPIXEL_BRIGHTNESS) {
+          menu_step_numeric(&staged_np_brightness, dir, wrap);
         }
       #endif
       #if HAS_ENCODER == true
@@ -3241,6 +3278,14 @@
         // live_display_brightness).
         display_intensity = staged_display_brightness;
       }
+      #if HAS_NP == true
+        else if (menu_edit_field == MENU_ITEM_NEOPIXEL_BRIGHTNESS) {
+          // Same live-preview-on-confirm treatment as Brightness above -
+          // EEPROM write stays deferred to menu_commit_and_exit() (see
+          // live_np_brightness).
+          led_set_intensity(staged_np_brightness);
+        }
+      #endif
       menu_state = MENU_STATE_LIST; // confirms staged value, no EEPROM write yet
     }
     #if HAS_WIFI == true
@@ -4910,6 +4955,14 @@
         icon_widths[MENU_ITEM_SOUND] = MENU_ICON_W_SOUND;
       #endif
 
+      #if HAS_NP == true
+        labels[MENU_ITEM_NEOPIXEL_BRIGHTNESS] = "LED Brightness";
+        sprintf(valbufs[MENU_ITEM_NEOPIXEL_BRIGHTNESS], "%u", staged_np_brightness);
+        icons[MENU_ITEM_NEOPIXEL_BRIGHTNESS] = bm_menu_icon_led_brightness;
+        icon_widths[MENU_ITEM_NEOPIXEL_BRIGHTNESS] = MENU_ICON_W_LED_BRIGHTNESS;
+        icon_dx[MENU_ITEM_NEOPIXEL_BRIGHTNESS] = 1;
+      #endif
+
       #if HAS_ENCODER == true
         labels[MENU_ITEM_ENCODER] = "Encoder";
         sprintf(valbufs[MENU_ITEM_ENCODER], staged_encoder_enabled ? "ON" : "OFF");
@@ -5018,6 +5071,12 @@
         else if (menu_edit_field == MENU_ITEM_SOUND) {
           title = "SOUND";
           sprintf(valbuf, staged_sound_enabled ? "ON" : "OFF");
+        }
+      #endif
+      #if HAS_NP == true
+        else if (menu_edit_field == MENU_ITEM_NEOPIXEL_BRIGHTNESS) {
+          title = "LED BRIGHTNESS";
+          sprintf(valbuf, "%u", staged_np_brightness);
         }
       #endif
       #if HAS_ENCODER == true
