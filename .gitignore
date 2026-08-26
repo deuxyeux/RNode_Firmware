@@ -7,9 +7,11 @@ Release/*.zip
 Release/*.json
 Release/*.uf2
 Release/*.bin
+Release/OTA/
 Console/build
 build/*
 .pio/
 .pio_build/
+.pio_vendor/
 compile_commands.json
 Release/*.version

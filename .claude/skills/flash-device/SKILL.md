@@ -1,47 +1,50 @@
 ---
 name: flash-device
-description: Use when building firmware for a specific RNode board and flashing it to a connected device via arduino-cli/Makefile, including the post-flash step that clears the "Firmware Corrupt" state. Triggers on "flash the device", "upload firmware", "build and flash", or when a board-specific firmware change needs to be tested on real hardware.
+description: Use when building firmware for a specific RNode board and flashing it to a connected device via PlatformIO, including the post-flash step that clears the "Firmware Corrupt" state. Triggers on "flash the device", "upload firmware", "build and flash", or when a board-specific firmware change needs to be tested on real hardware.
 ---
 
 # Flashing an RNode device
 
-Flashing is a destructive, hard-to-reverse action on real hardware — confirm the target board and port with the user before running `make upload-*` unless they've already asked for it explicitly in this turn.
+Flashing is a destructive, hard-to-reverse action on real hardware — confirm the target board and port with the user before running `pio run -t upload` unless they've already asked for it explicitly in this turn.
 
-## 1. Build the target board LAST
-
-`arduino-cli upload` (and the Makefile's `upload-*` targets) flash whatever was **most recently compiled** — they don't necessarily rebuild first. If you compiled a different board after the one you want to flash, `make upload-<board>` will silently flash the wrong firmware.
-
-- Either run `make firmware-<board>` immediately before `make upload-<board>`, with no other `firmware-*` build in between, or
-- Pass `--input-dir` pointing at the specific build output to `arduino-cli upload` directly.
-
-Board names come from the `firmware-*` / `upload-*` targets in `Makefile` (e.g. `heltec_t096`, `heltec_t114`, `tbeam`, `rak4631`, `t3s3`, `techo`, ...). Run `grep '^upload-' Makefile` to list them.
-
-## 2. Flash
+## 1. Build and flash with PlatformIO
 
 ```
-make upload-<board>
+pio run -e <env> -t upload
 ```
 
-This runs `arduino-cli upload -p /dev/ttyACM0 --fqbn <fqbn>`, then normally chains into `rnodeconf ... --firmware-hash $(./partition_hashes from_device ...)` to set the target firmware hash. That chained step requires the `RNS` Python module (`import RNS`) to be importable in the active shell — if it's not installed/activated, this step fails with `ModuleNotFoundError: No module named 'RNS'` even though the flash itself succeeded. Don't treat that failure as a flash failure; move to step 3.
+This builds and uploads in one step, to each environment's own isolated `.pio_build/<env>/` directory — unlike the old arduino-cli/Makefile flow, there's no stale-last-compiled-target footgun, so no need to build a throwaway target out of order first.
 
-`rnodeconf` also doesn't know every board (e.g. the Heltec T096) — for those the chained hash step fails or errors out on `-H/--firmware-hash` even with RNS available.
+Env names come from `platformio.ini` (e.g. `heltec_t096`, `heltec_t114`, `tbeam`, `rak4631`, `t3s3`, `techo`, ...). Run `grep '^\[env:' platformio.ini` to list them. Names mostly match the Makefile's `firmware-*`/`upload-*` board names, with a few exceptions (e.g. Makefile's `tbeam_sx126x` is `tbeam_sx1262` in platformio.ini) — check both if a name doesn't resolve.
 
-## 3. Clear "Firmware Corrupt" by setting the firmware hash
+Upload port defaults to auto-detect (confirmed working via `/dev/ttyACM0` on nRF52 boards); pass `--upload-port <port>` to pio if it picks the wrong one.
 
-Whenever the chained `rnodeconf --firmware-hash` step didn't succeed (missing `RNS`, or a board `rnodeconf` doesn't support), run the standalone script instead:
+### If the board has no platformio.ini env yet
+
+A few boards (extled variants, `mega2560`) are still Makefile/arduino-cli only. For those, fall back to:
+
+```
+make firmware-<board>          # build (do this last before upload — arduino-cli upload flashes whatever was most recently compiled)
+make upload-<board>            # flash over USB serial, port defaults to /dev/ttyACM0
+```
+
+`make upload-<board>` normally chains into `rnodeconf ... --firmware-hash ...`, which needs the `RNS` Python module importable in the active shell and doesn't know every board (e.g. Heltec T096) — don't treat a failure there as a flash failure, just move to step 2 below.
+
+## 2. Clear "Firmware Corrupt" by setting the firmware hash
+
+`pio run -t upload` does **not** set the target firmware hash — always run this after every PlatformIO flash:
 
 ```
 ~/Development/RNode_Scripts/set-hash-device [port]   # defaults to /dev/ttyACM0
 ```
 
-This talks raw KISS to the device (same commands as the RNode_Flasher web tool) to read the actual firmware hash and write it back as the target hash, independent of `rnodeconf`'s board database. It works for any board, including ones `rnodeconf` doesn't recognize. Expect ~15-20s — persisting the hash blocks the device and may drop/re-enumerate the CDC port; the script retries automatically.
+This talks raw KISS to the device (same commands as the RNode_Flasher web tool) to read the actual firmware hash and write it back as the target hash, independent of any board database. It works for any board. Expect ~15-20s — persisting the hash blocks the device and may drop/re-enumerate the CDC port; the script retries automatically. A "no response" readback attempt or two during the retry is normal, not a failure.
 
-**Always run this after a successful flash**, even if the chained `rnodeconf` step in `make upload-*` appeared to work — if it errored for any reason, the device will otherwise report "Firmware Corrupt" until the hash is set.
+(For the Makefile fallback path: also always run this, even if the chained `rnodeconf` step in `make upload-*` appeared to work — if it errored for any reason, the device will otherwise report "Firmware Corrupt" until the hash is set.)
 
 ## Quick reference
 
 ```
-make firmware-<board>          # build (do this last before upload)
-make upload-<board>            # flash over USB serial, port defaults to /dev/ttyACM0
-~/Development/RNode_Scripts/set-hash-device [port]   # fix up target hash if step above's rnodeconf call failed
+pio run -e <env> -t upload                           # build + flash in one step (preferred)
+~/Development/RNode_Scripts/set-hash-device [port]    # always run after, clears "Firmware Corrupt"
 ```

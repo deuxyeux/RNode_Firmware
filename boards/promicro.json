@@ -1,0 +1,41 @@
+{
+  "build": {
+    "arduino": {
+      "ldscript": "nrf52840_s140_v6.ld"
+    },
+    "core": "nRF5",
+    "cpu": "cortex-m4",
+    "extra_flags": "-DNRF52840_XXAA",
+    "f_cpu": "64000000L",
+    "hwids": [
+      ["0x239A", "0x00B4"],
+      ["0x239A", "0x00B3"]
+    ],
+    "usb_product": "nice!nano v2",
+    "mcu": "nrf52840",
+    "variant": "nice_nano",
+    "bsp": {
+      "name": "adafruit"
+    },
+    "softdevice": {
+      "sd_flags": "-DS140",
+      "sd_name": "s140",
+      "sd_version": "6.1.1",
+      "sd_fwid": "0xFFFE"
+    }
+  },
+  "connectivity": ["bluetooth"],
+  "frameworks": ["arduino"],
+  "name": "ProMicro / FakeTec DIY (nice!nano v2)",
+  "upload": {
+    "maximum_ram_size": 237568,
+    "maximum_size": 811008,
+    "speed": 115200,
+    "protocol": "nrfutil",
+    "use_1200bps_touch": true,
+    "require_upload_port": true,
+    "wait_for_upload_port": true
+  },
+  "url": "https://github.com/pdcook/nRFMicro-Arduino-Core",
+  "vendor": "promicro"
+}
