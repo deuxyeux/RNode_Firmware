@@ -872,22 +872,7 @@
     #define HW_ITEM_UPTIME HW_NEXT_E
     #define HW_NEXT_F      (HW_NEXT_E + 1)
 
-    // Last reset's cause + (if it followed a watchdog/lockup reset, not a
-    // clean power-on) the last CP() checkpoint reached before it - see
-    // nrf52_cp_report_last()/nrf52_wdt_init() (RNode_Firmware.ino). Only
-    // meaningful on nRF52: that's the platform with no free debug UART, no
-    // field SWD access, and (as of nrf52_wdt_init()) an actual watchdog
-    // that can now turn a hang into a reset worth inspecting here. ESP32's
-    // equivalent (esp_reset_reason_str()/cp_report_last()) already goes to
-    // its own debug UART instead - no on-screen row needed there.
-    #if MCU_VARIANT == MCU_NRF52
-      #define HW_ITEM_LAST_RESET HW_NEXT_F
-      #define HW_NEXT_G          (HW_NEXT_F + 1)
-    #else
-      #define HW_NEXT_G HW_NEXT_F
-    #endif
-
-    #define HW_ITEM_BACK  HW_NEXT_G
+    #define HW_ITEM_BACK  HW_NEXT_F
     #define HW_ITEM_COUNT (HW_ITEM_BACK + 1)
 
     #if HAS_GPIO_MENU == true
@@ -6166,21 +6151,6 @@
           sprintf(valbufs[HW_ITEM_UPTIME], "%02lu:%02lu:%02lu",
             (unsigned long)(up_s/3600), (unsigned long)((up_s/60)%60), (unsigned long)(up_s%60));
         }
-
-        #if MCU_VARIANT == MCU_NRF52
-          labels[HW_ITEM_LAST_RESET] = "Last Reset";
-          if (nrf52_had_prior_checkpoint) {
-            // cp_name() strings are call-site descriptions (some over 30
-            // chars, e.g. "urns_lxmf_loop->handle_incoming()"), not sized
-            // for this 24-byte value column like every other row here -
-            // snprintf (not sprintf) truncates instead of overflowing;
-            // good enough to identify the subsystem at a glance, which is
-            // all this row needs to do.
-            snprintf(valbufs[HW_ITEM_LAST_RESET], sizeof(valbufs[HW_ITEM_LAST_RESET]), "%s: %s", nrf52_last_reset_reason, nrf52_last_cp_name);
-          } else {
-            sprintf(valbufs[HW_ITEM_LAST_RESET], "%s", nrf52_last_reset_reason);
-          }
-        #endif
 
         labels[HW_ITEM_BACK] = "BACK";
         valbufs[HW_ITEM_BACK][0] = 0;

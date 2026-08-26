@@ -154,7 +154,7 @@ extern SPIClass SPI;
 
 sx126x::sx126x() :
   _spiSettings(16E6, MSBFIRST, SPI_MODE0),
-  _ss(LORA_DEFAULT_SS_PIN), _reset(LORA_DEFAULT_RESET_PIN), _dio0(LORA_DEFAULT_DIO0_PIN), _busy(LORA_DEFAULT_BUSY_PIN), _rxen(LORA_DEFAULT_RXEN_PIN), _txen(LORA_DEFAULT_TXEN_PIN),
+  _ss(LORA_DEFAULT_SS_PIN), _reset(LORA_DEFAULT_RESET_PIN), _dio0(LORA_DEFAULT_DIO0_PIN), _rxen(LORA_DEFAULT_RXEN_PIN), _txen(LORA_DEFAULT_TXEN_PIN), _busy(LORA_DEFAULT_BUSY_PIN),
   _frequency(0),
   _txp(0),
   _sf(0x07),
@@ -168,17 +168,17 @@ sx126x::sx126x() :
   _crcMode(1),
   _fifo_tx_addr_ptr(0),
   _fifo_rx_addr_ptr(0),
-  _packet({0}),
+  _packet{0},
   _preinit_done(false),
   _dio0_pending(false),
-  _onReceive(NULL)
+  _onReceive(nullptr)
 { setTimeout(0); }
 
 bool sx126x::preInit() {
   pinMode(_ss, OUTPUT);
   digitalWrite(_ss, HIGH);
   
-  #if BOARD_MODEL == BOARD_T3S3 || BOARD_MODEL == BOARD_HELTEC32_V3 || BOARD_MODEL == BOARD_HELTEC32_V4 || BOARD_MODEL == BOARD_TDECK || BOARD_MODEL == BOARD_XIAO_S3 || BOARD_MODEL == BOARD_GENERIC_ESP32 || BOARD_MODEL == BOARD_MESHPOE_S3 || BOARD_MODEL == BOARD_MESHADVENTURER_S3 || BOARD_MODEL == BOARD_MESHADVENTURER || BOARD_MODEL == BOARD_DIY_V1 || BOARD_MODEL == BOARD_AETHERNODE || BOARD_MODEL == BOARD_AETHERNODE_S3
+  #if BOARD_MODEL == BOARD_T3S3 || BOARD_MODEL == BOARD_HELTEC32_V3 || BOARD_MODEL == BOARD_HELTEC32_V4 || BOARD_MODEL == BOARD_TDECK || BOARD_MODEL == BOARD_XIAO_S3 || BOARD_MODEL == BOARD_GENERIC_ESP32 || BOARD_MODEL == BOARD_MESHPOE_S3 || BOARD_MODEL == BOARD_MESHADVENTURER_S3 || BOARD_MODEL == BOARD_MESHADVENTURER || BOARD_MODEL == BOARD_DIY_V1 || BOARD_MODEL == BOARD_AETHERNODE || BOARD_MODEL == BOARD_AETHERNODE_S3 || BOARD_MODEL == BOARD_TBEAM_1W
     SPI.begin(pin_sclk, pin_miso, pin_mosi, pin_cs);
   #elif BOARD_MODEL == BOARD_TECHO
     SPI.setPins(pin_miso, pin_sclk, pin_mosi);
@@ -189,9 +189,9 @@ bool sx126x::preInit() {
 
   // Check version (retry for up to 2 seconds)
   // TODO: Actually read version registers, not syncwords
-  long start = millis();
-  uint8_t syncmsb;
-  uint8_t synclsb;
+  unsigned long start = millis();
+  uint8_t syncmsb = 0;
+  uint8_t synclsb = 0;
   while (((millis() - start) < 2000) && (millis() >= start)) {
       syncmsb = readRegister(REG_SYNC_WORD_MSB_6X);
       synclsb = readRegister(REG_SYNC_WORD_LSB_6X);
@@ -305,7 +305,7 @@ void sx126x::writeBuffer(const uint8_t* buffer, size_t size) {
   SPI.beginTransaction(_spiSettings);
   SPI.transfer(OP_FIFO_WRITE_6X);
   SPI.transfer(_fifo_tx_addr_ptr);
-  for (int i = 0; i < size; i++) { SPI.transfer(buffer[i]); _fifo_tx_addr_ptr++; }
+  for (size_t i = 0; i < size; i++) { SPI.transfer(buffer[i]); _fifo_tx_addr_ptr++; }
   SPI.endTransaction();
   digitalWrite(_ss, HIGH);
 }
@@ -317,7 +317,7 @@ void sx126x::readBuffer(uint8_t* buffer, size_t size) {
   SPI.transfer(OP_FIFO_READ_6X);
   SPI.transfer(_fifo_rx_addr_ptr);
   SPI.transfer(0x00);
-  for (int i = 0; i < size; i++) { buffer[i] = SPI.transfer(0x00); }
+  for (size_t i = 0; i < size; i++) { buffer[i] = SPI.transfer(0x00); }
   SPI.endTransaction();
   digitalWrite(_ss, HIGH);
 }
@@ -789,8 +789,26 @@ int sx126x::endPacket() {
 }
 
 unsigned long preamble_detected_at = 0;
-extern long lora_preamble_time_ms;
-extern long lora_header_time_ms;
+// DIO0 is masked to IRQ_RX_DONE_MASK_6X only (onReceive(), above) - the
+// only thing that ever clears IRQ_HEADER_DET_MASK_6X in the radio's own
+// IRQ status register is handleDio0Rise()'s full-status clear, which only
+// runs once RX_DONE actually fires. A header sync that starts but never
+// completes to RX_DONE (interference, a corrupted/partial reception, a
+// signal that dies mid-packet) leaves that bit latched with nothing to
+// ever clear it - every subsequent dcd() call keeps reading it back set,
+// permanently wedging carrier_detected (and therefore medium_free()) to
+// "busy" - confirmed live on a T114: RX LED stuck on with no actual RX
+// traffic, and no TX able to go out (medium_free() -> false forever).
+// Same class of bug PREAMBLE_DET's own timeout below already guards
+// against; this bit just never got the equivalent treatment. Reuses
+// LORA_MODEM_TIMEOUT_MS (sx126x.h) - the same already-vetted "longest a
+// real over-the-air exchange should ever take on this hardware" bound
+// endPacket()'s own TX-done poll uses - rather than trying to compute an
+// exact max-payload-airtime bound, since the actual packet length isn't
+// known until RX_DONE, which is exactly what isn't firing here.
+unsigned long header_detected_at = 0;
+extern unsigned long lora_preamble_time_ms;
+extern unsigned long lora_header_time_ms;
 bool false_preamble_detected = false;
 
 bool sx126x::dcd() {
@@ -800,8 +818,19 @@ bool sx126x::dcd() {
   bool header_detected = false;
   bool carrier_detected = false;
 
-  if ((buf[1] & IRQ_HEADER_DET_MASK_6X) != 0) { header_detected = true; carrier_detected = true; }
-  else { header_detected = false; }
+  if ((buf[1] & IRQ_HEADER_DET_MASK_6X) != 0) {
+    header_detected = true; carrier_detected = true;
+    if (header_detected_at == 0) { header_detected_at = now; }
+    if (now - header_detected_at > (unsigned long)LORA_MODEM_TIMEOUT_MS) {
+      header_detected_at = 0;
+      uint8_t clearbuf[2] = {0};
+      clearbuf[1] = IRQ_HEADER_DET_MASK_6X;
+      executeOpcode(OP_CLEAR_IRQ_STATUS_6X, clearbuf, 2);
+    }
+  } else {
+    header_detected = false;
+    header_detected_at = 0;
+  }
 
   if ((buf[1] & IRQ_PREAMBLE_DET_MASK_6X) != 0) {
     carrier_detected = true;
@@ -1002,7 +1031,7 @@ void sx126x::enableTCXO() {
       uint8_t buf[4] = {MODE_TCXO_1_8V_6X, 0x00, 0x00, 0xFF};
     #elif BOARD_MODEL == BOARD_HELTEC_T114
       uint8_t buf[4] = {MODE_TCXO_1_8V_6X, 0x00, 0x00, 0xFF};
-    #elif BOARD_MODEL == BOARD_HELTEC_T096
+    #elif BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1
       uint8_t buf[4] = {MODE_TCXO_1_8V_6X, 0x00, 0x00, 0xFF};
     #elif BOARD_MODEL == BOARD_TECHO
       uint8_t buf[4] = {MODE_TCXO_1_8V_6X, 0x00, 0x00, 0xFF};
@@ -1023,6 +1052,15 @@ void sx126x::enableTCXO() {
     #elif BOARD_MODEL == BOARD_AETHERNODE_S3
       uint8_t buf[4] = {MODE_TCXO_1_8V_6X, 0x00, 0x00, 0xFF};
     #elif BOARD_MODEL == BOARD_PROMICRO
+      uint8_t buf[4] = {MODE_TCXO_1_8V_6X, 0x00, 0x00, 0xFF};
+    #elif BOARD_MODEL == BOARD_TBEAM_1W
+      // Meshtastic's t-beam-1w variant.h specifies 1.8V; MeshCore's own
+      // variant.h for the same physical module specifies 3.0V despite
+      // crediting the same upstream (Meshtastic PR #8967) - an unresolved
+      // discrepancy between the two reference firmwares with no hardware
+      // here to settle it. 1.8V (Meshtastic's value) is used as the
+      // primary/more actively-reviewed source; if TCXO fails to start on
+      // real hardware (XOSC_START_ERROR), try MODE_TCXO_3_0V_6X here.
       uint8_t buf[4] = {MODE_TCXO_1_8V_6X, 0x00, 0x00, 0xFF};
     #endif
     executeOpcode(OP_DIO3_TCXO_CTRL_6X, buf, 4);
@@ -1239,13 +1277,31 @@ void sx126x::handleDio0Rise() {
 // bracketing individual call sites against it: there is no longer any
 // SPI access from interrupt context at all, so nothing to race against.
 //
-// Scoped to ESP32 only for now - microReticulum_Firmware's own version
-// defers for nRF52 too, but receive_callback()'s _onReceive target
-// (RNode_Firmware.ino) has nRF52-specific taskENTER/EXIT_CRITICAL_FROM_
-// ISR() calls that assume true ISR context; moving those to task context
-// too needs its own dedicated nRF52 testing pass, not bundled in here
-// untested. nRF52 keeps the original direct-call behavior for now.
-#if MCU_VARIANT == MCU_ESP32
+// DEFERRED FOR NRF52 TOO (2026-08-26): was ESP32-only - this comment used
+// to say nRF52 needed "its own dedicated testing pass" before deferring,
+// since receive_callback()'s _onReceive target (RNode_Firmware.ino) had
+// nRF52-specific taskENTER/EXIT_CRITICAL_FROM_ISR() calls that assumed
+// true ISR context. That pass happened after reproducing a full node
+// lockup on two independent nRF52 boards (T096 and T114) that hung at the
+// *exact same instant* - only explainable by something both radios
+// received over the air at that moment, not by per-device internal
+// timing. receive_callback() (still called synchronously from here on
+// nRF52, unlike ESP32) does malloc() unconditionally for modem_packet_t -
+// and malloc() is not ISR-safe with FreeRTOS's default heap allocator
+// (pvPortMalloc() suspends the scheduler via vTaskSuspendAll(), which is
+// explicitly not valid from interrupt context and can deadlock against
+// whatever the main task's own heap operation was doing when the DIO0
+// interrupt preempted it). Both boards receiving the same over-the-air
+// packet at once would hit that same ISR-malloc hazard at once - matches
+// the symptom exactly. Fixed the same way ESP32 already was: the ISR now
+// only ever sets a flag, receive_callback()'s malloc()/memcpy() moves to
+// task context (handleDio0IfPending(), called from loop() below), and its
+// taskENTER/EXIT_CRITICAL_FROM_ISR() calls were downgraded to plain
+// taskENTER/EXIT_CRITICAL() to match (see receive_callback()'s own
+// comment, RNode_Firmware.ino) - no more SPI or heap access from true
+// interrupt context on this MCU either, for MODEM==SX1262 boards (every
+// current nRF52 board: T096/T114/T1/RAK4631/TECHO/PROMICRO).
+#if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
   void ISR_VECT sx126x::onDio0Rise() { sx126x_modem._dio0_pending = true; }
 #else
   void ISR_VECT sx126x::onDio0Rise() { sx126x_modem.handleDio0Rise(); }
@@ -1253,9 +1309,7 @@ void sx126x::handleDio0Rise() {
 
 // Must be called regularly from task context (loop(), RNode_Firmware.ino)
 // whenever radio_online - see onDio0Rise()'s own comment for why this
-// exists instead of doing the work directly in the ISR. On non-ESP32
-// platforms _dio0_pending is never set (onDio0Rise() calls
-// handleDio0Rise() directly there instead), so this is simply a no-op.
+// exists instead of doing the work directly in the ISR.
 void sx126x::handleDio0IfPending() {
   if (_dio0_pending) {
     _dio0_pending = false;

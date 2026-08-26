@@ -25,11 +25,30 @@
 // needs it earlier. Only the enum/macro/globals move up here; cp_name()/
 // cp_report_last() (which need DEBUG_LOG, from Utilities.h) stay below,
 // after Utilities.h's own include.
-#if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
-  // Shared checkpoint IDs - what loop()/URNS.h/sx126x.cpp bracket their
-  // major sections with, regardless of which MCU. Storage backend (below)
-  // differs per platform; this enum just needs to be in scope for CP()/
-  // CPV() call sites to compile on both.
+#if MCU_VARIANT == MCU_ESP32
+  // Pinpointing the still-open loopTask task-watchdog stall (see
+  // feedback_sx126x_tx_rx_spi_mutex_race.md / project_sx1262_tx_poll_yield_
+  // fix.md) - a real, uncorrupted capture finally caught one, but the panic
+  // dump only shows both cores already idle by the time it fires (loopTask
+  // had silently blocked and never come back), not where. RTC_NOINIT_ATTR
+  // survives the watchdog's own software reset (unlike regular RAM), so the
+  // last checkpoint loopTask reached survives into the next boot, where it
+  // gets printed once, right after the reset-reason line above - cheap
+  // enough (two word writes, no serial I/O) to bracket every major loop()
+  // section without perturbing the timing that's supposed to be measured.
+  #define CP_MAGIC 0xC0FFEE42
+  // volatile is load-bearing here, not defensive: cp_report_last()'s one
+  // read happens (in this compilation's view of program order) before any
+  // of loop()'s writes below it - the compiler has no way to know a reset
+  // and reboot sits between them, so without volatile it's free to treat
+  // every CP() write as a dead store never observed within this execution,
+  // and reorder/coalesce/drop them. That's almost certainly why the first
+  // real capture reported a checkpoint far older than the last heartbeat
+  // before the crash - not a logic bug in CP() itself, a missing volatile.
+  RTC_NOINIT_ATTR volatile uint32_t g_cp_magic;
+  RTC_NOINIT_ATTR volatile uint16_t g_cp_id;
+  RTC_NOINIT_ATTR volatile uint32_t g_cp_millis;
+
   enum {
     CP_NONE = 0,
     CP_LOOP_TOP,
@@ -72,31 +91,6 @@
     CP_TXQ_FLUSH_TRANSMIT,
     CP_TXQ_FLUSH_RECEIVE,
   };
-#endif
-
-#if MCU_VARIANT == MCU_ESP32
-  // Pinpointing the still-open loopTask task-watchdog stall (see
-  // feedback_sx126x_tx_rx_spi_mutex_race.md / project_sx1262_tx_poll_yield_
-  // fix.md) - a real, uncorrupted capture finally caught one, but the panic
-  // dump only shows both cores already idle by the time it fires (loopTask
-  // had silently blocked and never come back), not where. RTC_NOINIT_ATTR
-  // survives the watchdog's own software reset (unlike regular RAM), so the
-  // last checkpoint loopTask reached survives into the next boot, where it
-  // gets printed once, right after the reset-reason line above - cheap
-  // enough (two word writes, no serial I/O) to bracket every major loop()
-  // section without perturbing the timing that's supposed to be measured.
-  #define CP_MAGIC 0xC0FFEE42
-  // volatile is load-bearing here, not defensive: cp_report_last()'s one
-  // read happens (in this compilation's view of program order) before any
-  // of loop()'s writes below it - the compiler has no way to know a reset
-  // and reboot sits between them, so without volatile it's free to treat
-  // every CP() write as a dead store never observed within this execution,
-  // and reorder/coalesce/drop them. That's almost certainly why the first
-  // real capture reported a checkpoint far older than the last heartbeat
-  // before the crash - not a logic bug in CP() itself, a missing volatile.
-  RTC_NOINIT_ATTR volatile uint32_t g_cp_magic;
-  RTC_NOINIT_ATTR volatile uint16_t g_cp_id;
-  RTC_NOINIT_ATTR volatile uint32_t g_cp_millis;
 
   #define CP(x) do { g_cp_id = (x); g_cp_millis = millis(); } while (0)
   // Same as CP(), but stashes a caller-supplied value (packet length/written
@@ -105,31 +99,6 @@
   // ATTR), so this macro (not a bare `g_cp_millis = ...;` after CP()) is
   // what keeps call sites portable to non-ESP32 builds via the #else below.
   #define CPV(x, v) do { g_cp_id = (x); g_cp_millis = (v); } while (0)
-#elif MCU_VARIANT == MCU_NRF52
-  // nRF52 has no RTC_NOINIT-style region, but NRF_POWER->GPREGRET/GPREGRET2
-  // are two dedicated 8-bit registers that survive every reset except a
-  // genuine power-on (soft reset, pin reset, and - critically - the
-  // watchdog reset nrf52_wdt_init() below arms all preserve them), the same
-  // "outlives the reset that's about to happen" property RTC_NOINIT_ATTR
-  // gives ESP32 above, just one byte wide instead of a whole word. g_cp_id/
-  // g_cp_millis themselves are ordinary (non-retained) RAM, kept only so
-  // any future in-session diagnostic can read the full-width value; the
-  // GPREGRET mirror is what actually survives to the next boot for
-  // nrf52_cp_report_last() (below) to read back. Only the low byte of each
-  // fits - enough to identify which checkpoint (well under 256 entries)
-  // and coarsely which call (CPV's stashed length/count, truncated).
-  volatile uint16_t g_cp_id;
-  volatile uint32_t g_cp_millis;
-  #define CP(x) do { g_cp_id = (x); g_cp_millis = millis(); NRF_POWER->GPREGRET = (uint8_t)(x); } while (0)
-  #define CPV(x, v) do { g_cp_id = (x); g_cp_millis = (v); NRF_POWER->GPREGRET = (uint8_t)(x); NRF_POWER->GPREGRET2 = (uint8_t)(v); } while (0)
-
-  // Filled in by nrf52_cp_report_last() (below, after Utilities.h - it
-  // needs cp_name(), declared there) - has to live up here anyway, before
-  // Utilities.h's own #include, since Utilities.h pulls in Menu.h, and
-  // Menu.h's Hardware page (MENU_STATE_HW_LIST) reads these directly.
-  const char* nrf52_last_reset_reason = "POWERON";
-  const char* nrf52_last_cp_name = "NONE";
-  bool nrf52_had_prior_checkpoint = false;
 #else
   #define CP(x) do {} while (0)
   #define CPV(x, v) do {} while (0)
@@ -137,7 +106,7 @@
 
 #include "Utilities.h"
 
-#if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
+#if MCU_VARIANT == MCU_ESP32
   const char* cp_name(uint16_t id) {
     switch (id) {
       case CP_NONE:                  return "NONE";
@@ -193,9 +162,7 @@
       default:                       return "UNKNOWN";
     }
   }
-#endif
 
-#if MCU_VARIANT == MCU_ESP32
   #include <esp_task_wdt.h>
   #include <esp_heap_caps.h>
   #include <esp_system.h>
@@ -252,73 +219,6 @@
     return p;
   }
   void mbedtls_psram_free(void* p) { heap_caps_free(p); }
-#elif MCU_VARIANT == MCU_NRF52
-  // T096/T114 have no free UART (HAS_DEBUG_UART is false on both, Boards.h)
-  // and no SWD probe available in the field, so DEBUG_LOG() is a pure
-  // no-op here (Utilities.h) - there was previously no way to see where a
-  // hang happened short of reproducing it under a debugger. This mirrors
-  // the ESP32 block above (reset-reason capture + last-checkpoint
-  // readback), but surfaces the result on-screen (Menu.h's Hardware page -
-  // nrf52_last_reset_reason/nrf52_last_cp_name below) instead of over
-  // serial, since every nRF52 board with this checkpoint trail also has a
-  // display. Paired with nrf52_wdt_init()/nrf52_wdt_feed() (called from
-  // setup()/loop() below) so a genuine hang becomes a watchdog reset - and
-  // therefore an inspectable boot - instead of a silent lockup needing a
-  // manual power cycle.
-  const char* nrf52_reset_reason_str(uint32_t reasreg) {
-    // First match wins - a real reset can set more than one bit; the
-    // watchdog/lockup cases are what this trail exists to catch, so they're
-    // checked first.
-    if (reasreg & POWER_RESETREAS_DOG_Msk)      return "WATCHDOG";
-    if (reasreg & POWER_RESETREAS_LOCKUP_Msk)   return "LOCKUP";
-    if (reasreg & POWER_RESETREAS_SREQ_Msk)     return "SOFT";
-    if (reasreg & POWER_RESETREAS_RESETPIN_Msk) return "PIN";
-    if (reasreg & POWER_RESETREAS_OFF_Msk)      return "WAKE_OFF";
-    if (reasreg == 0)                           return "POWERON";
-    return "UNKNOWN";
-  }
-
-  // Call once at boot, before anything else's CP()/CPV() call this boot
-  // overwrites GPREGRET/GPREGRET2 - reads back whatever the *previous*
-  // boot's last checkpoint was.
-  void nrf52_cp_report_last() {
-    uint32_t reasreg = NRF_POWER->RESETREAS;
-    NRF_POWER->RESETREAS = reasreg; // write-1-to-clear, ready for next boot
-    nrf52_last_reset_reason = nrf52_reset_reason_str(reasreg);
-
-    // GPREGRET/GPREGRET2 aren't magic-guarded the way ESP32's g_cp_magic
-    // is above (no spare bits for a sentinel) - a power-on boot just reads
-    // back the register's power-on-reset default (0, i.e. CP_NONE), which
-    // is exactly the right "nothing to report" answer anyway.
-    uint8_t last_id = NRF_POWER->GPREGRET;
-    nrf52_had_prior_checkpoint = (reasreg != 0) && (last_id != CP_NONE);
-    if (nrf52_had_prior_checkpoint) { nrf52_last_cp_name = cp_name(last_id); }
-
-    g_cp_id = CP_NONE;
-    g_cp_millis = 0;
-    NRF_POWER->GPREGRET = CP_NONE;
-    NRF_POWER->GPREGRET2 = 0;
-  }
-
-  // 25s, matching the ESP32 task watchdog's own timeout (esp_task_wdt.h
-  // call sites, this file) - long enough that no known legitimate blocking
-  // operation (LittleFS eeprom_flush() retries, TCXO calibration,
-  // LORA_MODEM_TIMEOUT_MS's 20s TX-done poll) trips it, short enough that a
-  // real hang recovers in a reasonable time instead of sitting locked up
-  // indefinitely. NRF_WDT, once started, cannot be stopped or reconfigured
-  // short of a full chip reset - fine, it's armed once here and never
-  // needs to change again. CONFIG's SLEEP_Run bit keeps it counting
-  // through System ON sleep (this firmware's HAS_SLEEP path uses System
-  // OFF instead, which powers down far enough that the WDT can't matter
-  // either way).
-  void nrf52_wdt_init() {
-    NRF_WDT->CONFIG = (WDT_CONFIG_HALT_Pause << WDT_CONFIG_HALT_Pos) | (WDT_CONFIG_SLEEP_Run << WDT_CONFIG_SLEEP_Pos);
-    NRF_WDT->CRV = 819200UL; // 25000ms * 32768Hz / 1000
-    NRF_WDT->RREN = WDT_RREN_RR0_Msk;
-    NRF_WDT->TASKS_START = 1;
-  }
-
-  void nrf52_wdt_feed() { NRF_WDT->RR[0] = WDT_RR_RR_Reload; }
 #endif
 
 #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
@@ -435,13 +335,6 @@ void setup() {
   #if MCU_VARIANT == MCU_ESP32
     DEBUG_LOG("[Boot] reset reason: %s\r\n", esp_reset_reason_str());
     cp_report_last();
-  #elif MCU_VARIANT == MCU_NRF52
-    // No DEBUG_LOG on these boards (see nrf52_cp_report_last()'s own
-    // comment) - result goes to nrf52_last_reset_reason/nrf52_last_cp_name
-    // for Menu.h's Hardware page to show instead. Watchdog armed
-    // immediately after, before anything that could plausibly hang runs.
-    nrf52_cp_report_last();
-    nrf52_wdt_init();
   #endif
 
   #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
@@ -1131,16 +1024,21 @@ inline void kiss_write_packet() {
 // warning at the call sites below is harmless (one implicit IRAM section
 // wins, no functional difference) - leave it alone.
 inline void getPacketData(uint16_t len) {
-  #if MCU_VARIANT != MCU_NRF52
-    while (len-- && read_len < MTU) {
-      pbuf[read_len++] = LoRa->read();
-    }  
-  #else
+  // MODEM==SX1262 runs this from task context now on both ESP32 and
+  // nRF52 (see sx126x::onDio0Rise()'s own comment) - the ISR-safe
+  // taskENTER/EXIT_CRITICAL_FROM_ISR() pair is only still needed for a
+  // MODEM that still calls this from true ISR context on nRF52
+  // (sx127x/sx128x, not part of that fix).
+  #if MCU_VARIANT == MCU_NRF52 && MODEM != SX1262
     BaseType_t int_mask = taskENTER_CRITICAL_FROM_ISR();
     while (len-- && read_len < MTU) {
       pbuf[read_len++] = LoRa->read();
     }
     taskEXIT_CRITICAL_FROM_ISR(int_mask);
+  #else
+    while (len-- && read_len < MTU) {
+      pbuf[read_len++] = LoRa->read();
+    }
   #endif
 }
 
@@ -1156,7 +1054,12 @@ inline void getPacketData(uint16_t len) {
 // collide with itself regardless of how many times it's expanded - same
 // placement, just spelled out instead of auto-numbered.
 void __attribute__((section(".iram1.receive_callback"))) receive_callback(int packet_size) {
-  #if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
+  // Only actually assigned/used on nRF52 with a non-SX1262 modem (still
+  // ISR-direct there - see this function's own taskENTER_CRITICAL_FROM_
+  // ISR() call sites below); declaring it unconditionally on every MCU/
+  // MODEM combination left it triggering an unused-variable warning
+  // everywhere else.
+  #if MCU_VARIANT == MCU_NRF52 && MODEM != SX1262
     BaseType_t int_mask;
   #endif
 
@@ -1179,7 +1082,13 @@ void __attribute__((section(".iram1.receive_callback"))) receive_callback(int pa
       // This is the first part of a split
       // packet, so we set the seq variable
       // and add the data to the buffer
-      #if MCU_VARIANT == MCU_NRF52
+      // MODEM==SX1262 is deferred to task context now on both ESP32 and
+      // nRF52 (see sx126x::onDio0Rise()'s own comment) - the ISR-safe
+      // taskENTER/EXIT_CRITICAL_FROM_ISR() pair is only still needed for a
+      // MODEM that still calls this from true ISR context (sx127x/sx128x,
+      // which weren't part of that fix - see receive_callback()'s xQueue
+      // condition below for the same MODEM-gated reasoning).
+      #if MCU_VARIANT == MCU_NRF52 && MODEM != SX1262
         int_mask = taskENTER_CRITICAL_FROM_ISR(); read_len = 0; taskEXIT_CRITICAL_FROM_ISR(int_mask);
       #else
         read_len = 0;
@@ -1212,7 +1121,13 @@ void __attribute__((section(".iram1.receive_callback"))) receive_callback(int pa
       // same sequence id, so we must assume
       // that we are seeing the first part of
       // a new split packet.
-      #if MCU_VARIANT == MCU_NRF52
+      // MODEM==SX1262 is deferred to task context now on both ESP32 and
+      // nRF52 (see sx126x::onDio0Rise()'s own comment) - the ISR-safe
+      // taskENTER/EXIT_CRITICAL_FROM_ISR() pair is only still needed for a
+      // MODEM that still calls this from true ISR context (sx127x/sx128x,
+      // which weren't part of that fix - see receive_callback()'s xQueue
+      // condition below for the same MODEM-gated reasoning).
+      #if MCU_VARIANT == MCU_NRF52 && MODEM != SX1262
         int_mask = taskENTER_CRITICAL_FROM_ISR(); read_len = 0; taskEXIT_CRITICAL_FROM_ISR(int_mask);
       #else
         read_len = 0;
@@ -1234,7 +1149,7 @@ void __attribute__((section(".iram1.receive_callback"))) receive_callback(int pa
       if (seq != SEQ_UNSET) {
         // If we already had part of a split
         // packet in the buffer, we clear it.
-        #if MCU_VARIANT == MCU_NRF52
+        #if MCU_VARIANT == MCU_NRF52 && MODEM != SX1262
           int_mask = taskENTER_CRITICAL_FROM_ISR(); read_len = 0; taskEXIT_CRITICAL_FROM_ISR(int_mask);
         #else
           read_len = 0;
@@ -1306,12 +1221,13 @@ void __attribute__((section(".iram1.receive_callback"))) receive_callback(int pa
       // receive_callback() (this function) is shared across every modem
       // driver's _onReceive target, not just sx126x - only sx126x.cpp's
       // own onDio0Rise() was changed to defer to task context
-      // (handleDio0IfPending()); sx127x/sx128x still call their own
-      // handleDioXRise() directly from true ISR context on every
-      // platform, same as sx126x used to. So this must be keyed on the
-      // actual modem in use, not just MCU_VARIANT - an ESP32 board using
-      // SX1276/SX1280 still needs the ISR-safe xQueueSendFromISR() here.
-      #if MCU_VARIANT == MCU_ESP32 && MODEM == SX1262
+      // (handleDio0IfPending()), on both ESP32 and nRF52; sx127x/sx128x
+      // still call their own handleDioXRise() directly from true ISR
+      // context on every platform, same as sx126x used to. So this must
+      // be keyed on the actual modem in use, not just MCU_VARIANT - a
+      // board (either MCU) using SX1276/SX1280 still needs the ISR-safe
+      // xQueueSendFromISR() here.
+      #if MODEM == SX1262
         bool queue_ok = modem_packet_queue && xQueueSend(modem_packet_queue, &modem_packet, 0) == pdPASS;
       #else
         bool queue_ok = modem_packet_queue && xQueueSendFromISR(modem_packet_queue, &modem_packet, NULL) == pdPASS;
@@ -3036,8 +2952,6 @@ void work_while_waiting() { loop(); }
 void loop() {
   #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
     esp_task_wdt_reset();
-  #elif MCU_VARIANT == MCU_NRF52
-    nrf52_wdt_feed();
   #endif
   CP(CP_LOOP_TOP);
   // housekeeping_task()/kiss_tx_task()/ws_tx_task() used to run as their
@@ -3146,6 +3060,16 @@ void loop() {
       if (lt_airtime_limit != 0.0 && longterm_airtime >= lt_airtime_limit) airtime_lock = true;
 
     #elif MCU_VARIANT == MCU_NRF52
+      // Drains a DIO0 interrupt flagged by sx126x's onDio0Rise() (see its
+      // own comment, sx126x.cpp) - must run every loop() iteration, before
+      // the modem_packet_queue dequeue right below, since this is what
+      // actually populates that queue via receive_callback(). A no-op on
+      // other modems (MODEM != SX1262, still ISR-direct on this MCU too).
+      #if MODEM == SX1262
+        CP(CP_DIO0_PENDING);
+        LoRa->handleDio0IfPending();
+      #endif
+      CP(CP_MODEM_QUEUE_DRAIN);
       modem_packet_t *modem_packet = NULL;
       if(modem_packet_queue && xQueueReceive(modem_packet_queue, &modem_packet, 0) == pdTRUE && modem_packet) {
         memcpy(&pbuf, modem_packet->data, modem_packet->len);
