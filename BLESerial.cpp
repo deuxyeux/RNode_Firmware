@@ -172,13 +172,14 @@ void BLESerial::SetupSerialService() {
 
   RxCharacteristic = SerialService->createCharacteristic(BLE_RX_UUID, BLECharacteristic::PROPERTY_WRITE);
   RxCharacteristic->setAccessPermissions(ESP_GATT_PERM_WRITE_ENC_MITM);
-  RxCharacteristic->addDescriptor(new BLE2902());
   RxCharacteristic->setWriteProperty(true);
   RxCharacteristic->setCallbacks(this);
 
+  // NimBLE auto-adds the 2902 (CCCD) descriptor whenever a characteristic
+  // has notify/indicate enabled - manually adding one is deprecated
+  // (BLE2902 will be removed) and was already redundant here.
   TxCharacteristic = SerialService->createCharacteristic(BLE_TX_UUID, BLECharacteristic::PROPERTY_NOTIFY);
   TxCharacteristic->setAccessPermissions(ESP_GATT_PERM_READ_ENC_MITM);
-  TxCharacteristic->addDescriptor(new BLE2902());
   TxCharacteristic->setNotifyProperty(true);
   TxCharacteristic->setReadProperty(true);
 
