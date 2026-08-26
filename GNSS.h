@@ -68,7 +68,16 @@ uint8_t gnss_time_second() { return gps_parser.time.second(); }
 // above (typically valid before a position fix). Used by RTC.h's
 // rtc_sync_gps() to build a full unixtime out of GPS time alone, since
 // rtc_set_unixtime() needs a date, not just a time-of-day.
-bool     gnss_date_valid() { return gps_parser.date.isValid(); }
+// TinyGPSDate::commit() (TinyGPS++.cpp) marks the date valid whenever an
+// RMC sentence's date term was processed at all, even if the term itself
+// was blank/zero (e.g. a Void-status RMC sent before the receiver has
+// computed a real UTC date) - it never checks the decoded value, so
+// isValid() alone can read true while year()/month()/day() come back as
+// the "2000-00-00" sentinel (raw date value 0). day() is 1-31 in any real
+// date, never 0, so that's a safe general guard against this specific
+// library quirk - also protects rtc_sync_gps() (RTC.h), which trusts this
+// same wrapper before setting the RTC.
+bool     gnss_date_valid() { return gps_parser.date.isValid() && gps_parser.date.day() != 0; }
 uint16_t gnss_date_year()  { return gps_parser.date.year(); }
 uint8_t  gnss_date_month() { return gps_parser.date.month(); }
 uint8_t  gnss_date_day()   { return gps_parser.date.day(); }
@@ -128,6 +137,134 @@ const char *gnss_module_status_text() {
   return "DETECTING...";
 }
 
+// Duty-cycled acquisition - lets a board that can actually gate GNSS power
+// (GNSS_DUTY_CYCLE_CAPABLE, Boards.h - true wherever a board-specific GPS
+// block defined PIN_GPS_EN and/or PIN_GPS_STANDBY) sleep the receiver most
+// of the time instead of streaming continuously. Opt-in via the Settings
+// menu's GNSS > Update Interval field (Menu.h); GNSS_UPDATE_INTERVAL_
+// CONTINUOUS (0, the default on every board) bypasses all of this and
+// keeps today's always-on behavior. Boards with no gating pin at all never
+// get anything but Continuous - see the per-board audit in Boards.h.
+//
+// Three states, driven from gnss_duty_cycle_update() below (called from
+// gnss_update(), so still non-blocking, still polled every loop()
+// iteration):
+//   ACTIVE - powered, searching (identical to the always-on behavior).
+//   HOLD   - fix acquired; stays awake GNSS_FIX_HOLD_MS longer so the
+//            receiver can finish downloading ephemeris/almanac before
+//            sleeping (makes the *next* wake a warm/hot start instead of
+//            cold) and so any immediate menu/RTC-sync read sees a fresh
+//            fix.
+//   SLEEP  - receiver powered down (gnss_duty_pins_sleep() below decides
+//            soft-standby vs. hard EN-off per board); wakes back to ACTIVE
+//            once millis() reaches gnss_duty_wake_at_ms.
+#define GNSS_PSTATE_ACTIVE 0
+#define GNSS_PSTATE_HOLD   1
+#define GNSS_PSTATE_SLEEP  2
+
+#define GNSS_UPDATE_INTERVAL_CONTINUOUS 0UL // seconds - duty-cycle disabled
+
+#define GNSS_FIX_HOLD_MS               10000UL // stay awake this long past a fix before sleeping
+#define GNSS_SEARCH_TIMEOUT_MS         90000UL // give up a search with no fix after this long
+#define GNSS_SEARCH_TIMEOUT_BACKOFF_MS 45000UL // tightened timeout once a search has already failed once since the last lock
+#define GNSS_INITIAL_FIX_TIMEOUT_MS   180000UL // generous timeout while no fix has been obtained yet since GNSS was enabled - a true cold start (no ephemeris/almanac) can run well past the steady-state timeouts above, and the user turned GNSS on expecting to wait for it
+#define GNSS_FAILED_SEARCH_RETRY_MS   (5UL * 60UL * 1000UL) // retry this soon (not the full interval) after a failed search
+#define GNSS_LOCK_EWMA_WEIGHT          0.2f     // smoothing weight for gnss_duty_predicted_lock_ms
+
+// Selectable Update Interval presets (Menu.h) - a small curated list
+// rather than freeform seconds, matching the existing UX for this kind of
+// setting (Display Timeout/Brightness). GNSS_DUTY_CYCLE_HARD_ONLY boards
+// (T096/T1 - PIN_GPS_EN only, so every wake is a cold start) drop the
+// 1-minute preset, since a cycle that short would mostly just be spent
+// waiting out the cold start.
+#if GNSS_DUTY_CYCLE_HARD_ONLY == true
+  const uint32_t gnss_update_interval_presets_s[] = { 0, 300, 900, 3600 };
+  #define GNSS_UPDATE_INTERVAL_PRESET_COUNT 4
+#else
+  const uint32_t gnss_update_interval_presets_s[] = { 0, 60, 300, 900, 3600 };
+  #define GNSS_UPDATE_INTERVAL_PRESET_COUNT 5
+#endif
+
+uint32_t gnss_update_interval_s = GNSS_UPDATE_INTERVAL_DEFAULT; // 0 = Continuous, seconds otherwise
+uint8_t  gnss_pstate = GNSS_PSTATE_ACTIVE;
+unsigned long gnss_pstate_entered_ms = 0;
+unsigned long gnss_duty_wake_at_ms = 0;
+uint32_t gnss_duty_predicted_lock_ms = 0; // 0 = not yet seeded
+uint8_t  gnss_duty_lock_count = 0;        // successful locks since the last gnss_duty_reset() - the first is a cold-start outlier, excluded from the predictor (same reasoning Meshtastic's GPSUpdateScheduling uses)
+uint8_t  gnss_duty_consecutive_failures = 0;
+
+// Age of the last valid position, in ms - a thin wrapper over TinyGPSPlus's
+// own per-field staleness tracking (TinyGPSLocation::age(), TinyGPS++.h),
+// not a separately-maintained timestamp: location.isValid() latches true
+// forever after the first fix and never resets (confirmed against the
+// vendored library), so gnss_has_fix()/gnss_latitude()/etc. already keep
+// returning the last-known fix on their own once the receiver stops
+// updating - .age() is just what turns that into a "how stale" figure for
+// the Settings menu's Fix row (Menu.h).
+uint32_t gnss_location_age_ms() { return gps_parser.location.age(); }
+
+// Whether a duty-cycle sleep should cut hard power (PIN_GPS_EN) rather
+// than just soft-standby (PIN_GPS_STANDBY). Boards with only one of the
+// two pins have no choice to make; boards with both (currently only
+// Heltec32_v4) pick based on how long the sleep will be - short intervals
+// favor the cheap, fast-rewake standby path, long ones favor cutting
+// power outright once standby leakage no longer beats a full power cycle.
+// No calibration data for our specific chips exists, unlike Meshtastic's
+// empirically-fit power-curve threshold, so this is a simple fixed
+// cutover rather than a formula.
+#define GNSS_SOFTSLEEP_HARDSLEEP_CUTOVER_S (15UL * 60UL)
+
+bool gnss_duty_sleep_should_be_hard() {
+  #if defined(PIN_GPS_EN) && defined(PIN_GPS_STANDBY)
+    return gnss_update_interval_s >= GNSS_SOFTSLEEP_HARDSLEEP_CUTOVER_S;
+  #elif defined(PIN_GPS_EN)
+    return true;
+  #else
+    return false;
+  #endif
+}
+
+// Pin-only power control for duty-cycle wake/sleep - unlike
+// gnss_set_enabled() below, never touches GPS_SERIAL or gnss_detect_state:
+// a duty-cycle wake is a module already confirmed present (detection only
+// ever runs once, on the first activation - see gnss_duty_reset()), so
+// there's nothing to re-probe, and leaving GPS_SERIAL open the whole time
+// costs nothing while the receiver is silent.
+void gnss_duty_pins_wake() {
+  #ifdef PIN_GPS_EN
+    digitalWrite(PIN_GPS_EN, LOW); // active LOW
+  #endif
+  #ifdef PIN_GPS_STANDBY
+    digitalWrite(PIN_GPS_STANDBY, HIGH); // force wake
+  #endif
+}
+
+void gnss_duty_pins_sleep() {
+  bool hard = gnss_duty_sleep_should_be_hard();
+  #ifdef PIN_GPS_EN
+    if (hard) digitalWrite(PIN_GPS_EN, HIGH); // deassert, cut power
+  #endif
+  #ifdef PIN_GPS_STANDBY
+    // Moot when EN is also being cut (hard==true on a both-pins board) -
+    // harmless to leave as-is, same reasoning as gnss_set_enabled()'s own
+    // comment on Heltec32_v4's overlap between the two pins.
+    if (!hard) digitalWrite(PIN_GPS_STANDBY, LOW); // allow sleep
+  #endif
+}
+
+// Resets all duty-cycle bookkeeping to a fresh ACTIVE search - called
+// whenever GNSS transitions to enabled (gnss_set_enabled(), alongside
+// gnss_detect_reset()), so a freshly-enabled module always starts hunting
+// immediately rather than picking up mid-cycle state from a previous
+// session.
+void gnss_duty_reset() {
+  gnss_pstate = GNSS_PSTATE_ACTIVE;
+  gnss_pstate_entered_ms = millis();
+  gnss_duty_predicted_lock_ms = 0;
+  gnss_duty_lock_count = 0;
+  gnss_duty_consecutive_failures = 0;
+}
+
 // Shared by gnss_init() (boot) and the Settings menu's Enabled toggle
 // (Menu.h, MENU_STATE_GNSS_EDIT) - the single place that actually power-
 // cycles the receiver, so both paths stay in sync. Two independent,
@@ -159,6 +296,7 @@ void gnss_set_enabled(bool en) {
       GPS_SERIAL.begin(GPS_BAUD_RATE);
     #endif
     gnss_detect_reset();
+    gnss_duty_reset();
   } else {
     GPS_SERIAL.end();
   }
@@ -184,6 +322,13 @@ void gnss_init() {
   #ifdef PIN_GPS_EN
     pinMode(PIN_GPS_EN, OUTPUT);
   #endif
+  #ifdef PIN_GPS_STANDBY
+    // Never explicitly configured before this - digitalWrite() calls to it
+    // (gnss_set_enabled()/gnss_duty_pins_wake()/gnss_duty_pins_sleep()) had
+    // no guaranteed electrical effect without this, on any core that
+    // doesn't implicitly force OUTPUT mode on first digitalWrite().
+    pinMode(PIN_GPS_STANDBY, OUTPUT);
+  #endif
   #ifdef PIN_GPS_PPS
     pinMode(PIN_GPS_PPS, INPUT);
   #endif
@@ -194,6 +339,300 @@ void gnss_init() {
   gnss_set_enabled(gnss_enabled);
 }
 
+// Enters SLEEP and schedules the next wake. On a successful lock (failed
+// == false), the wake is scheduled interval_ms minus the predicted lock
+// time before the nominal deadline, so a fix is ready by the time it's
+// actually due rather than starting the search only at the deadline
+// itself. On a failed search, retries sooner (GNSS_FAILED_SEARCH_RETRY_MS,
+// capped at the configured interval) rather than waiting out the full
+// interval blind - an indoor/no-sky node gets another attempt soon instead
+// of going dark for a potentially long configured interval.
+void gnss_duty_schedule_sleep(unsigned long now, bool failed) {
+  gnss_duty_pins_sleep();
+  gnss_pstate = GNSS_PSTATE_SLEEP;
+  gnss_pstate_entered_ms = now;
+
+  unsigned long interval_ms = gnss_update_interval_s * 1000UL;
+  unsigned long sleep_ms;
+  if (failed) {
+    sleep_ms = min(interval_ms, (unsigned long)GNSS_FAILED_SEARCH_RETRY_MS);
+  } else {
+    sleep_ms = (interval_ms > gnss_duty_predicted_lock_ms) ? (interval_ms - gnss_duty_predicted_lock_ms) : 0;
+  }
+  gnss_duty_wake_at_ms = now + sleep_ms;
+}
+
+// Drives the ACTIVE/HOLD/SLEEP state machine (see the block comment above
+// gnss_duty_reset()) - only called while gnss_enabled, from gnss_update()
+// below. A no-op (forces/keeps ACTIVE) whenever duty-cycling isn't in play
+// at all, either because the board can't gate GNSS power
+// (GNSS_DUTY_CYCLE_CAPABLE, Boards.h) or the user has it set to
+// Continuous - covers both the default state and a live switch back to
+// Continuous while asleep, which needs to force the receiver back awake
+// immediately rather than leaving it powered down.
+void gnss_duty_cycle_update() {
+  if (gnss_update_interval_s == GNSS_UPDATE_INTERVAL_CONTINUOUS || !GNSS_DUTY_CYCLE_CAPABLE) {
+    if (gnss_pstate != GNSS_PSTATE_ACTIVE) gnss_duty_pins_wake();
+    gnss_pstate = GNSS_PSTATE_ACTIVE;
+    return;
+  }
+
+  unsigned long now = millis();
+
+  if (gnss_pstate == GNSS_PSTATE_ACTIVE) {
+    if (gnss_has_fix()) {
+      unsigned long lock_ms = now - gnss_pstate_entered_ms;
+      gnss_duty_lock_count++;
+      if (gnss_duty_lock_count >= 2) {
+        gnss_duty_predicted_lock_ms = (gnss_duty_predicted_lock_ms == 0)
+          ? lock_ms
+          : (uint32_t)((1.0f - GNSS_LOCK_EWMA_WEIGHT) * gnss_duty_predicted_lock_ms + GNSS_LOCK_EWMA_WEIGHT * lock_ms);
+      }
+      gnss_duty_consecutive_failures = 0;
+      gnss_pstate = GNSS_PSTATE_HOLD;
+      gnss_pstate_entered_ms = now;
+    } else {
+      // No fix at all yet since GNSS was enabled (gnss_duty_lock_count == 0,
+      // reset alongside gnss_duty_reset()) gets a longer, dedicated timeout
+      // regardless of gnss_duty_consecutive_failures - a true cold start can
+      // legitimately run past the steady-state search timeouts below, and
+      // the user enabled GNSS expecting to wait for that first fix.
+      unsigned long timeout;
+      if (gnss_duty_lock_count == 0) {
+        timeout = GNSS_INITIAL_FIX_TIMEOUT_MS;
+      } else {
+        timeout = (gnss_duty_consecutive_failures > 0) ? GNSS_SEARCH_TIMEOUT_BACKOFF_MS : GNSS_SEARCH_TIMEOUT_MS;
+      }
+      if (now - gnss_pstate_entered_ms >= timeout) {
+        gnss_duty_consecutive_failures++;
+        gnss_duty_schedule_sleep(now, true);
+      }
+    }
+  } else if (gnss_pstate == GNSS_PSTATE_HOLD) {
+    if (now - gnss_pstate_entered_ms >= GNSS_FIX_HOLD_MS) {
+      gnss_duty_schedule_sleep(now, false);
+    }
+  } else { // GNSS_PSTATE_SLEEP
+    if ((long)(now - gnss_duty_wake_at_ms) >= 0) {
+      gnss_duty_pins_wake();
+      gnss_pstate = GNSS_PSTATE_ACTIVE;
+      gnss_pstate_entered_ms = now;
+    }
+  }
+}
+
+// Settings menu (Menu.h) state label for the GNSS page's Module row -
+// only meaningful once duty-cycling is actually in play (a configured
+// interval, on a capable board) and the module's presence is already
+// confirmed; returns NULL otherwise so the menu falls back to
+// gnss_module_status_text()'s existing PRESENT/ABSENT/DETECTING text.
+const char *gnss_duty_state_text() {
+  if (gnss_update_interval_s == GNSS_UPDATE_INTERVAL_CONTINUOUS || !GNSS_DUTY_CYCLE_CAPABLE) return NULL;
+  if (gnss_detect_state != GNSS_DETECT_PRESENT) return NULL;
+  return (gnss_pstate == GNSS_PSTATE_SLEEP) ? "SLEEPING" : "SEARCHING";
+}
+
+// Verbose GNSS diagnostics (Menu.h's MENU_STATE_GNSS_DIAG/_GNSS_DIAG_SATS)
+// - opt-in per board (HAS_GNSS_DEBUG_MENU, Boards.h) since it adds real
+// per-byte parsing cost and pulls in PDOP/VDOP/satellites-in-view via
+// GSA/GSV, which stock TinyGPSPlus doesn't parse (only GGA/RMC are
+// handled internally - see TinyGPS++.cpp's endOfTermHandler()) and which
+// aren't guaranteed to even be in a given module's default NMEA output
+// set. TinyGPSCustom's sentence-name match is talker-ID-literal ("GPGSA"/
+// "GPGSV" exactly) - a multi-constellation module reporting as $GNGSA/
+// $GNGSV instead of $GPxxx will leave these permanently !isValid(), which
+// every wrapper below turns into a harmless "N/A"/empty result rather
+// than stale or garbage data.
+#if HAS_GNSS_DEBUG_MENU == true
+  TinyGPSCustom gnss_pdop_field(gps_parser, "GPGSA", 15);
+  TinyGPSCustom gnss_vdop_field(gps_parser, "GPGSA", 17);
+
+  // Satellites-in-view (PRN/elevation/azimuth/SNR), assembled from GPGSV -
+  // split across multiple sentences (up to 4 satellites each), reassembled
+  // below in gnss_gsv_update(). GNSS_SAT_VIEW_MAX is a display cap, not a
+  // protocol limit - same "bound the iteration/stack cost, let the menu
+  // scroll" reasoning as MENU_URNS_PATH_MAX_ROWS (Menu.h).
+  #define GNSS_SAT_VIEW_MAX 16
+  TinyGPSCustom gnss_gsv_total_msgs(gps_parser, "GPGSV", 1);
+  TinyGPSCustom gnss_gsv_msg_number(gps_parser, "GPGSV", 2);
+  TinyGPSCustom gnss_gsv_sat_number[4];
+  TinyGPSCustom gnss_gsv_elevation[4];
+  TinyGPSCustom gnss_gsv_azimuth[4];
+  TinyGPSCustom gnss_gsv_snr[4];
+
+  // TinyGPSCustom::begin() just links each field into gps_parser's custom-
+  // element chain - one-time setup, called once from setup() (RNode_
+  // Firmware.ino), same "wire it once, poll forever" shape as the rest of
+  // this file's initialization.
+  void gnss_gsv_fields_init() {
+    for (uint8_t i = 0; i < 4; i++) {
+      gnss_gsv_sat_number[i].begin(gps_parser, "GPGSV", 4 + 4 * i);
+      gnss_gsv_elevation[i].begin(gps_parser, "GPGSV", 5 + 4 * i);
+      gnss_gsv_azimuth[i].begin(gps_parser, "GPGSV", 6 + 4 * i);
+      gnss_gsv_snr[i].begin(gps_parser, "GPGSV", 7 + 4 * i);
+    }
+  }
+
+  struct gnss_sat_view_t {
+    uint8_t  prn;
+    uint8_t  elevation_deg;
+    uint16_t azimuth_deg;
+    uint8_t  snr_db;
+  };
+
+  gnss_sat_view_t gnss_sat_view_staging[GNSS_SAT_VIEW_MAX];   // being rebuilt this round
+  uint8_t         gnss_sat_view_staging_count = 0;
+  gnss_sat_view_t gnss_sat_view_committed[GNSS_SAT_VIEW_MAX]; // last complete round - what the menu reads
+  uint8_t         gnss_sat_view_committed_count = 0;
+
+  // Called from gnss_update()'s existing per-byte loop, after encode() -
+  // non-blocking, only does work when a new GPGSV sentence just completed
+  // (isUpdated() on the message-number field). Reset-and-rebuild: message
+  // number 1 starts a fresh staging pass (previous round's leftovers
+  // discarded); every sentence appends up to 4 non-empty satellite slots;
+  // once the message number reaches the round's own reported total, the
+  // staging buffer is committed as the current view snapshot. GSV round
+  // cadence/satellite count varies with sky visibility and receiver update
+  // rate, so this only ever trusts what's reported live each round, never
+  // a fixed sentence count.
+  void gnss_gsv_update() {
+    if (!gnss_gsv_msg_number.isUpdated()) return;
+    uint8_t msg_num = (uint8_t)atoi(gnss_gsv_msg_number.value());
+    uint8_t total_msgs = (uint8_t)atoi(gnss_gsv_total_msgs.value());
+    if (msg_num == 0 || total_msgs == 0) return; // malformed/empty term this round, skip
+
+    if (msg_num == 1) gnss_sat_view_staging_count = 0;
+
+    for (uint8_t i = 0; i < 4 && gnss_sat_view_staging_count < GNSS_SAT_VIEW_MAX; i++) {
+      const char *prn_str = gnss_gsv_sat_number[i].value();
+      if (prn_str[0] == 0) continue; // slot unused in this sentence (the last sentence of a round is often partial)
+      gnss_sat_view_t &s = gnss_sat_view_staging[gnss_sat_view_staging_count++];
+      s.prn           = (uint8_t)atoi(prn_str);
+      s.elevation_deg = (uint8_t)atoi(gnss_gsv_elevation[i].value());
+      s.azimuth_deg   = (uint16_t)atoi(gnss_gsv_azimuth[i].value());
+      s.snr_db        = (uint8_t)atoi(gnss_gsv_snr[i].value());
+    }
+
+    if (msg_num == total_msgs) {
+      memcpy(gnss_sat_view_committed, gnss_sat_view_staging, sizeof(gnss_sat_view_t) * gnss_sat_view_staging_count);
+      gnss_sat_view_committed_count = gnss_sat_view_staging_count;
+    }
+  }
+
+  // Fix quality/mode text - TinyGPSLocation::FixQuality()/FixMode()
+  // (TinyGPS++.h:57-58/67-68), richer than the plain has-fix bool above.
+  const char *gnss_fix_quality_text() {
+    if (!gps_parser.location.isValid()) return "N/A";
+    switch (gps_parser.location.FixQuality()) {
+      case TinyGPSLocation::Invalid:   return "Invalid";
+      case TinyGPSLocation::GPS:       return "GPS";
+      case TinyGPSLocation::DGPS:      return "DGPS";
+      case TinyGPSLocation::PPS:       return "PPS";
+      case TinyGPSLocation::RTK:       return "RTK";
+      case TinyGPSLocation::FloatRTK:  return "Float RTK";
+      case TinyGPSLocation::Estimated: return "Estimated";
+      case TinyGPSLocation::Manual:    return "Manual";
+      case TinyGPSLocation::Simulated: return "Simulated";
+      default:                         return "Unknown";
+    }
+  }
+  const char *gnss_fix_mode_text() {
+    if (!gps_parser.location.isValid()) return "N/A";
+    switch (gps_parser.location.FixMode()) {
+      case TinyGPSLocation::N: return "No Fix";
+      case TinyGPSLocation::A: return "Autonomous";
+      case TinyGPSLocation::D: return "Differential";
+      case TinyGPSLocation::E: return "Estimated";
+      default:                 return "Unknown";
+    }
+  }
+
+  // HDOP is already stock-parsed (gps_parser.hdop, GGA term 8) - just
+  // needs a validity guard and a quality-band label, neither of which
+  // exists anywhere else in this codebase. Bands are our own convention
+  // (not library-provided): <1 excellent, 1-2 good, 2-5 moderate, 5-10
+  // fair, >10 poor.
+  bool   gnss_hdop_valid() { return gps_parser.hdop.isValid(); }
+  double gnss_hdop()       { return gps_parser.hdop.hdop(); }
+  const char *gnss_hdop_band_text() {
+    if (!gnss_hdop_valid()) return "N/A";
+    double h = gnss_hdop();
+    if (h < 1.0)  return "Excellent";
+    if (h < 2.0)  return "Good";
+    if (h < 5.0)  return "Moderate";
+    if (h < 10.0) return "Fair";
+    return "Poor";
+  }
+
+  bool   gnss_pdop_valid() { return gnss_pdop_field.isValid(); }
+  double gnss_pdop()       { return atof(gnss_pdop_field.value()); }
+  bool   gnss_vdop_valid() { return gnss_vdop_field.isValid(); }
+  double gnss_vdop()       { return atof(gnss_vdop_field.value()); }
+
+  // Speed/course - km/h chosen (not knots/mph) to match this file's
+  // existing metric-only convention (gnss_altitude_meters() already
+  // reports meters, not feet); there's no unit-selection setting anywhere
+  // in Config.h/Menu.h to key off of instead.
+  bool   gnss_speed_valid()  { return gps_parser.speed.isValid(); }
+  double gnss_speed_kmph()   { return gps_parser.speed.kmph(); }
+  bool   gnss_course_valid() { return gps_parser.course.isValid(); }
+  double gnss_course_deg()   { return gps_parser.course.deg(); }
+  const char *gnss_course_cardinal() {
+    return gnss_course_valid() ? TinyGPSPlus::cardinal(gnss_course_deg()) : "N/A";
+  }
+
+  // Link/parse health - passedChecksum()/failedChecksum()/charsProcessed()
+  // already exist unconditionally on gps_parser (TinyGPSPlus core, not a
+  // TinyGPSCustom field); wrapped here rather than alongside the always-
+  // available wrappers above since nothing outside the diagnostics screen
+  // calls them.
+  uint32_t gnss_chars_processed() { return gps_parser.charsProcessed(); }
+  uint32_t gnss_checksum_passed() { return gps_parser.passedChecksum(); }
+  uint32_t gnss_checksum_failed() { return gps_parser.failedChecksum(); }
+  uint8_t  gnss_checksum_pass_rate_pct() {
+    uint32_t total = gnss_checksum_passed() + gnss_checksum_failed();
+    return total == 0 ? 0 : (uint8_t)((gnss_checksum_passed() * 100UL) / total);
+  }
+
+  // Duty-cycle internals, verbose counterpart to gnss_duty_state_text()'s
+  // collapsed SEARCHING/SLEEPING label above - distinguishes ACTIVE vs.
+  // HOLD (fix already acquired, holding awake) rather than folding both
+  // into one word.
+  const char *gnss_pstate_text() {
+    // gnss_duty_cycle_update() (and thus gnss_pstate itself) only ever
+    // runs while gnss_enabled (see gnss_update()) - disabling GNSS just
+    // freezes gnss_pstate wherever it was (defaulting to ACTIVE at
+    // declaration/reset), which would otherwise misleadingly read as
+    // "still searching" while the receiver is actually fully powered off.
+    // Same "N/A while disabled" reasoning as gnss_module_status_text().
+    if (!gnss_enabled) return "OFF";
+    switch (gnss_pstate) {
+      case GNSS_PSTATE_ACTIVE: return "ACTIVE";
+      case GNSS_PSTATE_HOLD:   return "HOLD";
+      case GNSS_PSTATE_SLEEP:  return "SLEEP";
+      default:                 return "?";
+    }
+  }
+  uint32_t gnss_duty_predicted_lock_s() { return gnss_duty_predicted_lock_ms / 1000; }
+  // Seconds until gnss_duty_wake_at_ms, 0 if not currently asleep or
+  // already past due - same signed-subtraction idiom gnss_duty_cycle_
+  // update() itself uses to stay millis()-wraparound-safe.
+  uint32_t gnss_duty_wake_countdown_s() {
+    if (gnss_pstate != GNSS_PSTATE_SLEEP) return 0;
+    long remain_ms = (long)(gnss_duty_wake_at_ms - millis());
+    return remain_ms > 0 ? (uint32_t)(remain_ms / 1000) : 0;
+  }
+
+  // Satellites-in-view accessors - Menu.h reads these row-by-row rather
+  // than being handed the struct array directly, same narrow-accessor
+  // convention as every other gnss_* wrapper in this file.
+  uint8_t  gnss_sat_view_count()              { return gnss_sat_view_committed_count; }
+  uint8_t  gnss_sat_view_prn(uint8_t i)       { return gnss_sat_view_committed[i].prn; }
+  uint8_t  gnss_sat_view_elevation(uint8_t i) { return gnss_sat_view_committed[i].elevation_deg; }
+  uint16_t gnss_sat_view_azimuth(uint8_t i)   { return gnss_sat_view_committed[i].azimuth_deg; }
+  uint8_t  gnss_sat_view_snr(uint8_t i)       { return gnss_sat_view_committed[i].snr_db; }
+#endif // HAS_GNSS_DEBUG_MENU
+
 // Non-blocking - drains only whatever GPS_SERIAL.available() already has
 // buffered, never waits for more. Called every loop() iteration
 // (RNode_Firmware.ino), same as encoder_process()/menu_button_process().
@@ -201,6 +640,10 @@ void gnss_update() {
   while (gnss_enabled && GPS_SERIAL.available()) {
     gps_parser.encode(GPS_SERIAL.read());
   }
+
+  #if HAS_GNSS_DEBUG_MENU == true
+    if (gnss_enabled) gnss_gsv_update();
+  #endif
 
   if (gnss_enabled && gnss_detect_state == GNSS_DETECT_PROBING) {
     if (gps_parser.passedChecksum() > gnss_detect_baseline_sentences) {
@@ -213,4 +656,6 @@ void gnss_update() {
       }
     }
   }
+
+  if (gnss_enabled) gnss_duty_cycle_update();
 }

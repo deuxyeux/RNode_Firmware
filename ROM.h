@@ -87,45 +87,41 @@
   #define EEPROM_RESERVED 200
 
   // Whether the GNSS receiver (HAS_GPS boards, GNSS.h) is allowed to
-  // initialize at all. The checksummed info region above (0x00-0xC7,
-  // EEPROM_RESERVED bytes wide) is completely full - ADDR_CONF_WS is
-  // explicitly the last free byte there. Growing EEPROM_RESERVED to make
-  // room was tried and reverted: it shifts EEPROM_OFFSET, which reindexes
-  // every eeprom_addr()-mapped byte, including this device's own already-
-  // provisioned ADDR_PRODUCT/MODEL/HW_REV/CHKSUM - on real hardware that
-  // silently misaligns those reads against data written under the old
-  // offset, breaking eeprom_product_valid()/eeprom_checksum_valid() and
-  // producing exactly the "missing config" state this was tested against.
-  // Instead, this uses a raw, non-offset physical byte, picked per-platform
-  // since "genuinely free space" is a different address on each - see
-  // gnss_conf_save() (Utilities.h) and its boot-time load
-  // (RNode_Firmware.ino), both of which use this value directly rather than
-  // through eeprom_addr()/config_addr().
+  // initialize at all, and its duty-cycle update interval (GNSS.h). These
+  // previously lived at raw, non-offset physical bytes 0x00/0x01, picked
+  // per-MCU-variant on the belief that low memory was "genuinely dead
+  // space" on nRF52 (config_addr()'s CONFIG_SIZE region is an ESP32-only
+  // concept, so that specific reasoning was correct) - but that reasoning
+  // never checked Device.h's own raw addressing scheme for the same low
+  // region. On every nRF52 board (EEPROM_SIZE=296, EEPROM_RESERVED=200):
+  // DEV_FWHASH_OFFSET = EEPROM_SIZE-EEPROM_RESERVED-DEV_SIG_LEN-DEV_HASH_LEN
+  // = 296-200-64-32 = 0, and DEV_SIG_OFFSET = 296-200-64 = 32 - i.e.
+  // dev_firmware_hash_target occupies raw bytes 0-31 and dev_sig occupies
+  // 32-95, filling the entire "dead" region. Raw byte 0x00 (the old
+  // ADDR_CONF_GNSS) was literally dev_firmware_hash_target[0]; toggling
+  // GNSS Enabled overwrote it, so the next boot's device_firmware_ok()
+  // comparison failed and displayed "Firmware Corrupt" - confirmed on a
+  // real T114 (see project memory feedback_gnss_eeprom_fwhash_collision
+  // for the full writeup). ADDR_CONF_GNSS_INTERVAL (0x01) had the same
+  // flaw against dev_firmware_hash_target[1], just not yet shipped when
+  // caught.
   //
-  // This #if requires MCU_VARIANT (Boards.h) to already be defined -
-  // Config.h includes Boards.h before this file specifically so that's
-  // true. Get that order backwards and both MCU_VARIANT and
-  // MCU_NRF52/MCU_ESP32 are undefined here, so the comparison below
-  // degenerates to "0 == 0" and silently always takes the nRF52 branch
-  // (0x00) regardless of the real target - confirmed empirically on real
-  // hardware, this was a live bug for a while (see project memory
-  // feedback_rom_h_include_order_undef_macro for the full writeup) that
-  // corrupted the first byte of ESP32's WiFi/Ethernet config storage
-  // whenever GNSS's enable byte was read or written.
-  #if MCU_VARIANT == MCU_NRF52
-    // The low "config" region (CONFIG_SIZE/CONFIG_OFFSET, only ever defined
-    // in Boards.h's MCU_ESP32 scope) is genuinely dead space on every nRF52
-    // board, since config_addr() never even compiles there.
-    #define ADDR_CONF_GNSS 0x00
-  #elif MCU_VARIANT == MCU_ESP32
-    // CONFIG_SIZE (256, below) reserves 0x00-0xFF for WiFi/Ethernet config -
-    // real usage there stops at ADDR_CONF_ETH_DNS+4=0x62, but the declared
-    // 256-byte width is treated as off-limits headroom for that region, not
-    // free space. EEPROM_OFFSET is 824 on the default 1024-byte ESP32
-    // EEPROM_SIZE (1024-200), so 256-823 is a genuinely unclaimed gap -
-    // this just takes its first byte.
-    #define ADDR_CONF_GNSS 256
-  #endif
+  // Fix: despite the comment on ADDR_CONF_WS above claiming the
+  // checksummed info region (0x00-0xC7, EEPROM_RESERVED bytes wide) is
+  // "completely full," there's an 8-byte gap - 0xA8-0xAF - between
+  // ADDR_CONF_OK (0xA7) and ADDR_CONF_BT (0xB0) that was never actually
+  // claimed by anything (verified by grepping every ADDR_CONF_* value in
+  // this file - it was simply overlooked, not intentionally reserved).
+  // These now live there instead, through the normal eeprom_addr() offset
+  // like every other ADDR_CONF_* setting - no more raw physical bytes, no
+  // more per-MCU_VARIANT branching, and no possibility of colliding with
+  // Device.h's raw addressing since that scheme only ever claims bytes
+  // below EEPROM_OFFSET, never inside the EEPROM_RESERVED window these
+  // sit in. See gnss_conf_save()/gnss_interval_conf_save() (Utilities.h)
+  // and their boot-time load (RNode_Firmware.ino), both of which now wrap
+  // these in eeprom_addr() like ADDR_CONF_VSR/BVS/TZ above.
+  #define ADDR_CONF_GNSS          0xA8
+  #define ADDR_CONF_GNSS_INTERVAL 0xA9
 
   // ESP-NOW's vport 1 (ESPNOW.h) has two independent axes, each its own raw
   // physical byte in the same genuinely-unclaimed 256-823 gap as

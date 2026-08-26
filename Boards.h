@@ -453,6 +453,17 @@
       // gnss_set_enabled(), GNSS.h.
       #define HAS_GPS true
       #define GPS_MODEL GPS_MODEL_AT6558
+      // Verbose GNSS diagnostics (Menu.h) - second board to opt in, after
+      // T114's L76K. GSA/GSV support on the AT6558's default NMEA sentence
+      // set is unverified as of this writing, same open risk as T114 (see
+      // gnss_gsv_update()'s own comment in GNSS.h) - PDOP/VDOP/Sats In View
+      // should degrade to N/A/No Data cleanly if the module doesn't emit
+      // them. This board has no PIN_GPS_EN/PIN_GPS_STANDBY (see comment
+      // above), so it's not GNSS_DUTY_CYCLE_CAPABLE - the Diagnostics
+      // page's duty-cycle rows and the main page's Module->Duty State swap
+      // both compile out here, leaving the main page's Module row
+      // untouched.
+      #define HAS_GNSS_DEBUG_MENU true
       #define GPS_SERIAL Serial1
       #define GPS_BAUD_RATE 9600 // AT6558's factory-default NMEA baud
       #define PIN_GPS_RX 3
@@ -887,6 +898,7 @@
       #define PIN_GPS_EN 34      // active LOW
       #define PIN_GPS_RESET 42   // active LOW, needs a >100ms hold to reset
       #define PIN_GPS_STANDBY 40 // HIGH=force wake, LOW=allow sleep
+      #define GNSS_DUTY_CYCLE_CAPABLE true // both pins - soft-sleep short intervals, hard power-off long ones
 
       // RNode Settings menu (Menu.h), button-only navigation (tap = next,
       // double-tap = back, hold = select/open - see menu_button_press()).
@@ -1400,6 +1412,14 @@
       #define HAS_GPS true
       #define GPS_MODEL GPS_MODEL_L76K
 
+      // Verbose GNSS diagnostics (Menu.h) - enabled here first since T114
+      // is actively flash-tested; GSA/GSV support on the L76K's default
+      // NMEA sentence set is unverified as of this writing (see
+      // gnss_gsv_update()'s own comment in GNSS.h) - if it never
+      // populates PDOP/VDOP/sats-in-view, this screen should still
+      // degrade to N/A rows, not misbehave.
+      #define HAS_GNSS_DEBUG_MENU true
+
       // L76K GNSS, wired to this core's second hardware UART (Serial2 -
       // cores/nRF5/Uart.cpp auto-instantiates it since PIN_SERIAL2_RX/TX
       // are always defined on this variant,
@@ -1421,6 +1441,7 @@
       // instead drives the L76K's own PIN_GPS_STANDBY line (soft sleep/
       // wake, independent of VEXT) - see GNSS.h's gnss_set_enabled().
       #define PIN_GPS_STANDBY 34
+      #define GNSS_DUTY_CYCLE_CAPABLE true // PIN_GPS_STANDBY only - soft-sleep
 
       // Battery voltage sensing (measure_battery(), Power.h) goes through
       // pin_vbat and a fixed volts-per-ADC-count constant, same as
@@ -1576,6 +1597,18 @@
       #define HAS_GPS true
       #define GPS_MODEL GPS_MODEL_UC6580
 
+      // Verbose GNSS diagnostics (Menu.h) - third board to opt in, after
+      // T114's L76K and MeshAdventurer-S3's AT6558. GSA/GSV support on the
+      // UC6580's default NMEA sentence set is unverified as of this
+      // writing, same open risk as the other two (see gnss_gsv_update()'s
+      // own comment in GNSS.h) - PDOP/VDOP/Sats In View should degrade to
+      // N/A/No Data cleanly if the module doesn't emit them. Unlike T114,
+      // this board is GNSS_DUTY_CYCLE_HARD_ONLY (every wake is a cold
+      // start), so the main GNSS page's Module row swaps to "Duty State"
+      // same as T114 - worth confirming that reads sensibly given the
+      // longer, harder power cycle.
+      #define HAS_GNSS_DEBUG_MENU true
+
       // UC6580 GNSS, wired to this core's second hardware UART (Serial2 -
       // cores/nRF5/Uart.cpp auto-instantiates it since PIN_SERIAL2_RX/TX
       // are always defined on this variant,
@@ -1601,6 +1634,8 @@
       // avoid a harmless macro-redefinition warning.
       #undef PIN_GPS_EN
       #define PIN_GPS_EN 6        // active LOW
+      #define GNSS_DUTY_CYCLE_CAPABLE true // PIN_GPS_EN only - hard power-off, cold start every wake
+      #define GNSS_DUTY_CYCLE_HARD_ONLY true
       #undef PIN_GPS_PPS
       #define PIN_GPS_PPS 43
       #undef PIN_GPS_RESET
@@ -1824,6 +1859,18 @@
     #define HAS_GPS false
   #endif
 
+  // Whether the verbose GNSS diagnostics subscreen (Menu.h's
+  // MENU_STATE_GNSS_DIAG/MENU_STATE_GNSS_DIAG_SATS) is compiled in.
+  // Opt-in per board, independent of HAS_GPS itself (meaningless without
+  // it, but not automatically turned on by it) - this is a debug/verbose
+  // surface, not something every HAS_GPS board's end user needs by
+  // default, and it adds real runtime cost (TinyGPSCustom PDOP/VDOP/GSV
+  // parsing on every gnss_update() byte) that boards which haven't
+  // verified GSA/GSV support on their specific chip shouldn't pay for.
+  #ifndef HAS_GNSS_DEBUG_MENU
+    #define HAS_GNSS_DEBUG_MENU false
+  #endif
+
   // Whether an onboard microReticulum node (URNS.h) runs alongside the
   // normal KISS/host modem path, giving the device its own Identity that
   // can originate/receive Reticulum packets directly (sensor telemetry,
@@ -1881,6 +1928,33 @@
   // gnss_enabled, GNSS.h.
   #ifndef GNSS_ENABLED_DEFAULT
     #define GNSS_ENABLED_DEFAULT false
+  #endif
+
+  // Duty-cycled GNSS acquisition (GNSS.h) - default interval, 0 = Continuous
+  // (today's always-on behavior), the safe default on every board. Opt-in
+  // only, via the Settings menu's GNSS > Update Interval field.
+  #ifndef GNSS_UPDATE_INTERVAL_DEFAULT
+    #define GNSS_UPDATE_INTERVAL_DEFAULT 0
+  #endif
+
+  // Whether this board can actually power the GNSS receiver down between
+  // duty-cycle wakes at all - only true where a board-specific GPS block
+  // above defined PIN_GPS_EN and/or PIN_GPS_STANDBY. Boards with neither
+  // (the receiver's power is either unswitched, like MeshAdventurer-S3's
+  // AT6558 add-on, or shares a rail with the display, like Heltec
+  // WTracker V2's UC6580) get no benefit from duty-cycling - the interval
+  // setting stays hidden there and Continuous is the only mode.
+  #ifndef GNSS_DUTY_CYCLE_CAPABLE
+    #define GNSS_DUTY_CYCLE_CAPABLE false
+  #endif
+
+  // Whether this board's only gating pin is PIN_GPS_EN (a hard power
+  // switch) with no PIN_GPS_STANDBY - every wake is therefore a cold start,
+  // so the Settings menu's selectable interval range starts at 5 min
+  // instead of 1 min there (a 1-min duty cycle would mostly be spent
+  // waiting on a cold start, defeating the point).
+  #ifndef GNSS_DUTY_CYCLE_HARD_ONLY
+    #define GNSS_DUTY_CYCLE_HARD_ONLY false
   #endif
 
   #ifndef VSENSE_DIVIDER_RATIO_DEFAULT

@@ -230,6 +230,7 @@ void drot_conf_save(uint8_t val);
 #endif
 #if HAS_GPS == true
   void gnss_conf_save(bool is_enabled);
+  void gnss_interval_conf_save(uint8_t preset_index);
 #endif
 #if MCU_VARIANT == MCU_ESP32 && HAS_RTC == true && (HAS_WIFI == true || HAS_ETHERNET == true)
   void kiss_indicate_ntp_sync(uint8_t status);
@@ -2641,14 +2642,30 @@ void enc_conf_save(bool is_enabled) {
 #endif
 
 #if HAS_GPS == true
-// ADDR_CONF_GNSS is a raw physical byte, not offset via eeprom_addr() - see
-// its own comment, ROM.h.
+// ADDR_CONF_GNSS is offset via eeprom_addr() like every other ADDR_CONF_*
+// setting - see its own comment, ROM.h, for why this used to be a raw
+// physical byte and why that collided with Device.h's firmware-hash
+// storage on nRF52.
 void gnss_conf_save(bool is_enabled) {
 	if (is_enabled) {
-		eeprom_update(ADDR_CONF_GNSS, GNSS_ENABLE_BYTE);
+		eeprom_update(eeprom_addr(ADDR_CONF_GNSS), GNSS_ENABLE_BYTE);
 	} else {
-		eeprom_update(ADDR_CONF_GNSS, GNSS_DISABLE_BYTE);
+		eeprom_update(eeprom_addr(ADDR_CONF_GNSS), GNSS_DISABLE_BYTE);
 	}
+  #if !HAS_EEPROM && MCU_VARIANT == MCU_NRF52
+    eeprom_flush();
+  #endif
+}
+
+// Same eeprom_addr() convention as gnss_conf_save() above. Stores the
+// selected index into gnss_update_interval_presets_s (GNSS.h), not the
+// raw seconds value - keeps this a single byte regardless of how large
+// the preset list gets. 0xFF (erased/never touched) is read back as "use
+// the board default" (GNSS_UPDATE_INTERVAL_DEFAULT, always index 0/
+// Continuous today) - same unset convention as ADDR_CONF_GNSS's own
+// enable byte.
+void gnss_interval_conf_save(uint8_t preset_index) {
+	eeprom_update(eeprom_addr(ADDR_CONF_GNSS_INTERVAL), preset_index);
   #if !HAS_EEPROM && MCU_VARIANT == MCU_NRF52
     eeprom_flush();
   #endif
