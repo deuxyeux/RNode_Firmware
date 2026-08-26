@@ -110,11 +110,15 @@ namespace msgpack {
         }
 
     public:
-        template <size_t N>
-        bool deserialize(StaticJsonDocument<N>& doc) {
-            return deserialize_arduinojson(doc);
-        }
-        bool deserialize(DynamicJsonDocument& doc) {
+        // Was two overloads (StaticJsonDocument<N>&, DynamicJsonDocument&) -
+        // both deprecated aliases over the same JsonDocument implementation
+        // in this ArduinoJson version (see compatibility.hpp: both publicly
+        // inherit JsonDocument, capacity() is vestigial). A single
+        // JsonDocument& overload accepts everything the two old ones did
+        // (public inheritance means a StaticJsonDocument<N>/
+        // DynamicJsonDocument reference-binds to JsonDocument& directly)
+        // without naming the deprecated types.
+        bool deserialize(JsonDocument& doc) {
             return deserialize_arduinojson(doc);
         }
 

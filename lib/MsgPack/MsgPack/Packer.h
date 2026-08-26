@@ -81,11 +81,15 @@ namespace msgpack {
             delete[] data;
         }
 
-        template <size_t N>
-        void serialize(const StaticJsonDocument<N>& doc, const size_t num_max_string_type = 32) {
-            serialize_arduinojson(doc, num_max_string_type);
-        }
-        void serialize(const DynamicJsonDocument& doc, const size_t num_max_string_type = 32) {
+        // Was two overloads (StaticJsonDocument<N>&, DynamicJsonDocument&) -
+        // both deprecated aliases over the same JsonDocument implementation
+        // in this ArduinoJson version (see compatibility.hpp: both publicly
+        // inherit JsonDocument, capacity() is vestigial). A single
+        // JsonDocument& overload accepts everything the two old ones did
+        // (public inheritance means a StaticJsonDocument<N>/
+        // DynamicJsonDocument reference-binds to JsonDocument& directly)
+        // without naming the deprecated types.
+        void serialize(const JsonDocument& doc, const size_t num_max_string_type = 32) {
             serialize_arduinojson(doc, num_max_string_type);
         }
 

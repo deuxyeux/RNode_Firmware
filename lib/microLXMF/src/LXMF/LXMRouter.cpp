@@ -1436,8 +1436,8 @@ bool LXMRouter::send_via_link(LXMessage& message, Link& link) {
 			// OPPORTUNISTIC path's proof tracking immediately above. The
 			// pyxis fork apparently never tested this branch end-to-end.
 			if (receipt) {
-				receipt.set_delivery_callback(static_proof_callback);
-				receipt.set_timeout_callback(static_proof_timeout_callback);
+				receipt.set_delivery_handler(static_proof_callback);
+				receipt.set_timeout_handler(static_proof_timeout_callback);
 				PendingProofSlot* slot = find_empty_pending_proof_slot();
 				if (slot) {
 					slot->in_use = true;
@@ -1461,10 +1461,15 @@ bool LXMRouter::send_via_link(LXMessage& message, Link& link) {
 
 			// Create resource with our concluded callback (fires on COMPLETE
 			// or FAILED) and progress callback (fires on each part transferred,
-			// blended into the message-level 0.10–1.0 progress band).
-			Resource resource(message.packed(), link, true, true,
-			                  static_outbound_resource_concluded,
-			                  static_outbound_resource_progress);
+			// blended into the message-level 0.10–1.0 progress band). Minimal
+			// constructor + fluent setters + start() - the (advertise=true,
+			// auto_compress=true, callback, progress_callback) deprecated
+			// constructor is a thin shim over exactly this same sequence.
+			Resource resource(message.packed(), link);
+			resource.auto_compress(true);
+			resource.set_callback(static_outbound_resource_concluded);
+			resource.progress_callback(static_outbound_resource_progress);
+			resource.start();
 
 			// Track this resource so we can match the callback to the message
 			if (resource.hash()) {
@@ -1531,14 +1536,18 @@ bool LXMRouter::send_opportunistic(LXMessage& message, const Identity& dest_iden
 		snprintf(buf, sizeof(buf), "  Packet data size: %zu bytes", packet_data.size());
 		DEBUG(buf);
 
-		// Create and send packet
-		Packet packet(destination, packet_data, RNS::Type::Packet::DATA);
+		// Create and send packet - the minimal Packet(destination, data)
+		// constructor already defaults packet_type to DATA (and every other
+		// field to what this deprecated 3-arg call explicitly/implicitly
+		// wanted: CONTEXT_NONE, BROADCAST, HEADER_1, FLAG_UNSET,
+		// create_receipt=true - see its own comment in Packet.cpp).
+		Packet packet(destination, packet_data);
 		PacketReceipt receipt = packet.receipt_send();
 
 		// Register proof callback to track delivery confirmation
 		if (receipt) {
-			receipt.set_delivery_callback(static_proof_callback);
-			receipt.set_timeout_callback(static_proof_timeout_callback);
+			receipt.set_delivery_handler(static_proof_callback);
+			receipt.set_timeout_handler(static_proof_timeout_callback);
 			PendingProofSlot* slot = find_empty_pending_proof_slot();
 			if (slot) {
 				slot->in_use = true;
@@ -1990,8 +1999,14 @@ bool LXMRouter::send_propagated(LXMessage& message) {
 	snprintf(buf, sizeof(buf), "  Propagated message size: %zu bytes", prop_packed.size());
 	DEBUG(buf);
 
-	// Send via resource with callback
-	Resource resource(prop_packed, _outbound_propagation_link, true, true, static_propagation_resource_concluded);
+	// Send via resource with callback - minimal constructor + fluent setters
+	// + start(), same equivalence as send_over_link()'s own resource path
+	// above (the deprecated (advertise=true, auto_compress=true, callback)
+	// constructor is a thin shim over exactly this sequence).
+	Resource resource(prop_packed, _outbound_propagation_link);
+	resource.auto_compress(true);
+	resource.set_callback(static_propagation_resource_concluded);
+	resource.start();
 
 	// Track this resource
 	if (resource.hash()) {
