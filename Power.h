@@ -181,6 +181,26 @@ float pmu_temperature = PMU_TEMP_MIN-1;
   bool bat_voltage_dropping = false;
   float bat_delay_v = 0;
   float bat_state_change_v = 0;
+#elif BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2
+  #define BAT_V_MIN       3.15
+  #define BAT_V_MAX       4.165
+  #define BAT_V_CHG       4.48
+  #define BAT_V_FLOAT     4.33
+  #define BAT_SAMPLES     7
+  // Meshtastic variant.h: BATTERY_PIN 1, ADC_CTRL 2 (active HIGH, powers
+  // the divider) - same "ADC pin behind an enable-gated divider, no real
+  // PMU chip" pattern as BOARD_HELTEC_T096 above, different pins.
+  const uint8_t pin_vbat = 1;
+  const uint8_t pin_ctrl = 2;
+  float bat_p_samples[BAT_SAMPLES];
+  float bat_v_samples[BAT_SAMPLES];
+  uint8_t bat_samples_count = 0;
+  int bat_discharging_samples = 0;
+  int bat_charging_samples = 0;
+  int bat_charged_samples = 0;
+  bool bat_voltage_dropping = false;
+  float bat_delay_v = 0;
+  float bat_state_change_v = 0;
 #elif BOARD_MODEL == BOARD_HELTEC_T1
   #define BAT_V_MIN       3.15
   #define BAT_V_MAX       4.165
@@ -275,6 +295,17 @@ void measure_battery() {
       float battery_measurement = (float)(analogRead(pin_vbat)) / 4095.0*6.7828;
     #elif BOARD_MODEL == BOARD_HELTEC_T096
       float battery_measurement = (float)(analogRead(pin_vbat)) * 0.017165;
+    #elif BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2
+      // No physical unit to calibrate a raw-analogRead() multiplier against
+      // (see BOARD_HELTEC_T096's own empirically-tuned constant above) - so
+      // this mirrors Meshtastic's reference variant.h exactly instead of
+      // guessing: ADC_ATTEN_DB_2_5 (~1.25V full scale, chosen there for
+      // this exact divider's low output swing) plus calibrated millivolt
+      // reads (analogReadMilliVolts() compensates the ESP32 ADC's own
+      // nonlinearity, unlike a raw analogRead()*constant scale) and their
+      // empirical ADC_MULTIPLIER (4.9*1.045). Attenuation is set once in
+      // battery_init() below.
+      float battery_measurement = (float)(analogReadMilliVolts(pin_vbat)) / 1000.0 * 5.1205;
     #elif BOARD_MODEL == BOARD_HELTEC_T114 || BOARD_MODEL == BOARD_PROMICRO || BOARD_MODEL == BOARD_HELTEC_T1
       float battery_measurement = (float)(analogRead(pin_vbat)) * battery_v_scale;
     #elif BOARD_MODEL == BOARD_TECHO
@@ -542,6 +573,14 @@ bool init_pmu() {
     digitalWrite(pin_ctrl, HIGH);
     return true;
   #elif BOARD_MODEL == BOARD_HELTEC_T096
+    pinMode(pin_ctrl,OUTPUT);
+    digitalWrite(pin_ctrl, HIGH);
+    return true;
+  #elif BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2
+    // ADC_2_5db matches Meshtastic's own reference variant.h (chosen there
+    // for this exact divider's low output swing) - see battery_measurement's
+    // own comment above for why this pairs with analogReadMilliVolts().
+    analogSetPinAttenuation(pin_vbat, ADC_2_5db);
     pinMode(pin_ctrl,OUTPUT);
     digitalWrite(pin_ctrl, HIGH);
     return true;

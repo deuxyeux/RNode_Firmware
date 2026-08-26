@@ -138,6 +138,19 @@
   #define BOARD_DIY_V1            0xF6 // DIY-V1
   #define BOARD_AETHERNODE_S3     0xF7 // Aethernode-S3
 
+  // Heltec Wireless Tracker V2 (ESP32-S3FN8 + SX1262 + KCT8103L FEM +
+  // ST7735S 160x80 TFT + UC6580 GNSS - same display/GNSS/FEM as
+  // BOARD_HELTEC_T096, just on ESP32-S3 instead of nRF52). No physical unit
+  // available to validate against - pin mapping cross-checked between
+  // Meshtastic's own variant def (~/Development/meshtastic_firmware/
+  // variants/esp32s3/heltec_wireless_tracker_v2) and MeshCore's
+  // (~/Development/MeshCore/variants/heltec_tracker_v2), which agree on
+  // every pin - same no-hardware-yet precedent as BOARD_TBEAM_1W above.
+  #define PRODUCT_HELTEC_WTRACKER_V2  0xD8 // Heltec Wireless Tracker V2
+  #define BOARD_HELTEC_WTRACKER_V2    0x46
+  #define MODEL_D6                    0xD6 // Heltec Wireless Tracker V2, 470-510 MHz
+  #define MODEL_D7                    0xD7 // Heltec Wireless Tracker V2, 863-928 MHz
+
   // Heltec Mesh Node T1 (nRF52840, HT-mesh-node-t1 core - already installed
   // locally, unlike T096/T114's own CI-mirrored core). Same display/GNSS
   // chip as BOARD_HELTEC_T096 (ST7735 160x80 + UC6580), no external FEM
@@ -1336,10 +1349,162 @@
         #endif
       #endif
 
+    #elif BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2
+      // Heltec Wireless Tracker V2 (ESP32-S3FN8 + SX1262 + KCT8103L FEM +
+      // ST7735S 160x80 TFT + UC6580 GNSS - same display/GNSS/FEM as
+      // BOARD_HELTEC_T096, just on ESP32-S3 instead of nRF52). No physical
+      // unit available to validate against - pin mapping cross-checked
+      // between Meshtastic's own variant def
+      // (~/Development/meshtastic_firmware/variants/esp32s3/
+      // heltec_wireless_tracker_v2) and MeshCore's
+      // (~/Development/MeshCore/variants/heltec_tracker_v2), which agree
+      // on every pin - same no-hardware-yet precedent as BOARD_TBEAM_1W
+      // above.
+      #define IS_ESP32S3 true
+      #define MODEM SX1262
+      #define HAS_DISPLAY true
+      #define HAS_BLUETOOTH false
+      #define HAS_BLE true
+      #define HAS_WIFI true
+      #define HAS_CONSOLE true
+      #define HAS_EEPROM true
+      #define HAS_PMU true
+      #define HAS_NP false
+      #define HAS_SD false
+      #define HAS_TCXO true
+      #define HAS_BUSY true
+      #define HAS_INPUT true
+      #define HAS_SLEEP true
+      // Wake from deep sleep on the same button used for menu/input (GPIO0,
+      // pin_btn_usr1 below) - active LOW, same convention as every other
+      // HAS_SLEEP ESP32-S3 board in this codebase (e.g. BOARD_HELTEC32_V4/
+      // BOARD_T3S3).
+      #define PIN_WAKEUP GPIO_NUM_0
+      #define WAKEUP_LEVEL 0
+
+      // RNode Settings menu (Menu.h), button-only navigation - same pattern
+      // as BOARD_HELTEC_T096 (no encoder on this board either). Shares
+      // T096's 160x80 ST7735 menu rendering path (Menu.h/Display.h's own
+      // BOARD_HELTEC_T096-grouped blocks) since it's the identical panel.
+      #define HAS_MENU true
+
+      #define DIO2_AS_RF_SWITCH true
+      #define CONFIG_UART_BUFFER_SIZE 6144
+      #define CONFIG_QUEUE_SIZE 6144
+      #define CONFIG_QUEUE_MAX_LENGTH 200
+      #define BLE_MANUFACTURER "Heltec"
+      #define BLE_MODEL "WTrackerV2"
+
+      #define HAS_LORA_PA true
+      #define HAS_LORA_LNA true
+      #define OCP_TUNED 0x38
+      // Same KCT8103L FEM chip as BOARD_HELTEC_T096 (confirmed in both
+      // Meshtastic's and MeshCore's reference variant.h for this board) -
+      // reuses that board's gain table/thresholds verbatim.
+      #define LORA_PA_MODEL LORA_PA_KCT8103L
+      #define LNA_GD_THRSHLD (-109)
+      #define LNA_GD_LIMIT   (-89)
+      #define LORA_LNA_GAIN  21
+      #define LORA_LNA_GVT   12
+
+      // KCT8103L FEM: VFEM LDO enable on GPIO7, CSD on GPIO4, CTX on GPIO5
+      // (Meshtastic variant.h: LORA_PA_PWR_EN 7, LORA_KCT8103L_PA_CSD 4,
+      // LORA_KCT8103L_PA_CTX 5). CPS is wired to SX1262 DIO2 and switched
+      // automatically via DIO2_AS_RF_SWITCH, same as every other
+      // DIO2-driven FEM in this codebase.
+      #define LORA_PA_PWR_EN 7
+      #define LORA_PA_CPS    -1
+      #define LORA_PA_CSD    4
+      #define LORA_PA_CTX    5
+
+      #define PA_MAX_OUTPUT  28
+      #define PA_GAIN_POINTS 22
+
+      #define LORA_LNA_KCT8103L_GAIN 21
+      const int PA_KCT8103L_VALUES[PA_GAIN_POINTS] = {13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 12, 12, 11, 11, 10, 9, 8, 7};
+
+      // Single onboard LED (Meshtastic variant.h: LED_POWER 18) - no
+      // separate RX/TX indicators, same shared-LED pattern as T096.
+      const int pin_led_rx = 18;
+      const int pin_led_tx = 18;
+
+      // SPI (LoRa) - Meshtastic/MeshCore variant.h: LORA_SCK 9, LORA_MISO
+      // 11, LORA_MOSI 10, LORA_CS 8, LORA_RESET 12, LORA_DIO1 14 (IRQ),
+      // LORA_DIO2 13 (their macro name for the BUSY line, not a real DIO2 -
+      // SX126X_BUSY is #defined to it in both reference firmwares).
+      const int pin_cs = 8;
+      const int pin_sclk = 9;
+      const int pin_mosi = 10;
+      const int pin_miso = 11;
+      const int pin_reset = 12;
+      const int pin_busy = 13;
+      const int pin_dio = 14;
+      const int pin_tcxo_enable = -1;
+
+      const int pin_btn_usr1 = 0;
+
+      // pin_vbat/pin_ctrl (battery ADC) are declared in Power.h's own
+      // BOARD_HELTEC_WTRACKER_V2 block, same as BOARD_HELTEC_T096 - not
+      // here, to match that board's existing split.
+
+      // ST7735S 160x80 TFT, identical panel family to BOARD_HELTEC_T096 -
+      // shares that board's rendering pipeline (Display.h/Menu.h/Graphics.h)
+      // wholesale, just different pins and an ESP32 SPIClass object instead
+      // of the nRF52 core's pre-wired SPI1. Meshtastic/MeshCore variant.h:
+      // ST7735_CS 38, ST7735_RS(DC) 40, ST7735_SDA(MOSI) 42, ST7735_SCK 41,
+      // ST7735_RESET 39, TFT_BL 21.
+      #define DISPLAY_SCALE 1
+      #define USE_COLOR_DISPLAY true
+      #define PIN_WTV2_TFT_MOSI 42
+      #define PIN_WTV2_TFT_SCK 41
+      #define PIN_WTV2_TFT_SS 38
+      #define PIN_WTV2_TFT_DC 40
+      #define PIN_WTV2_TFT_RST 39
+      #define PIN_WTV2_TFT_BLGT 21
+
+      // VEXT_ENABLE (GPIO3, active HIGH) - powers the GPS, GPS LNA, and the
+      // TFT together (Meshtastic variant.h: "VEXT_ENABLE 3 // active HIGH -
+      // powers the GPS, GPS LNA and OLED"). Unlike T096, there's no separate
+      // per-peripheral enable pin, so this one line is both this board's
+      // "TFT_EN" (driven from display_init(), Display.h) and its GPS power -
+      // see HAS_GPS below for why PIN_GPS_EN is deliberately left undefined.
+      #define PIN_WTV2_VEXT_EN 3
+
+      const int DISPLAY_DC = PIN_WTV2_TFT_DC;
+      const int DISPLAY_CS = PIN_WTV2_TFT_SS;
+      const int DISPLAY_MOSI = PIN_WTV2_TFT_MOSI;
+      const int DISPLAY_CLK = PIN_WTV2_TFT_SCK;
+      const int DISPLAY_BL_PIN = PIN_WTV2_TFT_BLGT;
+      const int DISPLAY_RST = PIN_WTV2_TFT_RST;
+
+      // Built-in UC6580 GNSS - same chipset as BOARD_HELTEC_T096, so
+      // GNSS.h's existing GPS_MODEL_UC6580 parser needs no changes.
+      // Meshtastic variant.h: GPS_RX_PIN 33, GPS_TX_PIN 34, PIN_GPS_RESET
+      // 35, PIN_GPS_PPS 36, GPS_BAUDRATE 115200. Unlike T096's dedicated
+      // nRF52 Serial2, ESP32's UART peripherals bind pins at .begin() time,
+      // so GPS_SERIAL is Serial1 with explicit rx/tx args - same portability
+      // indirection as BOARD_MESHADVENTURER_S3's own HAS_GPS block.
+      #define HAS_GPS true
+      #define GPS_MODEL GPS_MODEL_UC6580
+      #define GPS_SERIAL Serial1
+      #define GPS_BAUD_RATE 115200
+      #define PIN_GPS_RX 33 // MCU RX - wired to GPS TX-out
+      #define PIN_GPS_TX 34 // MCU TX - wired to GPS RX-in
+      #define PIN_GPS_PPS 36
+      #define PIN_GPS_RESET 35 // active LOW (Meshtastic: GPS_RESET_MODE LOW)
+      // No PIN_GPS_EN here - GPS power is the shared PIN_WTV2_VEXT_EN line
+      // above (also used by the TFT), not a dedicated GPS enable pin, so
+      // toggling GNSS off in the Settings menu must not touch this pin (it
+      // would also kill the display) - same reasoning as
+      // BOARD_MESHADVENTURER_S3's own "no PIN_GPS_EN/PIN_GPS_STANDBY apply
+      // here" GNSS block. Always-populated onboard receiver (not an
+      // optional add-on like MeshAdventurer-S3's), so GNSS_ENABLED_DEFAULT
+      // stays at its global default (true).
+
     #else
       #error An unsupported ESP32 board was selected. Cannot compile RNode firmware.
     #endif
-  
+
   #elif MCU_VARIANT == MCU_NRF52
     #if BOARD_MODEL == BOARD_RAK4631
       #define HAS_EEPROM false

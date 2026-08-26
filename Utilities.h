@@ -930,6 +930,18 @@ void set_rns_link_state(uint8_t new_state) {
 		void led_tx_off() { }
 		void led_id_on()  { }
 		void led_id_off() { }
+	#elif BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2
+		// Same active-HIGH convention as BOARD_HELTEC_T096 (Utilities.h,
+		// MCU_NRF52 branch below) - neither Meshtastic's nor MeshCore's
+		// reference variant.h for this board states its LED's active level,
+		// assumed same as T096 pending real hardware to verify (worst case
+		// it's just inverted, not damaging).
+		void led_rx_on()  { digitalWrite(pin_led_rx, HIGH); }
+		void led_rx_off() { digitalWrite(pin_led_rx, LOW); }
+		void led_tx_on()  { digitalWrite(pin_led_tx, HIGH); }
+		void led_tx_off() { digitalWrite(pin_led_tx, LOW); }
+		void led_id_on()  { }
+		void led_id_off() { }
 	#endif
 #elif MCU_VARIANT == MCU_NRF52
     #if HAS_NP == true
@@ -2126,7 +2138,7 @@ int getTxPower() {
     #if BOARD_MODEL == BOARD_HELTEC32_V4
 	bool pa_values_determined = false;
 	int tx_gain[PA_GAIN_POINTS] = {100};
-    #elif BOARD_MODEL == BOARD_HELTEC_T096
+    #elif BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2
 	bool pa_values_determined = false;
 	int tx_gain[PA_GAIN_POINTS] = {100};
     #else
@@ -2147,7 +2159,7 @@ void determine_pa_values() {
 			pa_values_determined = true;
 			for (int i=0; i < PA_GAIN_POINTS; i++) { Serial.print(" "); Serial.printf("%d", tx_gain[i]); }
 		}
-	#elif BOARD_MODEL == BOARD_HELTEC_T096
+	#elif BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2
 		if (lora_pa_model == LORA_PA_KCT8103L) {
 			for (int i=0; i < PA_GAIN_POINTS; i++) { tx_gain[i] = PA_KCT8103L_VALUES[i]; }
 			pa_values_determined = true;
@@ -2503,7 +2515,7 @@ bool eeprom_product_valid() {
 	#if PLATFORM == PLATFORM_AVR
 	if (rval == PRODUCT_RNODE || rval == PRODUCT_HMBRW) {
 	#elif PLATFORM == PLATFORM_ESP32
-	if (rval == PRODUCT_RNODE || rval == BOARD_RNODE_NG_20 || rval == BOARD_RNODE_NG_21 || rval == PRODUCT_HMBRW || rval == PRODUCT_TBEAM || rval == PRODUCT_T32_10 || rval == PRODUCT_T32_20 || rval == PRODUCT_T32_21 || rval == PRODUCT_H32_V2 || rval == PRODUCT_H32_V3 || rval == PRODUCT_H32_V4 || rval == PRODUCT_TDECK_V1 || rval == PRODUCT_TBEAM_S_V1 || rval == PRODUCT_TBEAM_S_V3 || rval == PRODUCT_XIAO_S3) {
+	if (rval == PRODUCT_RNODE || rval == BOARD_RNODE_NG_20 || rval == BOARD_RNODE_NG_21 || rval == PRODUCT_HMBRW || rval == PRODUCT_TBEAM || rval == PRODUCT_T32_10 || rval == PRODUCT_T32_20 || rval == PRODUCT_T32_21 || rval == PRODUCT_H32_V2 || rval == PRODUCT_H32_V3 || rval == PRODUCT_H32_V4 || rval == PRODUCT_TDECK_V1 || rval == PRODUCT_TBEAM_S_V1 || rval == PRODUCT_TBEAM_S_V3 || rval == PRODUCT_XIAO_S3 || rval == PRODUCT_HELTEC_WTRACKER_V2) {
 	#elif PLATFORM == PLATFORM_NRF52
 	if (rval == PRODUCT_RAK4631 || rval == PRODUCT_HELTEC_T114 || rval == PRODUCT_HELTEC_T096 || rval == PRODUCT_HELTEC_T1 || rval == PRODUCT_TECHO || rval == PRODUCT_HMBRW) {
 	#else
@@ -2557,6 +2569,8 @@ bool eeprom_model_valid() {
   if (model == MODEL_C6 || model == MODEL_C7) {
   #elif BOARD_MODEL == BOARD_HELTEC_T096
   if (model == MODEL_D3 || model == MODEL_D5) {
+  #elif BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2
+  if (model == MODEL_D6 || model == MODEL_D7) {
   #elif BOARD_MODEL == BOARD_HELTEC_T1
   if (model == MODEL_DF || model == MODEL_E2) {
   #elif BOARD_MODEL == BOARD_RAK4631
