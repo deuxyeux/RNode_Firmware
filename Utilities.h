@@ -798,6 +798,13 @@ void set_rns_link_state(uint8_t new_state) {
 		void led_tx_off() { }
 		void led_id_on()  { }
 		void led_id_off() { }
+	#elif BOARD_MODEL == BOARD_TBEAM_1W
+		void led_rx_on()  { digitalWrite(pin_led_rx, HIGH); }
+		void led_rx_off() {	digitalWrite(pin_led_rx, LOW); }
+		void led_tx_on()  { digitalWrite(pin_led_tx, HIGH); }
+		void led_tx_off() { digitalWrite(pin_led_tx, LOW); }
+		void led_id_on()  { }
+		void led_id_off() { }
 	#elif BOARD_MODEL == BOARD_LORA32_V1_0
 		#if defined(EXTERNAL_LEDS)
 			void led_rx_on()  { digitalWrite(pin_led_rx, HIGH); }
@@ -2287,6 +2294,8 @@ void setTXPower() {
 		if (model == MODEL_E9) LoRa->setTxPower(mapped_lora_txp, PA_OUTPUT_PA_BOOST_PIN);
 		if (model == MODEL_E3) LoRa->setTxPower(mapped_lora_txp, PA_OUTPUT_PA_BOOST_PIN);
 		if (model == MODEL_E8) LoRa->setTxPower(mapped_lora_txp, PA_OUTPUT_PA_BOOST_PIN);
+		if (model == MODEL_E5) LoRa->setTxPower(mapped_lora_txp, PA_OUTPUT_PA_BOOST_PIN);
+		if (model == MODEL_E6) LoRa->setTxPower(mapped_lora_txp, PA_OUTPUT_PA_BOOST_PIN);
 
 		if (model == MODEL_FD) LoRa->setTxPower(mapped_lora_txp, PA_OUTPUT_PA_BOOST_PIN);
 		if (model == MODEL_FE) LoRa->setTxPower(mapped_lora_txp, PA_OUTPUT_PA_BOOST_PIN);
@@ -2515,7 +2524,7 @@ bool eeprom_product_valid() {
 	#if PLATFORM == PLATFORM_AVR
 	if (rval == PRODUCT_RNODE || rval == PRODUCT_HMBRW) {
 	#elif PLATFORM == PLATFORM_ESP32
-	if (rval == PRODUCT_RNODE || rval == BOARD_RNODE_NG_20 || rval == BOARD_RNODE_NG_21 || rval == PRODUCT_HMBRW || rval == PRODUCT_TBEAM || rval == PRODUCT_T32_10 || rval == PRODUCT_T32_20 || rval == PRODUCT_T32_21 || rval == PRODUCT_H32_V2 || rval == PRODUCT_H32_V3 || rval == PRODUCT_H32_V4 || rval == PRODUCT_TDECK_V1 || rval == PRODUCT_TBEAM_S_V1 || rval == PRODUCT_TBEAM_S_V3 || rval == PRODUCT_XIAO_S3 || rval == PRODUCT_HELTEC_WTRACKER_V2) {
+	if (rval == PRODUCT_RNODE || rval == BOARD_RNODE_NG_20 || rval == BOARD_RNODE_NG_21 || rval == PRODUCT_HMBRW || rval == PRODUCT_TBEAM || rval == PRODUCT_T32_10 || rval == PRODUCT_T32_20 || rval == PRODUCT_T32_21 || rval == PRODUCT_H32_V2 || rval == PRODUCT_H32_V3 || rval == PRODUCT_H32_V4 || rval == PRODUCT_TDECK_V1 || rval == PRODUCT_TBEAM_S_V1 || rval == PRODUCT_TBEAM_S_V3 || rval == PRODUCT_XIAO_S3 || rval == PRODUCT_TBEAM_1W || rval == PRODUCT_HELTEC_WTRACKER_V2) {
 	#elif PLATFORM == PLATFORM_NRF52
 	if (rval == PRODUCT_RAK4631 || rval == PRODUCT_HELTEC_T114 || rval == PRODUCT_HELTEC_T096 || rval == PRODUCT_HELTEC_T1 || rval == PRODUCT_TECHO || rval == PRODUCT_HMBRW) {
 	#else
@@ -2545,6 +2554,8 @@ bool eeprom_model_valid() {
 	if (model == MODEL_FF || model == MODEL_FE || model == MODEL_FD) {
 	#elif BOARD_MODEL == BOARD_TBEAM
 	if (model == MODEL_E4 || model == MODEL_E9 || model == MODEL_E3 || model == MODEL_E8) {
+	#elif BOARD_MODEL == BOARD_TBEAM_1W
+	if (model == MODEL_E5 || model == MODEL_E6) {
 	#elif BOARD_MODEL == BOARD_TDECK
 	if (model == MODEL_D4 || model == MODEL_D9) {
 	#elif BOARD_MODEL == BOARD_TECHO

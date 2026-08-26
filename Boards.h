@@ -67,6 +67,11 @@
   #define MODEL_DB            0xDB // LilyGO T-Beam Supreme, 433 MHz
   #define MODEL_DC            0xDC // LilyGO T-Beam Supreme, 868 MHz
 
+  #define PRODUCT_TBEAM_1W    0xE1 // LilyGO T-Beam 1W devices
+  #define BOARD_TBEAM_1W      0x45
+  #define MODEL_E5            0xE5 // LilyGO T-Beam 1W, 433 MHz
+  #define MODEL_E6            0xE6 // LilyGO T-Beam 1W, 868 MHz
+
   #define PRODUCT_XIAO_S3     0xEB
   #define BOARD_XIAO_S3       0x3E
   #define MODEL_DE            0xDE // Xiao ESP32S3 with Wio-SX1262 module, 433 MHz
@@ -647,6 +652,123 @@
       #define PIN_ENCODER_UP 16
       #define PIN_ENCODER_DOWN 17
       #define PIN_ENCODER_PRESS 4
+
+    #elif BOARD_MODEL == BOARD_TBEAM_1W
+      // LilyGO T-Beam 1W (ESP32-S3 + SX1262 driving an XY16P35 1W PA/LNA
+      // module). No physical unit available to validate against - the pin
+      // mapping and RF-switch topology below are cross-checked between
+      // Meshtastic's board/variant defs (~/Development/meshtastic_firmware/
+      // variants/esp32s3/t-beam-1w) and MeshCore's own
+      // (~/Development/MeshCore/variants/lilygo_tbeam_1w), which agree on
+      // every pin except TCXO voltage and the battery ADC scale - both
+      // called out where they're set below.
+      #define IS_ESP32S3 true
+      #undef HAS_DISPLAY
+      #define HAS_DISPLAY true
+      #define HAS_BLUETOOTH false
+      #undef HAS_BLE
+      #define HAS_BLE true
+      #undef HAS_WIFI
+      #define HAS_WIFI true
+      #define HAS_CONSOLE true
+      #undef HAS_EEPROM
+      #define HAS_EEPROM true
+      #define HAS_BUSY true
+      #undef HAS_INPUT
+      #define HAS_INPUT true
+      #undef HAS_TCXO
+      #define HAS_TCXO true
+      #undef MODEM
+      #define MODEM SX1262
+
+      // XY16P35 module: DIO2 drives the PA leg of the RF switch directly
+      // (SX126X_DIO2_AS_RF_SWITCH in both reference firmwares); CTRL/RXEN
+      // (GPIO21) is a separate, MCU-driven LNA-enable line - exactly the
+      // "DIO2_AS_RF_SWITCH true with a real pin_rxen" pattern this firmware
+      // already uses for BOARD_MESHADVENTURER_S3. rxAntEnable()/
+      // beginPacket() (sx126x.cpp) already drive that pin HIGH on receive()
+      // and LOW at the start of every TX with no board-specific code needed
+      // - see those functions' own comments for why.
+      #define DIO2_AS_RF_SWITCH true
+      #define HAS_RF_SWITCH_RX_TX false
+
+      // RSSI correction for the module's built-in LNA - no datasheet figure
+      // available for the XY16P35, so this reuses the same generic
+      // external-LNA default every other FEM-equipped board in this
+      // codebase falls back to (MeshPoE-S3, MeshAdventurer-S3,
+      // MeshAdventurer, DIY-V1) rather than inventing an unverified number.
+      #undef HAS_LORA_LNA
+      #define HAS_LORA_LNA true
+      #define LORA_LNA_GAIN  17
+      #define LORA_LNA_GVT   12
+
+      // RNode Settings menu (Menu.h), button-only navigation (tap = next,
+      // double-tap = back, hold = select/open) - no encoder on this board.
+      #define HAS_MENU true
+
+      // Direct resistor-divider battery ADC (2S 7.4V LiPo pack), no fuel
+      // gauge/PMU - same mechanism as BOARD_MESHADVENTURER_S3's
+      // HAS_VSENSE/PIN_VSENSE (Power.h's update_vsense()). Meshtastic's and
+      // MeshCore's variant.h disagree on the exact multiplier for what both
+      // describe as the same divider (2.9333 vs 3.0) - 3.0 is used here as
+      // a clean starting point; it's a runtime-overridable default
+      // (vsense_divider_ratio, CMD_VSENSE_DIV) either way, so field
+      // calibration against a real pack corrects it.
+      #define HAS_VSENSE true
+      #define PIN_VSENSE 4
+      #define VSENSE_DIVIDER_RATIO_DEFAULT 3.0
+
+      // Built-in Quectel L76K GNSS - same chip and enable-line style as
+      // BOARD_HELTEC_T114's. GPS_EN_PIN (GPIO16) is active-HIGH on this
+      // board (MeshCore's PIN_GPS_EN_ACTIVE defaults HIGH and nothing
+      // overrides it for this variant), the opposite polarity from this
+      // firmware's generic PIN_GPS_EN macro (T096-style, active-LOW - see
+      // GNSS.h) - so it's wired as PIN_GPS_STANDBY instead (HIGH=awake,
+      // LOW=allow sleep, GNSS.h's gnss_set_enabled()), matching T114's own
+      // L76K wiring exactly.
+      #define HAS_GPS true
+      #define GPS_MODEL GPS_MODEL_L76K
+      #define GPS_SERIAL Serial1
+      #define GPS_BAUD_RATE 9600 // L76K's factory-default NMEA baud
+      #define PIN_GPS_RX 5       // MCU RX - wired to GPS TX-out
+      #define PIN_GPS_TX 6       // MCU TX - wired to GPS RX-in
+      #define PIN_GPS_PPS 7
+      #define PIN_GPS_STANDBY 16 // active HIGH - see comment above
+      #define GNSS_DUTY_CYCLE_CAPABLE true // PIN_GPS_STANDBY only - soft-sleep
+
+      const int pin_cs = 15;
+      const int pin_sclk = 13;
+      const int pin_miso = 12;
+      const int pin_mosi = 11;
+      const int pin_busy = 38;
+      const int pin_reset = 3;
+      const int pin_dio = 1;
+      // No discrete TXEN GPIO on this module - DIO2 (above) drives the PA
+      // leg directly; only the LNA leg (RXEN) is MCU-controlled.
+      const int pin_txen = -1;
+      const int pin_rxen = 21;
+      const int pin_tcxo_enable = -1;
+
+      // BOOT button. A 2nd button (ALT, GPIO17) exists on this board but
+      // isn't wired to anything - this firmware has no generic
+      // second-user-button concept (see pin_btn_usr1's own use sites).
+      const int pin_btn_usr1 = 0;
+
+      const int pin_led_rx = 18;
+      const int pin_led_tx = 18;
+
+      // GPIO40/41 aren't modeled by any existing pin_* concept in this
+      // firmware - they're handled directly in setup() (RNode_Firmware.ino)
+      // instead of through the generic radio-pin machinery above.
+      //   pin_radio_en (GPIO40): LDO enable for the whole XY16P35 module
+      //     (SX1262 + PA + LNA) - must be driven HIGH before any SPI/radio
+      //     access, per both reference firmwares.
+      //   pin_fan_en (GPIO41): PA cooling fan, driven on unconditionally at
+      //     boot (matches MeshCore's TBeam1WBoard::begin(): "on by default -
+      //     1W PA can overheat"). No thermal sensing to duty-cycle it
+      //     against, so this errs toward always-on rather than silent.
+      const int pin_radio_en = 40;
+      const int pin_fan_en = 41;
 
     #elif BOARD_MODEL == BOARD_DIY_V1
       #define HAS_DISPLAY true
