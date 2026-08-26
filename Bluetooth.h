@@ -516,6 +516,23 @@ char bt_da[BT_DEV_ADDR_LEN];
 #elif MCU_VARIANT == MCU_NRF52
     uint32_t pairing_pin = 0;
 
+  // bt_connect_callback()/bt_pairing_complete() (below) are Bluefruit
+  // Security/Periph callbacks - the Adafruit nRF52 core dispatches these
+  // from its own SoftDevice event-handling task, not from loop()'s task.
+  // They used to call set_rns_link_state() directly, which (since the RNS
+  // link-state chirps were added) does non-reentrant work - tone()/
+  // noTone() on the shared PWM peripheral plus several buzzer_async_*
+  // globals (Utilities.h) - that loop()'s own buzzer_update() polls and
+  // mutates every iteration with no locking, since it was always written
+  // assuming a single caller task. Racing loop() for that hardware/state
+  // from a second task intermittently wedged the whole node (observed as
+  // a full lockup, not just BLE misbehaving, once a BLE central actually
+  // connected/paired and this path started firing) - deferred through
+  // this flag instead, so the actual set_rns_link_state() call happens
+  // from update_bt(), polled from loop() like everything else that
+  // touches shared firmware state.
+  volatile int8_t bt_pending_rns_link_state = -1;
+
   uint8_t eeprom_read(uint32_t mapped_addr);
 
   void bt_stop() {
@@ -562,7 +579,7 @@ char bt_da[BT_DEV_ADDR_LEN];
       if (security.sm == 1 && security.lv >= 3) {
           // Serial.println("Auth level success");
           bt_state = BT_STATE_CONNECTED;
-          set_rns_link_state(RNS_LINK_STATE_DISCONNECTED);
+          bt_pending_rns_link_state = RNS_LINK_STATE_DISCONNECTED;
           connection->disconnect();
           bt_disable_pairing();
       } else {
@@ -589,7 +606,7 @@ char bt_da[BT_DEV_ADDR_LEN];
   void bt_connect_callback(uint16_t conn_handle) {
     // Serial.println("Connect callback");
     bt_state = BT_STATE_CONNECTED;
-    set_rns_link_state(RNS_LINK_STATE_DISCONNECTED);
+    bt_pending_rns_link_state = RNS_LINK_STATE_DISCONNECTED;
 
     BLEConnection* conn = Bluefruit.Connection(conn_handle);
     conn->requestPHY(BLE_GAP_PHY_2MBPS);
@@ -735,6 +752,13 @@ char bt_da[BT_DEV_ADDR_LEN];
   void bt_debond_all() { }
 
   void update_bt() {
+    // Apply any RNS link-state transition a BLE callback deferred (see
+    // bt_pending_rns_link_state's own comment above) - safe here, loop()'s
+    // own task, same one buzzer_update() runs on.
+    if (bt_pending_rns_link_state != -1) {
+      set_rns_link_state((uint8_t)bt_pending_rns_link_state);
+      bt_pending_rns_link_state = -1;
+    }
     if (bt_allow_pairing && millis()-bt_pairing_started >= BT_PAIRING_TIMEOUT) {
       bt_disable_pairing();
     }

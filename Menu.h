@@ -34,7 +34,7 @@
   // why the address/datetime/text-wheel editors don't need this yet).
   // Values are starting points, not final - like every other pixel-level
   // convention in this file, tuning happens live on hardware, not here.
-  #if BOARD_MODEL == BOARD_HELTEC_T096
+  #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1
     #define MENU_GFX menu_canvas
     #define MENU_FONT SMALL_FONT
     #define MENU_CONTENT_W (MENU_CANVAS_W - 8) // 4px margin each side
@@ -130,6 +130,41 @@
     #define MENU_EDIT_FOOTER_TEXT_Y 59
   #endif
 
+  // Optional leading icon column for draw_menu_list_disp() rows - board-
+  // independent (the icons themselves are small fixed-size Piskel glyphs,
+  // see bm_menu_icon_* in Graphics.h), unlike the row metrics above which
+  // vary per board/canvas. Only lists that build their own icons[] table
+  // (draw_settings_menu_disp()'s RNODE SETTINGS list, MESSENGER's top
+  // screen) reserve this full shared column - every other list's labels
+  // still start at the plain x=8 those use when the icons param is left at
+  // its nullptr default. See MENU_BACK_TEXT_X below for the separate,
+  // narrower treatment every plain "BACK" row gets automatically instead.
+  #define MENU_ROW_ICON_X 6
+  #define MENU_ROW_ICON_COL_W MENU_ICON_W_INBOX // widest icon (19px)
+  #define MENU_ROW_ICON_GAP 3
+  #if BOARD_MODEL == BOARD_HELTEC_T114
+    // Same shared-column math as every other board, but against T114's
+    // much taller 20px row (MENU_LIST_ROW_H above) and bigger Tamsyn6x12
+    // font the label still read as sitting too far right of its icon -
+    // moved closer, confirmed on real hardware (first pass -10, nudged
+    // back +2 after a follow-up look).
+    #define MENU_ROW_TEXT_X_ICONS (MENU_ROW_ICON_X + MENU_ROW_ICON_COL_W + MENU_ROW_ICON_GAP - 8)
+    // Row-centered icon (draw_menu_list_disp() below) still read a touch
+    // off relative to the label - confirmed on real hardware (first pass
+    // -1, nudged back +1 after a follow-up look, netting 0/no adjustment
+    // from plain row-centering).
+    #define MENU_ICON_Y_NUDGE 0
+  #else
+    #define MENU_ROW_TEXT_X_ICONS (MENU_ROW_ICON_X + MENU_ROW_ICON_COL_W + MENU_ROW_ICON_GAP)
+    #define MENU_ICON_Y_NUDGE 0
+  #endif
+  // Deliberately not MENU_ROW_TEXT_X_ICONS - that column is sized for the
+  // widest icon of any list that opts in (bm_menu_icon_inbox, 19px), which
+  // would collide with plain lists' own longer labels/inline values (e.g.
+  // URNS's "Remote Management" + ON/OFF) if every BACK row reserved it too.
+  // BACK only ever needs room for its own narrow (9px) glyph.
+  #define MENU_BACK_TEXT_X (MENU_ROW_ICON_X + MENU_ICON_W_BACK + MENU_ROW_ICON_GAP)
+
   #define MENU_STATE_CLOSED         0
   #define MENU_STATE_LIST           1   // top-level list
   #define MENU_STATE_EDIT           2   // editing a top-level field
@@ -177,6 +212,12 @@
   #define MENU_STATE_URNS_PATH_HASH_VIEW 44 // full path hash, two plain lines, no captions - opened from MENU_STATE_URNS_PATH_DETAIL's Hash row, dismissed by any input
   #define MENU_STATE_URNS_FREE_DETAIL 45 // urns partition usage broken down by data type (HAS_URNS boards), opened from MENU_STATE_URNS_LIST's Free row - read-only, computed once on entry (never in a draw path - see project_urns_partition_growth memory)
   #define MENU_STATE_MSNGR_SEND_RESULT 46 // live status (Sending.../Delivered/No Confirmation) + BACK, opened from MENU_STATE_MSNGR_PEER's Send Hi/Bye/SOS and MENU_STATE_MSNGR_TEXT_ENTRY's Send key - same "live status + BACK" shape as MENU_STATE_MSNGR_PING_RESULT, auto-dismisses on Delivered/No Confirmation (msngr_send_result_process(), polled from loop()) unlike Ping's manual-only dismiss
+  #define MENU_STATE_URNS_RADIO_LIST 47 // Radio submenu list - Frequency/Bandwidth/SF/CR/TX Power/Back - top-level item, sits right under URNS on boards that have it, not nested inside URNS_LIST, and not gated on HAS_URNS (configures the same TNC-mode EEPROM fields a connected host already uses independently of the onboard URNS node)
+  #define MENU_STATE_URNS_RADIO_EDIT 48 // editing whichever of Frequency/Bandwidth/SF/CR/TX Power was selected
+  #if HAS_GPS == true && HAS_GNSS_DEBUG_MENU == true
+    #define MENU_STATE_GNSS_DIAG      49 // verbose GNSS diagnostics summary - opened from MENU_STATE_GNSS_LIST's Diagnostics row
+    #define MENU_STATE_GNSS_DIAG_SATS 50 // satellites-in-view list (PRN/El/Az/SNR, from GPGSV) - opened from MENU_STATE_GNSS_DIAG's Sats In View row
+  #endif
 
   // The Hardware page used to only exist when there was board-level info
   // worth showing (battery/voltage sensing via HAS_PMU, or an ESP32-S3's
@@ -244,10 +285,21 @@
     // no live start/stop path) - staged here, actually written by
     // menu_commit_and_exit(), same as ESP-NOW's own Enabled field.
     #define MENU_ITEM_URNS MENU_NEXT_IDX_SE2
-    #define MENU_NEXT_IDX_SE3 (MENU_NEXT_IDX_SE2 + 1)
+    #define MENU_NEXT_IDX_SE2R (MENU_NEXT_IDX_SE2 + 1)
   #else
-    #define MENU_NEXT_IDX_SE3 MENU_NEXT_IDX_SE2
+    #define MENU_NEXT_IDX_SE2R MENU_NEXT_IDX_SE2
   #endif
+
+  // Opens the Radio submenu (Frequency/Bandwidth/SF/CR/TX Power,
+  // URNS_RADIO_ITEM_*, MENU_STATE_URNS_RADIO_LIST/EDIT) - sits right under
+  // URNS on boards that have it, per user request. NOT gated on HAS_URNS:
+  // it configures the same lora_freq/bw/sf/cr/txp globals and EEPROM
+  // fields (eeprom_conf_save() etc, Utilities.h) the classic host-attached
+  // TNC mode already uses via CMD_FREQUENCY/CMD_CONF_SAVE, which works
+  // independently of the onboard URNS node - so this menu item is useful
+  // on any board, whether or not HAS_URNS is compiled in.
+  #define MENU_ITEM_URNS_RADIO MENU_NEXT_IDX_SE2R
+  #define MENU_NEXT_IDX_SE3 (MENU_NEXT_IDX_SE2R + 1)
 
   #if HAS_ESPNOW == true
     // Opens the ESP-NOW submenu (Enabled + Mode fields, ESPNOW_ITEM_*,
@@ -410,30 +462,109 @@
   #endif
 
   #if HAS_GPS == true
-    #define GNSS_ITEM_ENABLED    0   // editable, immediate-commit toggle - power-cycles PIN_GPS_EN live
-    // Auto-detected module presence (gnss_module_status_text(), GNSS.h) -
-    // shows the chip name once real NMEA bytes have been seen since
-    // Enabled last went true, "DETECTING..." during the first
-    // GNSS_DETECT_MAX_ATTEMPTS probe attempts, or "NOT DETECTED" once
-    // those are exhausted with nothing received. Matters most on boards
-    // where the receiver is an optional add-on (MeshAdventurer-S3's
-    // ATGM336H) - otherwise turning Enabled on with no module wired would
-    // just show permanently-zero Fix/Satellites, indistinguishable from
-    // "no sky view yet".
-    #define GNSS_ITEM_MODULE     1   // read-only
-    #define GNSS_ITEM_FIX        2   // read-only
-    #define GNSS_ITEM_SATELLITES 3   // read-only
-    #define GNSS_ITEM_LATITUDE   4   // read-only
-    #define GNSS_ITEM_LONGITUDE  5   // read-only
-    #define GNSS_ITEM_ALTITUDE   6   // read-only
+    #define GNSS_ITEM_ENABLED 0   // editable, immediate-commit toggle - power-cycles PIN_GPS_EN live
+    #define GNSS_NEXT_0 1
+
+    // Duty-cycled acquisition interval (GNSS.h) - only present on boards
+    // that can actually gate GNSS power (PIN_GPS_EN and/or PIN_GPS_STANDBY
+    // - see the per-board audit, Boards.h). Boards without a gating pin
+    // get no real benefit from duty-cycling the receiver, so this row is
+    // compiled out there entirely rather than exposing a setting that
+    // can't deliver what it implies.
+    #if GNSS_DUTY_CYCLE_CAPABLE == true
+      #define GNSS_ITEM_UPDATE_INTERVAL GNSS_NEXT_0 // editable, immediate-commit - same pattern as Enabled above
+      #define GNSS_NEXT_1 (GNSS_NEXT_0 + 1)
+    #else
+      #define GNSS_NEXT_1 GNSS_NEXT_0
+    #endif
+
+    // Module identity (gnss_module_status_text()/gnss_chip_name(), GNSS.h)
+    // vs. Duty State - a mutually exclusive slot, not two separate rows.
+    // Plain "Module" (chip name once detected, DETECTING.../NOT DETECTED
+    // otherwise - matters most on boards where the receiver is an
+    // optional add-on, like MeshAdventurer-S3's ATGM336H) only lives here
+    // when there's no Diagnostics page to relocate it to. Once Diagnostics
+    // exists (HAS_GNSS_DEBUG_MENU true), Module always moves there
+    // (GNSS_DIAG_ITEM_MODULE below) and this slot either shows the more
+    // actionable "Duty State" (ACTIVE/HOLD/SLEEP, on boards that actually
+    // duty-cycle) or disappears entirely (on debug-menu boards with no
+    // duty-cycle capability at all, e.g. MeshAdventurer-S3's AT6558 - no
+    // PIN_GPS_EN/PIN_GPS_STANDBY to gate power with, so there's no duty
+    // state to show instead).
+    #if HAS_GNSS_DEBUG_MENU == true && GNSS_DUTY_CYCLE_CAPABLE == true
+      #define GNSS_ITEM_DUTY_STATE GNSS_NEXT_1 // read-only
+      #define GNSS_NEXT_2 (GNSS_NEXT_1 + 1)
+    #elif HAS_GNSS_DEBUG_MENU == true
+      #define GNSS_NEXT_2 GNSS_NEXT_1
+    #else
+      #define GNSS_ITEM_MODULE GNSS_NEXT_1 // read-only
+      #define GNSS_NEXT_2 (GNSS_NEXT_1 + 1)
+    #endif
+
+    #define GNSS_ITEM_FIX        GNSS_NEXT_2       // read-only
+    #define GNSS_ITEM_SATELLITES (GNSS_NEXT_2 + 1) // read-only
+    #define GNSS_ITEM_LATITUDE   (GNSS_NEXT_2 + 2) // read-only
+    #define GNSS_ITEM_LONGITUDE  (GNSS_NEXT_2 + 3) // read-only
+    #define GNSS_ITEM_ALTITUDE   (GNSS_NEXT_2 + 4) // read-only
     // GNSS time (UTC) - populates independently of Fix/location (see
     // gnss_time_valid(), GNSS.h) - a receiver typically syncs time before
     // ever achieving a position fix, so this is a genuine diagnostic: Time
     // valid but Fix/Satellites still 0 confirms sentence parsing works
     // end-to-end and it's an antenna/sky-visibility issue, not firmware.
-    #define GNSS_ITEM_TIME       7   // read-only
-    #define GNSS_ITEM_BACK       8
-    #define GNSS_ITEM_COUNT      9
+    #define GNSS_ITEM_TIME       (GNSS_NEXT_2 + 5) // read-only
+    #define GNSS_NEXT_3          (GNSS_NEXT_2 + 6)
+
+    #if HAS_GNSS_DEBUG_MENU == true
+      #define GNSS_ITEM_DIAGNOSTICS GNSS_NEXT_3 // opens MENU_STATE_GNSS_DIAG
+      #define GNSS_NEXT_4 (GNSS_NEXT_3 + 1)
+    #else
+      #define GNSS_NEXT_4 GNSS_NEXT_3
+    #endif
+
+    #define GNSS_ITEM_BACK  GNSS_NEXT_4
+    #define GNSS_ITEM_COUNT (GNSS_ITEM_BACK + 1)
+
+    #if HAS_GNSS_DEBUG_MENU == true
+      // GNSS_DIAG_ITEM_* - verbose diagnostics summary page
+      // (MENU_STATE_GNSS_DIAG), opened via GNSS_ITEM_DIAGNOSTICS above.
+      // Uses the Hardware page's _NEXT_-chaining convention (more
+      // conditional rows here than the flat two-branch GNSS_ITEM_* style
+      // above handles cleanly).
+      #define GNSS_DIAG_ITEM_MODULE      0   // gnss_chip_name() - chip identity moved here from the main GNSS_ITEM_MODULE row
+      #define GNSS_DIAG_ITEM_FIX_QUALITY 1
+      #define GNSS_DIAG_ITEM_FIX_MODE    2
+      #define GNSS_DIAG_ITEM_HDOP        3
+      #define GNSS_DIAG_ITEM_PDOP        4
+      #define GNSS_DIAG_ITEM_VDOP        5
+      #define GNSS_DIAG_ITEM_SPEED       6
+      #define GNSS_DIAG_ITEM_COURSE      7
+      #define GNSS_DIAG_ITEM_DATE        8
+      #define GNSS_DIAG_ITEM_SATS_USED   9   // gnss_satellite_count(), GGA - kept for direct comparison against Sats In View below
+      #define GNSS_DIAG_ITEM_SATS_VIEW   10  // opens MENU_STATE_GNSS_DIAG_SATS
+      #define GNSS_DIAG_ITEM_CHK_PASSED  11
+      #define GNSS_DIAG_ITEM_CHK_FAILED  12
+      #define GNSS_DIAG_ITEM_CHK_RATE    13
+      #define GNSS_DIAG_ITEM_CHARS       14
+      #define GNSS_DIAG_NEXT_0           15
+
+      #if GNSS_DUTY_CYCLE_CAPABLE == true
+        #define GNSS_DIAG_ITEM_DUTY_STATE     GNSS_DIAG_NEXT_0
+        #define GNSS_DIAG_ITEM_LOCK_COUNT     (GNSS_DIAG_NEXT_0 + 1)
+        #define GNSS_DIAG_ITEM_FAIL_COUNT     (GNSS_DIAG_NEXT_0 + 2)
+        #define GNSS_DIAG_ITEM_PREDICTED      (GNSS_DIAG_NEXT_0 + 3)
+        // Always present when duty-capable (not conditionally shown/hidden
+        // on live gnss_pstate) - item-enum indices are compile-time
+        // constants everywhere else in this file; only this row's value
+        // text changes ("--" outside SLEEP, "Ns" inside it).
+        #define GNSS_DIAG_ITEM_WAKE_COUNTDOWN (GNSS_DIAG_NEXT_0 + 4)
+        #define GNSS_DIAG_NEXT_1 (GNSS_DIAG_NEXT_0 + 5)
+      #else
+        #define GNSS_DIAG_NEXT_1 GNSS_DIAG_NEXT_0
+      #endif
+
+      #define GNSS_DIAG_ITEM_BACK  GNSS_DIAG_NEXT_1
+      #define GNSS_DIAG_ITEM_COUNT (GNSS_DIAG_ITEM_BACK + 1)
+    #endif
   #endif
 
   #if HAS_ESPNOW == true
@@ -629,6 +760,20 @@
   #endif
   #endif
 
+  // Radio submenu (MENU_STATE_URNS_RADIO_LIST/EDIT) - Frequency/Bandwidth/
+  // SF/CR/TX Power. NOT gated on HAS_URNS - backed by the same EEPROM
+  // fields/functions a connected host's CMD_FREQUENCY/etc + CMD_CONF_SAVE
+  // already use (lora_freq/lora_bw/lora_sf/lora_cr/lora_txp,
+  // eeprom_conf_save(), Utilities.h), which work independently of the
+  // onboard URNS node - see project plan for the Radio menu.
+  #define URNS_RADIO_ITEM_FREQ  0
+  #define URNS_RADIO_ITEM_BW    1
+  #define URNS_RADIO_ITEM_SF    2
+  #define URNS_RADIO_ITEM_CR    3
+  #define URNS_RADIO_ITEM_TXP   4
+  #define URNS_RADIO_ITEM_BACK  5
+  #define URNS_RADIO_ITEM_COUNT 6
+
   #if HAS_SENSORS == true
     // Fully read-only - no editable fields, so unlike GNSS's own list above
     // there's no matching MENU_STATE_SENSORS_EDIT, only BACK does anything
@@ -666,10 +811,10 @@
       #define HW_NEXT_A2 HW_NEXT_A
     #endif
 
-    // No GPS chip-identification item here (removed - redundant with the
-    // GNSS page's own Module row, GNSS_ITEM_MODULE, which shows the exact
-    // same gnss_module_status_text() value plus the live Enabled/Fix/etc.
-    // fields it belongs alongside).
+    // No GPS chip-identification item here (removed - redundant with GNSS
+    // chip identity, which lives on the GNSS page itself: GNSS_ITEM_MODULE
+    // on boards without a Diagnostics page, or GNSS_DIAG_ITEM_MODULE on the
+    // Diagnostics page for boards that have one).
     #define HW_NEXT_A3 HW_NEXT_A2
 
     #if HAS_WIFI == true
@@ -727,7 +872,22 @@
     #define HW_ITEM_UPTIME HW_NEXT_E
     #define HW_NEXT_F      (HW_NEXT_E + 1)
 
-    #define HW_ITEM_BACK  HW_NEXT_F
+    // Last reset's cause + (if it followed a watchdog/lockup reset, not a
+    // clean power-on) the last CP() checkpoint reached before it - see
+    // nrf52_cp_report_last()/nrf52_wdt_init() (RNode_Firmware.ino). Only
+    // meaningful on nRF52: that's the platform with no free debug UART, no
+    // field SWD access, and (as of nrf52_wdt_init()) an actual watchdog
+    // that can now turn a hang into a reset worth inspecting here. ESP32's
+    // equivalent (esp_reset_reason_str()/cp_report_last()) already goes to
+    // its own debug UART instead - no on-screen row needed there.
+    #if MCU_VARIANT == MCU_NRF52
+      #define HW_ITEM_LAST_RESET HW_NEXT_F
+      #define HW_NEXT_G          (HW_NEXT_F + 1)
+    #else
+      #define HW_NEXT_G HW_NEXT_F
+    #endif
+
+    #define HW_ITEM_BACK  HW_NEXT_G
     #define HW_ITEM_COUNT (HW_ITEM_BACK + 1)
 
     #if HAS_GPIO_MENU == true
@@ -799,7 +959,7 @@
   // applies to every HAS_MENU board regardless of WiFi/Ethernet) - hence
   // living here, ungated, rather than under either feature's own #if.
   #if HAS_INPUT == true || HAS_WIFI == true || HAS_ETHERNET == true
-    #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_T114
+    #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1 || BOARD_MODEL == BOARD_HELTEC_T114
       // Same footprint-tracking idea as the generic branch below, but in
       // panel (not canvas-local) coordinates, since the box is pushed
       // through menu_popup_canvas (Display.h) at whatever panel offset
@@ -850,7 +1010,7 @@
     // reuse draw_menu_list_disp()'s own row_h/baseline convention - the
     // same font at the same tightness, already proven to fit cleanly.
     void draw_menu_status_rect(const char *text) {
-      #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_T114
+      #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1 || BOARD_MODEL == BOARD_HELTEC_T114
         // Only ever reached today via draw_button_hold_overlay() (menu
         // closed) - the menu-open popup path (Sync NTP, Clear Static)
         // needs HAS_WIFI/HAS_ETHERNET, which neither board has. Draws
@@ -1037,7 +1197,7 @@
     void draw_button_hold_overlay() {
       if (menu_is_open() || !button_pressed()) {
         button_hold_beeped_tier = BUTTON_HOLD_TIER_NONE;
-        #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_T114
+        #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1 || BOARD_MODEL == BOARD_HELTEC_T114
           // Neither board has a periodic full-screen clear to make a
           // leftover box disappear on its own (see
           // menu_status_rect_clear()'s own comment) - explicitly erase it
@@ -1059,7 +1219,7 @@
         draw_menu_status_rect(button_hold_tier_text(tier));
       } else {
         button_hold_beeped_tier = BUTTON_HOLD_TIER_NONE;
-        #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_T114
+        #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1 || BOARD_MODEL == BOARD_HELTEC_T114
           menu_status_rect_clear();
         #endif
       }
@@ -1097,7 +1257,16 @@
     void menu_draw_popup(const char *text) {
       strncpy(menu_popup_text, text, 23); menu_popup_text[23] = 0;
       draw_menu_status_rect(menu_popup_text);
-      display.display();
+      // draw_menu_status_rect() already pushes directly to hardware on
+      // T096/T114/WTRACKER_V2-style displays (no separate framebuffer to
+      // flush) - display.display() only exists on the SSD1306 fallback
+      // path (DISPLAY_IS_OLED, Display.h), which is the only one that
+      // needs this explicit flush. Never reached on T096 itself (no
+      // HAS_WIFI there), only surfaced once WTRACKER_V2 added a real WiFi
+      // TFT board to this HAS_WIFI-gated block.
+      #if DISPLAY_IS_OLED
+        display.display();
+      #endif
     }
 
     // Opens the popup (or updates it if already open) showing `text`,
@@ -1106,8 +1275,17 @@
       menu_popup_return_state = return_state;
       menu_state = MENU_STATE_STATUS_POPUP;
       // Fresh session - don't erase a footprint left over from wherever
-      // the box happened to be the last time the popup was used.
-      menu_popup_prev_valid = false;
+      // the box happened to be the last time the popup was used. Variable
+      // name matches whichever declaration draw_menu_status_rect() above
+      // actually compiled (panel-coordinate tracking on T096/T114/
+      // WTRACKER_V2, canvas-local elsewhere - never reached on T096 itself
+      // since it has no HAS_WIFI, only surfaced once WTRACKER_V2 added a
+      // real WiFi TFT board to this HAS_WIFI-gated block).
+      #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1 || BOARD_MODEL == BOARD_HELTEC_T114
+        menu_popup_prev_panel_valid = false;
+      #else
+        menu_popup_prev_valid = false;
+      #endif
       menu_popup_auto_dismiss_at = 0; // no auto-dismiss unless armed separately, see menu_draw_popup_timed()
       menu_draw_popup(text);
     }
@@ -1182,6 +1360,20 @@
     // expected one).
     uint8_t espnow_lr_confirm_cursor = 2;
   #endif
+
+  // Radio submenu (top-level item, sits right under URNS on boards that
+  // have it) - stages the same lora_freq/lora_bw/lora_sf/lora_cr/lora_txp
+  // globals a connected host's CMD_FREQUENCY/etc already read/write, and
+  // commits via the same eeprom_conf_save()/eeprom_have_conf() (Utilities.h)
+  // a host's CMD_CONF_SAVE already uses. NOT gated on HAS_URNS - see
+  // project plan for the Radio menu for why.
+  uint8_t urns_radio_menu_cursor = 0;
+  uint32_t staged_lora_freq = 0;
+  uint32_t staged_lora_bw   = 0;
+  uint8_t  staged_lora_sf   = 0;
+  uint8_t  staged_lora_cr   = 0;
+  uint8_t  staged_lora_txp  = 0;
+
   #if HAS_URNS == true
     uint8_t urns_menu_cursor = 0;
     bool staged_urns_enabled = true;
@@ -1189,6 +1381,7 @@
     bool staged_urns_link_mtu_discovery = true;
     bool staged_urns_remote_mgmt_enabled = true;
     bool staged_urns_probe_dest_enabled = false;
+
     uint8_t urns_paths_menu_cursor = 0;
     uint8_t urns_path_detail_cursor = 0;
     uint8_t urns_free_detail_cursor = URNS_FREE_DETAIL_ITEM_BACK;
@@ -1500,6 +1693,10 @@
 
   #if HAS_GPS == true
     uint8_t gnss_menu_cursor = 0;
+    #if HAS_GNSS_DEBUG_MENU == true
+      uint8_t gnss_diag_menu_cursor = 0;
+      uint8_t gnss_diag_sats_cursor = 0;
+    #endif
     // Working copy while inside MENU_STATE_GNSS_EDIT - synced fresh from
     // the live gnss_enabled value on entry (see menu_confirm_select()), not
     // staged at whole-menu-open time, since this commits immediately (and
@@ -1507,6 +1704,13 @@
     // SAVE & EXIT - same immediate-commit pattern as RTC's own Timezone
     // field above.
     bool staged_gnss_enabled = true;
+    #if GNSS_DUTY_CYCLE_CAPABLE == true
+      // Working copy while inside MENU_STATE_GNSS_EDIT for the Update
+      // Interval row - an index into gnss_update_interval_presets_s
+      // (GNSS.h), same immediate-commit-on-confirm pattern as
+      // staged_gnss_enabled above.
+      uint8_t staged_gnss_interval_index = 0;
+    #endif
   #endif
 
   #if HAS_SENSORS == true
@@ -1673,6 +1877,92 @@
     }
     staged_display_rotation = (uint8_t)v;
   }
+
+    // Radio submenu steppers - edit the same staged_lora_* fields committed
+    // in menu_commit_and_exit() via the existing eeprom_conf_save(). NOT
+    // gated on HAS_URNS - see project plan for the Radio menu.
+
+    // 25kHz/detent at rest, ramping with accelerated_step() - sweeping a
+    // multi-hundred-MHz range 1Hz at a time isn't usable on an encoder. No
+    // firmware-enforced regulatory/range bounds, same as CMD_FREQUENCY's own
+    // handler (RNode_Firmware.ino) - this is a "you set what you configure"
+    // field exactly as the host path already is.
+    void step_urns_radio_freq(int8_t dir, bool wrap = false) {
+      int64_t step = (int64_t)accelerated_step() * 25000;
+      int64_t v = (int64_t)staged_lora_freq + (dir > 0 ? step : -step);
+      if (wrap) {
+        if (v < 0)          v = 1000000000;
+        if (v > 1000000000) v = 0;
+      } else {
+        if (v < 0)          v = 0;
+        if (v > 1000000000) v = 1000000000;
+      }
+      staged_lora_freq = (uint32_t)v;
+    }
+
+    // Bandwidth has no meaningful continuous range - cycle through the
+    // SX126x's standard discrete values instead of raw Hz stepping, same
+    // "present a real value set, not free-form" reasoning as OLED
+    // step_brightness() above. CMD_BANDWIDTH's own KISS handler still
+    // accepts arbitrary Hz (unchanged), this is menu-UI-only.
+    void step_urns_radio_bw(int8_t dir, bool wrap = false) {
+      static const uint32_t values[] = { 7800, 10400, 15600, 20800, 31250, 41700, 62500, 125000, 250000, 500000 };
+      const int8_t count = sizeof(values) / sizeof(values[0]);
+      int8_t idx = 0;
+      for (int8_t i = 0; i < count; i++) if (values[i] == staged_lora_bw) { idx = i; break; }
+      idx += (dir > 0 ? 1 : -1);
+      if (wrap) {
+        if (idx < 0) idx = count - 1;
+        if (idx > count - 1) idx = 0;
+      } else {
+        if (idx < 0) idx = 0;
+        if (idx > count - 1) idx = count - 1;
+      }
+      staged_lora_bw = values[idx];
+    }
+
+    // Bounds match CMD_SF's own handler (RNode_Firmware.ino) so the menu and
+    // a connected host never disagree.
+    void step_urns_radio_sf(int8_t dir, bool wrap = false) {
+      int8_t v = (int8_t)staged_lora_sf + (dir > 0 ? 1 : -1);
+      if (wrap) {
+        if (v < 5)  v = 12;
+        if (v > 12) v = 5;
+      } else {
+        if (v < 5)  v = 5;
+        if (v > 12) v = 12;
+      }
+      staged_lora_sf = (uint8_t)v;
+    }
+
+    // Bounds match CMD_CR's own handler (RNode_Firmware.ino).
+    void step_urns_radio_cr(int8_t dir, bool wrap = false) {
+      int8_t v = (int8_t)staged_lora_cr + (dir > 0 ? 1 : -1);
+      if (wrap) {
+        if (v < 5) v = 8;
+        if (v > 8) v = 5;
+      } else {
+        if (v < 5) v = 5;
+        if (v > 8) v = 8;
+      }
+      staged_lora_cr = (uint8_t)v;
+    }
+
+    // Ceiling matches CMD_TXPOWER's own handler (RNode_Firmware.ino) via
+    // lora_txp_max() (Utilities.h) - shared so the menu and a connected
+    // host can't drift apart.
+    void step_urns_radio_txp(int8_t dir, bool wrap = false) {
+      int8_t max_txp = lora_txp_max();
+      int8_t v = (int8_t)staged_lora_txp + (dir > 0 ? 1 : -1);
+      if (wrap) {
+        if (v < 0)       v = max_txp;
+        if (v > max_txp) v = 0;
+      } else {
+        if (v < 0)       v = 0;
+        if (v > max_txp) v = max_txp;
+      }
+      staged_lora_txp = (uint8_t)v;
+    }
 
   #if MENU_HAS_HW_PAGE == true && HAS_VSENSE == true
     // Stored/edited as ratio*10 (e.g. 110 = 11.0) - 1 and 254 keep clear of
@@ -2030,6 +2320,12 @@
       staged_urns_remote_mgmt_enabled = urns_remote_management_enabled;
       staged_urns_probe_dest_enabled = urns_probe_destination_enabled;
     #endif
+    // Radio submenu - not gated on HAS_URNS, see project plan for the Radio menu.
+    staged_lora_freq = lora_freq;
+    staged_lora_bw   = lora_bw;
+    staged_lora_sf   = (uint8_t)lora_sf;
+    staged_lora_cr   = (uint8_t)lora_cr;
+    staged_lora_txp  = (uint8_t)lora_txp;
     #if HAS_ENCODER == true
       staged_encoder_enabled = encoder_enabled;
     #endif
@@ -2212,6 +2508,26 @@
             urns_remote_mgmt_changed || urns_probe_dest_changed) { hard_reset(); }
       }
     #endif
+    {
+      // Radio submenu (Frequency/Bandwidth/SF/CR/TX Power) - not a new
+      // EEPROM field, reuses the same lora_freq/bw/sf/cr/txp globals and
+      // eeprom_conf_save() (Utilities.h) a connected host's CMD_CONF_SAVE
+      // already writes through ADDR_CONF_FREQ/BW/SF/CR/TXP (ROM.h). NOT
+      // gated on HAS_URNS - see project plan for the Radio menu for why
+      // this reuses rather than adds dedicated URNS_RADIO_* fields.
+      bool urns_radio_changed = (staged_lora_freq != lora_freq) || (staged_lora_bw != lora_bw) ||
+        (staged_lora_sf != (uint8_t)lora_sf) || (staged_lora_cr != (uint8_t)lora_cr) ||
+        (staged_lora_txp != (uint8_t)lora_txp);
+      if (urns_radio_changed) {
+        lora_freq = staged_lora_freq;
+        lora_bw   = staged_lora_bw;
+        lora_sf   = staged_lora_sf;
+        lora_cr   = staged_lora_cr;
+        lora_txp  = staged_lora_txp;
+        eeprom_conf_save();
+        hard_reset();
+      }
+    }
     #if HAS_ENCODER == true
       if (staged_encoder_enabled != encoder_enabled) {
         enc_conf_save(staged_encoder_enabled);
@@ -2409,7 +2725,25 @@
   // menu_encoder_rotate()/menu_encoder_button()), so this only fires on
   // genuine inactivity, not e.g. while the user is mid-scroll.
   void menu_timeout_process() {
-    if (menu_is_open() && millis() - menu_last_activity_ms > (unsigned long)SETTINGS_MENU_TIMEOUT * 1000UL) {
+    if (!menu_is_open()) return;
+    #if HAS_GPS == true && HAS_GNSS_DEBUG_MENU == true
+      // GNSS Diagnostics/Sats In View are meant to be watched, not
+      // interacted with - values update on their own (satellite/duty-cycle
+      // state) with no button presses expected, so both this menu's own
+      // idle-close and Display.h's generic blanking timeout (which share
+      // the same "no real input" clock) would otherwise kick the user back
+      // to the main screen mid-observation. display_unblank() resets
+      // Display.h's last_unblank_event as a side effect (it's already
+      // called unconditionally on every real input event, see its own
+      // comment), which is enough to suppress blanking too without
+      // Display.h - built before Menu.h - needing to know about
+      // MENU_STATE_GNSS_DIAG directly.
+      if (menu_state == MENU_STATE_GNSS_DIAG || menu_state == MENU_STATE_GNSS_DIAG_SATS) {
+        display_unblank();
+        return;
+      }
+    #endif
+    if (millis() - menu_last_activity_ms > (unsigned long)SETTINGS_MENU_TIMEOUT * 1000UL) {
       menu_close_without_saving();
     }
   }
@@ -2502,8 +2836,23 @@
         gnss_menu_cursor = menu_clamp_cursor(gnss_menu_cursor, dir, GNSS_ITEM_COUNT, wrap);
       } else if (menu_state == MENU_STATE_GNSS_EDIT) {
         buzzer_encoder_tick_melody();
+        #if GNSS_DUTY_CYCLE_CAPABLE == true
+          if (gnss_menu_cursor == GNSS_ITEM_UPDATE_INTERVAL) {
+            staged_gnss_interval_index = menu_clamp_cursor(staged_gnss_interval_index, dir, GNSS_UPDATE_INTERVAL_PRESET_COUNT, wrap);
+          } else
+        #endif
         staged_gnss_enabled = !staged_gnss_enabled;
       }
+      #if HAS_GNSS_DEBUG_MENU == true
+        else if (menu_state == MENU_STATE_GNSS_DIAG) {
+          buzzer_encoder_tick_melody();
+          gnss_diag_menu_cursor = menu_clamp_cursor(gnss_diag_menu_cursor, dir, GNSS_DIAG_ITEM_COUNT, wrap);
+        } else if (menu_state == MENU_STATE_GNSS_DIAG_SATS) {
+          buzzer_encoder_tick_melody();
+          uint8_t row_count = gnss_sat_view_count() == 0 ? 2 : (uint8_t)(gnss_sat_view_count() + 1);
+          gnss_diag_sats_cursor = menu_clamp_cursor(gnss_diag_sats_cursor, dir, row_count, wrap);
+        }
+      #endif
     #endif
     #if HAS_ESPNOW == true
       else if (menu_state == MENU_STATE_ESPNOW_LIST) {
@@ -2597,6 +2946,20 @@
       }
       #endif
     #endif
+      else if (menu_state == MENU_STATE_URNS_RADIO_LIST) {
+        buzzer_encoder_tick_melody();
+        urns_radio_menu_cursor = menu_clamp_cursor(urns_radio_menu_cursor, dir, URNS_RADIO_ITEM_COUNT, wrap);
+      } else if (menu_state == MENU_STATE_URNS_RADIO_EDIT) {
+        buzzer_encoder_tick_melody();
+        // Cursor-dispatched stepper, same shape as ESP-NOW's MENU_STATE_
+        // ESPNOW_EDIT - urns_radio_menu_cursor still points at whichever
+        // field was open when this state was entered.
+        if (urns_radio_menu_cursor == URNS_RADIO_ITEM_FREQ)      step_urns_radio_freq(dir, wrap);
+        else if (urns_radio_menu_cursor == URNS_RADIO_ITEM_BW)   step_urns_radio_bw(dir, wrap);
+        else if (urns_radio_menu_cursor == URNS_RADIO_ITEM_SF)   step_urns_radio_sf(dir, wrap);
+        else if (urns_radio_menu_cursor == URNS_RADIO_ITEM_CR)   step_urns_radio_cr(dir, wrap);
+        else                                                     step_urns_radio_txp(dir, wrap);
+      }
     #if HAS_SENSORS == true
       else if (menu_state == MENU_STATE_SENSORS_LIST) {
         buzzer_encoder_tick_melody();
@@ -2841,6 +3204,10 @@
           urns_menu_cursor = 0;
         }
       #endif
+        else if (menu_cursor == MENU_ITEM_URNS_RADIO) {
+          menu_state = MENU_STATE_URNS_RADIO_LIST;
+          urns_radio_menu_cursor = 0;
+        }
       #if HAS_ESPNOW == true
         else if (menu_cursor == MENU_ITEM_ESPNOW) {
           menu_state = MENU_STATE_ESPNOW_LIST;
@@ -3189,17 +3556,61 @@
           staged_gnss_enabled = gnss_enabled;
           menu_state = MENU_STATE_GNSS_EDIT;
         }
+        #if HAS_GNSS_DEBUG_MENU == true
+          else if (gnss_menu_cursor == GNSS_ITEM_DIAGNOSTICS) {
+            gnss_diag_menu_cursor = 0;
+            menu_state = MENU_STATE_GNSS_DIAG;
+          }
+        #endif
+        #if GNSS_DUTY_CYCLE_CAPABLE == true
+          else if (gnss_menu_cursor == GNSS_ITEM_UPDATE_INTERVAL) {
+            // Sync fresh from the live value (by matching it back to its
+            // preset index) - same immediate-commit reasoning as Enabled
+            // above, not a whole-submenu staged edit.
+            staged_gnss_interval_index = 0;
+            for (uint8_t i = 0; i < GNSS_UPDATE_INTERVAL_PRESET_COUNT; i++) {
+              if (gnss_update_interval_presets_s[i] == gnss_update_interval_s) { staged_gnss_interval_index = i; break; }
+            }
+            menu_state = MENU_STATE_GNSS_EDIT;
+          }
+        #endif
       } else if (menu_state == MENU_STATE_GNSS_EDIT) {
-        // Commits + live power-cycles the receiver here rather than
-        // staging until SAVE & EXIT - a power-saving toggle should apply
-        // the instant it's confirmed, same immediate-commit pattern as
-        // RTC's Timezone field.
+        // Commits + applies live here rather than staging until SAVE &
+        // EXIT - a power-saving toggle should apply the instant it's
+        // confirmed, same immediate-commit pattern as RTC's Timezone
+        // field.
+        #if GNSS_DUTY_CYCLE_CAPABLE == true
+          if (gnss_menu_cursor == GNSS_ITEM_UPDATE_INTERVAL) {
+            uint32_t new_interval_s = gnss_update_interval_presets_s[staged_gnss_interval_index];
+            if (new_interval_s != gnss_update_interval_s) {
+              gnss_interval_conf_save(staged_gnss_interval_index);
+              gnss_update_interval_s = new_interval_s;
+            }
+          } else
+        #endif
         if (staged_gnss_enabled != gnss_enabled) {
           gnss_conf_save(staged_gnss_enabled);
           gnss_set_enabled(staged_gnss_enabled);
         }
         menu_state = MENU_STATE_GNSS_LIST;
       }
+      #if HAS_GNSS_DEBUG_MENU == true
+        else if (menu_state == MENU_STATE_GNSS_DIAG) {
+          if (gnss_diag_menu_cursor == GNSS_DIAG_ITEM_BACK) {
+            menu_state = MENU_STATE_GNSS_LIST;
+          } else if (gnss_diag_menu_cursor == GNSS_DIAG_ITEM_SATS_VIEW) {
+            gnss_diag_sats_cursor = 0;
+            menu_state = MENU_STATE_GNSS_DIAG_SATS;
+          }
+          // Every other row is read-only info - same "only BACK/enterable
+          // rows do anything" shape as MENU_STATE_URNS_PATH_DETAIL.
+        } else if (menu_state == MENU_STATE_GNSS_DIAG_SATS) {
+          // Single fixed list, nothing to drill into further - any confirm
+          // on a sat row or BACK both just return, same "flat leaf list"
+          // shape as MENU_STATE_MEM_DETAIL.
+          menu_state = MENU_STATE_GNSS_DIAG;
+        }
+      #endif
     #endif
     #if HAS_ESPNOW == true
       else if (menu_state == MENU_STATE_ESPNOW_LIST) {
@@ -3593,6 +4004,18 @@
       }
       #endif
     #endif
+      else if (menu_state == MENU_STATE_URNS_RADIO_LIST) {
+        if (urns_radio_menu_cursor == URNS_RADIO_ITEM_BACK) {
+          menu_state = MENU_STATE_LIST;
+        } else {
+          menu_state = MENU_STATE_URNS_RADIO_EDIT;
+        }
+      } else if (menu_state == MENU_STATE_URNS_RADIO_EDIT) {
+        // Same deferred-commit reasoning as URNS_EDIT above - nothing's
+        // written here, only staged; menu_commit_and_exit() applies it and
+        // reboots via the existing eeprom_conf_save() (Utilities.h).
+        menu_state = MENU_STATE_URNS_RADIO_LIST;
+      }
     #if HAS_SENSORS == true
       else if (menu_state == MENU_STATE_SENSORS_LIST) {
         // Every row is read-only - only BACK does anything, same as the
@@ -3812,7 +4235,14 @@
   // not right at it, or the glyph tops get clipped by the rect's own top
   // edge. Shows up to 4 rows at a time, scrolling to keep the cursor
   // visible - lists have grown past 4 items and will likely keep growing.
-  void draw_menu_list_disp(const char *title, const char **labels, char valbufs[][24], uint8_t count, uint8_t cursor) {
+  // icons/icon_widths are parallel arrays of length count, entries nullptr/0
+  // for rows with no icon - both left at their default (nullptr) by every
+  // call site except draw_settings_menu_disp()'s top-level list.
+  // icon_dx is a per-row nudge (px, from MENU_ROW_ICON_X) for glyphs that
+  // sit visually off-center in their reserved column just from being
+  // narrower than MENU_ROW_ICON_COL_W and left-anchored, e.g. bm_menu_icon_urns
+  // (7px, the narrowest) - default nullptr/0, same opt-in pattern as icons.
+  void draw_menu_list_disp(const char *title, const char **labels, char valbufs[][24], uint8_t count, uint8_t cursor, const uint8_t **icons = nullptr, const uint8_t *icon_widths = nullptr, const int8_t *icon_dx = nullptr) {
     MENU_GFX.setFont(MENU_FONT);
     MENU_GFX.setTextSize(1);
     MENU_GFX.setTextColor(SSD1306_WHITE);
@@ -3832,13 +4262,54 @@
       uint8_t i = first + vi;
       uint8_t row_top = MENU_LIST_TOP_Y + vi * row_h;
       uint8_t y = row_top + MENU_LIST_BASELINE_OFF; // text baseline
-      if (i == cursor) {
+      bool selected = (i == cursor);
+      if (selected) {
         MENU_GFX.fillRect(4, row_top, MENU_CONTENT_W, row_h - 1, SSD1306_WHITE);
         MENU_GFX.setTextColor(SSD1306_BLACK);
       } else {
         MENU_GFX.setTextColor(SSD1306_WHITE);
       }
-      MENU_GFX.setCursor(8, y);
+
+      uint8_t text_x = 8;
+      const uint8_t *row_icon = nullptr;
+      uint8_t row_icon_w = 0;
+      uint8_t icon_x = MENU_ROW_ICON_X;
+      if (icons) {
+        // Explicit per-list table (RNODE SETTINGS, MESSENGER's top screen)
+        // - column reserved uniformly across every row so labels stay
+        // aligned whether or not that particular row has art.
+        text_x = MENU_ROW_TEXT_X_ICONS;
+        if (icons[i]) {
+          row_icon = icons[i];
+          row_icon_w = icon_widths[i];
+          icon_x += icon_dx ? icon_dx[i] : 0;
+        }
+      } else if (strcmp(labels[i], "BACK") == 0) {
+        // No explicit table (every plain submenu list) - BACK still gets
+        // bm_menu_icon_back automatically, so none of its ~20 call sites
+        // need to opt in individually. Indented just enough for its own
+        // narrow (9px) glyph rather than the wide shared column above,
+        // which would collide with this list's own longer labels/inline
+        // values (e.g. URNS's "Remote Management" + ON/OFF) - see
+        // MENU_BACK_TEXT_X's own comment.
+        row_icon = bm_menu_icon_back;
+        row_icon_w = MENU_ICON_W_BACK;
+        text_x = MENU_BACK_TEXT_X;
+      }
+      if (row_icon) {
+        // Vertically centered in the row rather than top-aligned - on the
+        // 11px-row boards row_h - MENU_ICON_H (10px) is only 1px of slack,
+        // so this rounds down to the same top-aligned position it always
+        // was there. T114's much taller 20px row (bigger Tamsyn6x12 font)
+        // is why this can't just stay a fixed offset: 10px of slack pinned
+        // the icon visibly to the top-left of the row, confirmed on real
+        // hardware.
+        int16_t icon_y = row_top + (row_h - MENU_ICON_H) / 2 + MENU_ICON_Y_NUDGE;
+        uint16_t fg = selected ? SSD1306_BLACK : SSD1306_WHITE;
+        uint16_t bg = selected ? SSD1306_WHITE : SSD1306_BLACK;
+        MENU_GFX.drawBitmap(icon_x, icon_y, row_icon, row_icon_w, MENU_ICON_H, fg, bg);
+      }
+      MENU_GFX.setCursor(text_x, y);
       MENU_GFX.print(labels[i]);
 
       if (valbufs[i][0] != 0) {
@@ -4406,7 +4877,7 @@
   #endif
 
   void draw_settings_menu_disp() {
-    #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_T114
+    #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1 || BOARD_MODEL == BOARD_HELTEC_T114
       // Unlike the other boards (whose display.clearDisplay() call in
       // update_display() wipes the whole panel buffer before getting
       // here every cycle), nothing clears menu_canvas on its own - it's
@@ -4422,81 +4893,127 @@
     if (menu_state == MENU_STATE_LIST) {
       const char *labels[MENU_ITEM_COUNT];
       char valbufs[MENU_ITEM_COUNT][24];
+      // Left-column glyphs for the handful of items that have one (Graphics.h
+      // bm_menu_icon_*) - every other slot stays nullptr/0, which
+      // draw_menu_list_disp() treats as "no icon" but still reserves the
+      // column for, so labels stay aligned whether or not their row has art.
+      const uint8_t *icons[MENU_ITEM_COUNT] = { nullptr };
+      uint8_t icon_widths[MENU_ITEM_COUNT] = { 0 };
+      int8_t icon_dx[MENU_ITEM_COUNT] = { 0 };
 
       labels[MENU_ITEM_DISPLAY_TIMEOUT] = "Display Timeout";
       if (staged_display_timeout == 0) sprintf(valbufs[MENU_ITEM_DISPLAY_TIMEOUT], "OFF");
       else                              sprintf(valbufs[MENU_ITEM_DISPLAY_TIMEOUT], "%us", staged_display_timeout);
+      icons[MENU_ITEM_DISPLAY_TIMEOUT] = bm_menu_icon_display;
+      icon_widths[MENU_ITEM_DISPLAY_TIMEOUT] = MENU_ICON_W_DISPLAY;
 
       labels[MENU_ITEM_DISPLAY_BRIGHTNESS] = "Brightness";
       format_brightness(staged_display_brightness, valbufs[MENU_ITEM_DISPLAY_BRIGHTNESS]);
+      icons[MENU_ITEM_DISPLAY_BRIGHTNESS] = bm_menu_icon_brightness;
+      icon_widths[MENU_ITEM_DISPLAY_BRIGHTNESS] = MENU_ICON_W_BRIGHTNESS;
+      icon_dx[MENU_ITEM_DISPLAY_BRIGHTNESS] = 1;
 
       labels[MENU_ITEM_ORIENTATION] = "Orientation";
       format_orientation(staged_display_rotation, valbufs[MENU_ITEM_ORIENTATION]);
+      icons[MENU_ITEM_ORIENTATION] = bm_menu_icon_rotation;
+      icon_widths[MENU_ITEM_ORIENTATION] = MENU_ICON_W_ROTATION;
 
       #if HAS_BUZZER == true
         labels[MENU_ITEM_SOUND] = "Sound";
         sprintf(valbufs[MENU_ITEM_SOUND], staged_sound_enabled ? "ON" : "OFF");
+        icons[MENU_ITEM_SOUND] = bm_menu_icon_sound;
+        icon_widths[MENU_ITEM_SOUND] = MENU_ICON_W_SOUND;
       #endif
 
       #if HAS_ENCODER == true
         labels[MENU_ITEM_ENCODER] = "Encoder";
         sprintf(valbufs[MENU_ITEM_ENCODER], staged_encoder_enabled ? "ON" : "OFF");
+        icons[MENU_ITEM_ENCODER] = bm_menu_icon_encoder;
+        icon_widths[MENU_ITEM_ENCODER] = MENU_ICON_W_ENCODER;
       #endif
 
       #if HAS_LXMF == true
         labels[MENU_ITEM_MESSENGER] = "Messenger";
         sprintf(valbufs[MENU_ITEM_MESSENGER], ">"); // opens a submenu, not an inline value
+        icons[MENU_ITEM_MESSENGER] = bm_menu_icon_messenger;
+        icon_widths[MENU_ITEM_MESSENGER] = MENU_ICON_W_MESSENGER;
       #endif
 
       #if HAS_URNS == true
         labels[MENU_ITEM_URNS] = "URNS";
         sprintf(valbufs[MENU_ITEM_URNS], ">"); // opens a submenu, not an inline value
+        icons[MENU_ITEM_URNS] = bm_menu_icon_urns;
+        icon_widths[MENU_ITEM_URNS] = MENU_ICON_W_URNS;
+        icon_dx[MENU_ITEM_URNS] = 2; // narrowest icon (7px) - left-anchored, looks off vs. the others without this
       #endif
+
+      labels[MENU_ITEM_URNS_RADIO] = "Radio";
+      sprintf(valbufs[MENU_ITEM_URNS_RADIO], ">"); // opens a submenu, not an inline value
+      icons[MENU_ITEM_URNS_RADIO] = bm_menu_icon_radio;
+      icon_widths[MENU_ITEM_URNS_RADIO] = MENU_ICON_W_RADIO;
 
       #if HAS_ESPNOW == true
         labels[MENU_ITEM_ESPNOW] = "ESP-NOW";
         sprintf(valbufs[MENU_ITEM_ESPNOW], ">"); // opens a submenu, not an inline value
+        icons[MENU_ITEM_ESPNOW] = bm_menu_icon_espnow;
+        icon_widths[MENU_ITEM_ESPNOW] = MENU_ICON_W_ESPNOW;
       #endif
 
       #if HAS_WIFI == true
         labels[MENU_ITEM_WIFI] = "WiFi";
         sprintf(valbufs[MENU_ITEM_WIFI], ">"); // opens a submenu, not an inline value
+        icons[MENU_ITEM_WIFI] = bm_menu_icon_wifi;
+        icon_widths[MENU_ITEM_WIFI] = MENU_ICON_W_WIFI;
       #endif
 
       #if HAS_ETHERNET == true
         labels[MENU_ITEM_ETHERNET] = "Ethernet";
         sprintf(valbufs[MENU_ITEM_ETHERNET], ">"); // opens a submenu, not an inline value
+        icons[MENU_ITEM_ETHERNET] = bm_menu_icon_ethernet;
+        icon_widths[MENU_ITEM_ETHERNET] = MENU_ICON_W_ETHERNET;
       #endif
 
       #if HAS_RTC == true
         labels[MENU_ITEM_RTC] = "RTC";
         sprintf(valbufs[MENU_ITEM_RTC], ">"); // opens a submenu, not an inline value
+        icons[MENU_ITEM_RTC] = bm_menu_icon_rtc;
+        icon_widths[MENU_ITEM_RTC] = MENU_ICON_W_RTC;
       #endif
 
       #if HAS_GPS == true
         labels[MENU_ITEM_GNSS] = "GNSS";
         sprintf(valbufs[MENU_ITEM_GNSS], ">"); // opens a submenu, not an inline value
+        icons[MENU_ITEM_GNSS] = bm_menu_icon_gnss;
+        icon_widths[MENU_ITEM_GNSS] = MENU_ICON_W_GNSS;
       #endif
 
       #if HAS_SENSORS == true
         labels[MENU_ITEM_SENSORS] = "Sensors";
         sprintf(valbufs[MENU_ITEM_SENSORS], ">"); // opens a submenu, not an inline value
+        icons[MENU_ITEM_SENSORS] = bm_menu_icon_sensors;
+        icon_widths[MENU_ITEM_SENSORS] = MENU_ICON_W_SENSORS;
       #endif
 
       #if MENU_HAS_HW_PAGE == true
         labels[MENU_ITEM_HARDWARE] = "Hardware";
         sprintf(valbufs[MENU_ITEM_HARDWARE], ">"); // opens a submenu, not an inline value
+        icons[MENU_ITEM_HARDWARE] = bm_menu_icon_hardware;
+        icon_widths[MENU_ITEM_HARDWARE] = MENU_ICON_W_HARDWARE;
       #endif
 
       #if HAS_OTA == true
         labels[MENU_ITEM_FW_UPDATE] = "F/W Update";
         sprintf(valbufs[MENU_ITEM_FW_UPDATE], ">"); // opens a submenu, not an inline value
+        icons[MENU_ITEM_FW_UPDATE] = bm_menu_icon_fwupdate;
+        icon_widths[MENU_ITEM_FW_UPDATE] = MENU_ICON_W_FWUPDATE;
       #endif
 
       labels[MENU_ITEM_SAVE_EXIT] = "SAVE & EXIT";
       valbufs[MENU_ITEM_SAVE_EXIT][0] = 0;
+      icons[MENU_ITEM_SAVE_EXIT] = bm_menu_icon_saveexit;
+      icon_widths[MENU_ITEM_SAVE_EXIT] = MENU_ICON_W_SAVEEXIT;
 
-      draw_menu_list_disp("RNODE SETTINGS", labels, valbufs, MENU_ITEM_COUNT, menu_cursor);
+      draw_menu_list_disp("RNODE SETTINGS", labels, valbufs, MENU_ITEM_COUNT, menu_cursor, icons, icon_widths, icon_dx);
 
     } else if (menu_state == MENU_STATE_EDIT) {
       char valbuf[8];
@@ -4735,13 +5252,62 @@
         labels[GNSS_ITEM_ENABLED] = "Enabled";
         sprintf(valbufs[GNSS_ITEM_ENABLED], gnss_enabled ? "ON" : "OFF");
 
-        labels[GNSS_ITEM_MODULE] = "Module";
-        sprintf(valbufs[GNSS_ITEM_MODULE], "%s", gnss_module_status_text());
+        #if GNSS_DUTY_CYCLE_CAPABLE == true
+          labels[GNSS_ITEM_UPDATE_INTERVAL] = "Poll Interval";
+          if (gnss_update_interval_s == GNSS_UPDATE_INTERVAL_CONTINUOUS) sprintf(valbufs[GNSS_ITEM_UPDATE_INTERVAL], "Cont.");
+          else if (gnss_update_interval_s < 3600)                        sprintf(valbufs[GNSS_ITEM_UPDATE_INTERVAL], "%u min", (unsigned)(gnss_update_interval_s / 60));
+          else                                                            sprintf(valbufs[GNSS_ITEM_UPDATE_INTERVAL], "%u hour", (unsigned)(gnss_update_interval_s / 3600));
+        #endif
+
+        #if HAS_GNSS_DEBUG_MENU == true && GNSS_DUTY_CYCLE_CAPABLE == true
+          // Module identity moved to the Diagnostics page (GNSS_DIAG_ITEM_
+          // MODULE) - this row shows the verbose duty-cycle state instead,
+          // since that's the more actionable at-a-glance status once
+          // Diagnostics exists as the place to check chip identity/
+          // detection.
+          labels[GNSS_ITEM_DUTY_STATE] = "Duty State";
+          sprintf(valbufs[GNSS_ITEM_DUTY_STATE], "%s", gnss_pstate_text());
+        #elif HAS_GNSS_DEBUG_MENU == true
+          // Module identity moved to Diagnostics, and this board has no
+          // duty-cycle capability to show instead (see GNSS_ITEM_* enum's
+          // own comment) - the slot is omitted entirely rather than left
+          // showing something that isn't there.
+        #else
+          labels[GNSS_ITEM_MODULE] = "Module";
+          #if GNSS_DUTY_CYCLE_CAPABLE == true
+            // While duty-cycling is active, this doubles as a SEARCHING/
+            // SLEEPING indicator (gnss_duty_state_text(), GNSS.h) instead of
+            // the usual chip-presence text, so the page doesn't look stuck
+            // during a sleep interval.
+            const char *gnss_module_row_text = gnss_duty_state_text();
+            if (gnss_module_row_text == NULL) gnss_module_row_text = gnss_module_status_text();
+            sprintf(valbufs[GNSS_ITEM_MODULE], "%s", gnss_module_row_text);
+          #else
+            sprintf(valbufs[GNSS_ITEM_MODULE], "%s", gnss_module_status_text());
+          #endif
+        #endif
 
         labels[GNSS_ITEM_FIX] = "Fix";
-        sprintf(valbufs[GNSS_ITEM_FIX], gnss_has_fix() ? "YES" : "No Fix");
+        if (gnss_has_fix()) {
+          // Latitude/Longitude/Altitude/Fix all latch their last known
+          // value forever (TinyGPSLocation::isValid() never resets - see
+          // gnss_location_age_ms(), GNSS.h) - while duty-cycling is
+          // active, an age suffix distinguishes a live fix from a stale
+          // one held over from before the last sleep, so the page doesn't
+          // read as broken during SLEEP/early SEARCHING.
+          #if GNSS_DUTY_CYCLE_CAPABLE == true
+            if (gnss_update_interval_s != GNSS_UPDATE_INTERVAL_CONTINUOUS) {
+              uint32_t gnss_fix_age_s = gnss_location_age_ms() / 1000;
+              if (gnss_fix_age_s < 60) sprintf(valbufs[GNSS_ITEM_FIX], "YES (%us ago)", (unsigned)gnss_fix_age_s);
+              else                      sprintf(valbufs[GNSS_ITEM_FIX], "YES (%um ago)", (unsigned)(gnss_fix_age_s / 60));
+            } else
+          #endif
+          sprintf(valbufs[GNSS_ITEM_FIX], "YES");
+        } else {
+          sprintf(valbufs[GNSS_ITEM_FIX], "No Fix");
+        }
 
-        labels[GNSS_ITEM_SATELLITES] = "Satellites";
+        labels[GNSS_ITEM_SATELLITES] = "Sats Used";
         sprintf(valbufs[GNSS_ITEM_SATELLITES], "%u", (unsigned)gnss_satellite_count());
 
         labels[GNSS_ITEM_LATITUDE] = "Latitude";
@@ -4760,13 +5326,131 @@
         if (gnss_time_valid()) sprintf(valbufs[GNSS_ITEM_TIME], "%02u:%02u:%02u", gnss_time_hour(), gnss_time_minute(), gnss_time_second());
         else                    sprintf(valbufs[GNSS_ITEM_TIME], "N/A");
 
+        #if HAS_GNSS_DEBUG_MENU == true
+          labels[GNSS_ITEM_DIAGNOSTICS] = "Diagnostics";
+          sprintf(valbufs[GNSS_ITEM_DIAGNOSTICS], ">"); // opens a submenu, not an inline value
+        #endif
+
         labels[GNSS_ITEM_BACK] = "BACK";
         valbufs[GNSS_ITEM_BACK][0] = 0;
 
         draw_menu_list_disp("GNSS", labels, valbufs, GNSS_ITEM_COUNT, gnss_menu_cursor);
       } else if (menu_state == MENU_STATE_GNSS_EDIT) {
+        #if GNSS_DUTY_CYCLE_CAPABLE == true
+          if (gnss_menu_cursor == GNSS_ITEM_UPDATE_INTERVAL) {
+            uint32_t staged_interval_s = gnss_update_interval_presets_s[staged_gnss_interval_index];
+            char interval_valbuf[24];
+            if (staged_interval_s == GNSS_UPDATE_INTERVAL_CONTINUOUS) sprintf(interval_valbuf, "Continuous");
+            else if (staged_interval_s < 3600)                        sprintf(interval_valbuf, "%u min", (unsigned)(staged_interval_s / 60));
+            else                                                       sprintf(interval_valbuf, "%u hour", (unsigned)(staged_interval_s / 3600));
+            draw_menu_edit_disp("POLL INTERVAL", interval_valbuf);
+          } else
+        #endif
         draw_menu_edit_disp("GNSS ENABLED", staged_gnss_enabled ? "ON" : "OFF");
       }
+      #if HAS_GNSS_DEBUG_MENU == true
+        else if (menu_state == MENU_STATE_GNSS_DIAG) {
+          const char *labels[GNSS_DIAG_ITEM_COUNT];
+          char valbufs[GNSS_DIAG_ITEM_COUNT][24];
+
+          labels[GNSS_DIAG_ITEM_MODULE] = "Module";
+          sprintf(valbufs[GNSS_DIAG_ITEM_MODULE], "%s", gnss_chip_name());
+
+          labels[GNSS_DIAG_ITEM_FIX_QUALITY] = "Fix Quality";
+          sprintf(valbufs[GNSS_DIAG_ITEM_FIX_QUALITY], "%s", gnss_fix_quality_text());
+
+          labels[GNSS_DIAG_ITEM_FIX_MODE] = "Fix Mode";
+          sprintf(valbufs[GNSS_DIAG_ITEM_FIX_MODE], "%s", gnss_fix_mode_text());
+
+          labels[GNSS_DIAG_ITEM_HDOP] = "HDOP";
+          if (gnss_hdop_valid()) sprintf(valbufs[GNSS_DIAG_ITEM_HDOP], "%.1f %s", gnss_hdop(), gnss_hdop_band_text());
+          else                   sprintf(valbufs[GNSS_DIAG_ITEM_HDOP], "N/A");
+
+          labels[GNSS_DIAG_ITEM_PDOP] = "PDOP";
+          if (gnss_pdop_valid()) sprintf(valbufs[GNSS_DIAG_ITEM_PDOP], "%.1f", gnss_pdop());
+          else                   sprintf(valbufs[GNSS_DIAG_ITEM_PDOP], "N/A");
+
+          labels[GNSS_DIAG_ITEM_VDOP] = "VDOP";
+          if (gnss_vdop_valid()) sprintf(valbufs[GNSS_DIAG_ITEM_VDOP], "%.1f", gnss_vdop());
+          else                   sprintf(valbufs[GNSS_DIAG_ITEM_VDOP], "N/A");
+
+          labels[GNSS_DIAG_ITEM_SPEED] = "Speed";
+          if (gnss_speed_valid()) sprintf(valbufs[GNSS_DIAG_ITEM_SPEED], "%.1f km/h", gnss_speed_kmph());
+          else                    sprintf(valbufs[GNSS_DIAG_ITEM_SPEED], "N/A");
+
+          labels[GNSS_DIAG_ITEM_COURSE] = "Course";
+          if (gnss_course_valid()) sprintf(valbufs[GNSS_DIAG_ITEM_COURSE], "%.0f %s", gnss_course_deg(), gnss_course_cardinal());
+          else                     sprintf(valbufs[GNSS_DIAG_ITEM_COURSE], "N/A");
+
+          labels[GNSS_DIAG_ITEM_DATE] = "Date";
+          if (gnss_date_valid()) sprintf(valbufs[GNSS_DIAG_ITEM_DATE], "%04u-%02u-%02u", gnss_date_year(), gnss_date_month(), gnss_date_day());
+          else                   sprintf(valbufs[GNSS_DIAG_ITEM_DATE], "N/A");
+
+          labels[GNSS_DIAG_ITEM_SATS_USED] = "Sats Used";
+          sprintf(valbufs[GNSS_DIAG_ITEM_SATS_USED], "%u", (unsigned)gnss_satellite_count());
+
+          labels[GNSS_DIAG_ITEM_SATS_VIEW] = "Sats In View";
+          sprintf(valbufs[GNSS_DIAG_ITEM_SATS_VIEW], "%u >", (unsigned)gnss_sat_view_count()); // count preview + drill-down indicator
+
+          labels[GNSS_DIAG_ITEM_CHK_PASSED] = "Chk Passed";
+          sprintf(valbufs[GNSS_DIAG_ITEM_CHK_PASSED], "%lu", (unsigned long)gnss_checksum_passed());
+
+          labels[GNSS_DIAG_ITEM_CHK_FAILED] = "Chk Failed";
+          sprintf(valbufs[GNSS_DIAG_ITEM_CHK_FAILED], "%lu", (unsigned long)gnss_checksum_failed());
+
+          labels[GNSS_DIAG_ITEM_CHK_RATE] = "Chk Pass Rate";
+          sprintf(valbufs[GNSS_DIAG_ITEM_CHK_RATE], "%u%%", (unsigned)gnss_checksum_pass_rate_pct());
+
+          labels[GNSS_DIAG_ITEM_CHARS] = "Chars RX";
+          sprintf(valbufs[GNSS_DIAG_ITEM_CHARS], "%lu", (unsigned long)gnss_chars_processed());
+
+          #if GNSS_DUTY_CYCLE_CAPABLE == true
+            labels[GNSS_DIAG_ITEM_DUTY_STATE] = "Duty State";
+            sprintf(valbufs[GNSS_DIAG_ITEM_DUTY_STATE], "%s", gnss_pstate_text());
+
+            labels[GNSS_DIAG_ITEM_LOCK_COUNT] = "Lock Count";
+            sprintf(valbufs[GNSS_DIAG_ITEM_LOCK_COUNT], "%u", (unsigned)gnss_duty_lock_count);
+
+            labels[GNSS_DIAG_ITEM_FAIL_COUNT] = "Consec Fails";
+            sprintf(valbufs[GNSS_DIAG_ITEM_FAIL_COUNT], "%u", (unsigned)gnss_duty_consecutive_failures);
+
+            labels[GNSS_DIAG_ITEM_PREDICTED] = "Pred. Lock";
+            if (gnss_duty_predicted_lock_ms == 0) sprintf(valbufs[GNSS_DIAG_ITEM_PREDICTED], "N/A");
+            else                                  sprintf(valbufs[GNSS_DIAG_ITEM_PREDICTED], "%lus", (unsigned long)gnss_duty_predicted_lock_s());
+
+            labels[GNSS_DIAG_ITEM_WAKE_COUNTDOWN] = "Wake In";
+            if (gnss_pstate == GNSS_PSTATE_SLEEP) sprintf(valbufs[GNSS_DIAG_ITEM_WAKE_COUNTDOWN], "%lus", (unsigned long)gnss_duty_wake_countdown_s());
+            else                                  sprintf(valbufs[GNSS_DIAG_ITEM_WAKE_COUNTDOWN], "--");
+          #endif
+
+          labels[GNSS_DIAG_ITEM_BACK] = "BACK";
+          valbufs[GNSS_DIAG_ITEM_BACK][0] = 0;
+
+          draw_menu_list_disp("GNSS DIAGNOSTICS", labels, valbufs, GNSS_DIAG_ITEM_COUNT, gnss_diag_menu_cursor);
+        } else if (menu_state == MENU_STATE_GNSS_DIAG_SATS) {
+          uint8_t sat_count = gnss_sat_view_count();
+          uint8_t row_count = sat_count == 0 ? 2 : (uint8_t)(sat_count + 1); // "No Data" + BACK, or sats + BACK
+
+          const char *labels[GNSS_SAT_VIEW_MAX + 1];
+          char label_bufs[GNSS_SAT_VIEW_MAX][8];
+          char valbufs[GNSS_SAT_VIEW_MAX + 1][24];
+
+          if (sat_count == 0) {
+            labels[0] = "No Data";
+            valbufs[0][0] = 0;
+          } else {
+            for (uint8_t i = 0; i < sat_count; i++) {
+              snprintf(label_bufs[i], sizeof(label_bufs[i]), "Sat %u", (unsigned)gnss_sat_view_prn(i));
+              labels[i] = label_bufs[i];
+              sprintf(valbufs[i], "El%u Az%u %udB", (unsigned)gnss_sat_view_elevation(i), (unsigned)gnss_sat_view_azimuth(i), (unsigned)gnss_sat_view_snr(i));
+            }
+          }
+          labels[row_count - 1] = "BACK";
+          valbufs[row_count - 1][0] = 0;
+
+          draw_menu_list_disp("SATS IN VIEW", labels, valbufs, row_count, gnss_diag_sats_cursor);
+        }
+      #endif
     #endif
     #if HAS_ESPNOW == true
       else if (menu_state == MENU_STATE_ESPNOW_LIST) {
@@ -4999,9 +5683,13 @@
       else if (menu_state == MENU_STATE_MSNGR_LIST) {
         const char *labels[MSNGR_TOP_ITEM_COUNT];
         char valbufs[MSNGR_TOP_ITEM_COUNT][24];
+        const uint8_t *icons[MSNGR_TOP_ITEM_COUNT] = { nullptr };
+        uint8_t icon_widths[MSNGR_TOP_ITEM_COUNT] = { 0 };
 
         labels[MSNGR_TOP_ITEM_INBOX] = "Inbox";
         sprintf(valbufs[MSNGR_TOP_ITEM_INBOX], "%u", (unsigned)(urns_message_store ? urns_message_store->get_unread_count() : 0));
+        icons[MSNGR_TOP_ITEM_INBOX] = bm_menu_icon_inbox;
+        icon_widths[MSNGR_TOP_ITEM_INBOX] = MENU_ICON_W_INBOX;
 
         labels[MSNGR_TOP_ITEM_BOOKMARKS] = "Bookmarks";
         sprintf(valbufs[MSNGR_TOP_ITEM_BOOKMARKS], "%u", (unsigned)msngr_bookmark_count);
@@ -5015,11 +5703,20 @@
 
         labels[MSNGR_TOP_ITEM_ANNOUNCE_NODE] = "Announce Node";
         valbufs[MSNGR_TOP_ITEM_ANNOUNCE_NODE][0] = 0;
+        icons[MSNGR_TOP_ITEM_ANNOUNCE_NODE] = bm_menu_icon_announce_node;
+        icon_widths[MSNGR_TOP_ITEM_ANNOUNCE_NODE] = MENU_ICON_W_ANNOUNCE_NODE;
 
         labels[MSNGR_TOP_ITEM_BACK] = "BACK";
         valbufs[MSNGR_TOP_ITEM_BACK][0] = 0;
+        // Explicit here (not auto-detected) since this list already builds
+        // its own icons[] table for Inbox/Announce Node above - see
+        // draw_menu_list_disp()'s own comment on why passing any table at
+        // all switches a list over to the wide shared column instead of
+        // BACK's usual narrow auto-indent.
+        icons[MSNGR_TOP_ITEM_BACK] = bm_menu_icon_back;
+        icon_widths[MSNGR_TOP_ITEM_BACK] = MENU_ICON_W_BACK;
 
-        draw_menu_list_disp("MESSENGER", labels, valbufs, MSNGR_TOP_ITEM_COUNT, msngr_menu_cursor);
+        draw_menu_list_disp("MESSENGER", labels, valbufs, MSNGR_TOP_ITEM_COUNT, msngr_menu_cursor, icons, icon_widths);
       } else if (menu_state == MENU_STATE_MSNGR_INBOX) {
         uint8_t row_count = msngr_inbox_row_count();
         const char *labels[MENU_MSNGR_LIST_MAX_ROWS + 1];
@@ -5259,6 +5956,50 @@
       }
       #endif
     #endif
+      else if (menu_state == MENU_STATE_URNS_RADIO_LIST) {
+        const char *labels[URNS_RADIO_ITEM_COUNT];
+        char valbufs[URNS_RADIO_ITEM_COUNT][24];
+
+        labels[URNS_RADIO_ITEM_FREQ] = "Frequency";
+        sprintf(valbufs[URNS_RADIO_ITEM_FREQ], "%lu.%03lu", (unsigned long)(staged_lora_freq / 1000000), (unsigned long)((staged_lora_freq / 1000) % 1000));
+
+        labels[URNS_RADIO_ITEM_BW] = "Bandwidth";
+        if (staged_lora_bw >= 1000) sprintf(valbufs[URNS_RADIO_ITEM_BW], "%lukHz", (unsigned long)(staged_lora_bw / 1000));
+        else                        sprintf(valbufs[URNS_RADIO_ITEM_BW], "%luHz", (unsigned long)staged_lora_bw);
+
+        labels[URNS_RADIO_ITEM_SF] = "Spreading Factor";
+        sprintf(valbufs[URNS_RADIO_ITEM_SF], "%u", staged_lora_sf);
+
+        labels[URNS_RADIO_ITEM_CR] = "Coding Rate";
+        sprintf(valbufs[URNS_RADIO_ITEM_CR], "%u", staged_lora_cr);
+
+        labels[URNS_RADIO_ITEM_TXP] = "TX Power";
+        sprintf(valbufs[URNS_RADIO_ITEM_TXP], "%udBm", staged_lora_txp);
+
+        labels[URNS_RADIO_ITEM_BACK] = "BACK";
+        valbufs[URNS_RADIO_ITEM_BACK][0] = 0;
+
+        draw_menu_list_disp("RADIO", labels, valbufs, URNS_RADIO_ITEM_COUNT, urns_radio_menu_cursor);
+      } else if (menu_state == MENU_STATE_URNS_RADIO_EDIT) {
+        char valbuf[24];
+        if (urns_radio_menu_cursor == URNS_RADIO_ITEM_FREQ) {
+          sprintf(valbuf, "%lu.%03lu MHz", (unsigned long)(staged_lora_freq / 1000000), (unsigned long)((staged_lora_freq / 1000) % 1000));
+          draw_menu_edit_disp("FREQUENCY", valbuf);
+        } else if (urns_radio_menu_cursor == URNS_RADIO_ITEM_BW) {
+          if (staged_lora_bw >= 1000) sprintf(valbuf, "%lu kHz", (unsigned long)(staged_lora_bw / 1000));
+          else                        sprintf(valbuf, "%lu Hz", (unsigned long)staged_lora_bw);
+          draw_menu_edit_disp("BANDWIDTH", valbuf);
+        } else if (urns_radio_menu_cursor == URNS_RADIO_ITEM_SF) {
+          sprintf(valbuf, "%u", staged_lora_sf);
+          draw_menu_edit_disp("SPREADING FACTOR", valbuf);
+        } else if (urns_radio_menu_cursor == URNS_RADIO_ITEM_CR) {
+          sprintf(valbuf, "%u", staged_lora_cr);
+          draw_menu_edit_disp("CODING RATE", valbuf);
+        } else {
+          sprintf(valbuf, "%u dBm", staged_lora_txp);
+          draw_menu_edit_disp("TX POWER", valbuf);
+        }
+      }
     #if HAS_SENSORS == true
       else if (menu_state == MENU_STATE_SENSORS_LIST) {
         const char *labels[SENSORS_ITEM_COUNT];
@@ -5327,8 +6068,8 @@
           else                sprintf(valbufs[HW_ITEM_BATTERY], "N/A");
         #endif
 
-        // No GNSS Chip row here anymore - redundant with the GNSS page's
-        // own Module row (GNSS_ITEM_MODULE), see HW_NEXT_A3's own comment.
+        // No GNSS Chip row here anymore - redundant with GNSS chip
+        // identity on the GNSS page itself, see HW_NEXT_A3's own comment.
 
         #if HAS_WIFI == true
           // wr_device_ip/subnet only mean anything once actually connected
@@ -5425,6 +6166,21 @@
           sprintf(valbufs[HW_ITEM_UPTIME], "%02lu:%02lu:%02lu",
             (unsigned long)(up_s/3600), (unsigned long)((up_s/60)%60), (unsigned long)(up_s%60));
         }
+
+        #if MCU_VARIANT == MCU_NRF52
+          labels[HW_ITEM_LAST_RESET] = "Last Reset";
+          if (nrf52_had_prior_checkpoint) {
+            // cp_name() strings are call-site descriptions (some over 30
+            // chars, e.g. "urns_lxmf_loop->handle_incoming()"), not sized
+            // for this 24-byte value column like every other row here -
+            // snprintf (not sprintf) truncates instead of overflowing;
+            // good enough to identify the subsystem at a glance, which is
+            // all this row needs to do.
+            snprintf(valbufs[HW_ITEM_LAST_RESET], sizeof(valbufs[HW_ITEM_LAST_RESET]), "%s: %s", nrf52_last_reset_reason, nrf52_last_cp_name);
+          } else {
+            sprintf(valbufs[HW_ITEM_LAST_RESET], "%s", nrf52_last_reset_reason);
+          }
+        #endif
 
         labels[HW_ITEM_BACK] = "BACK";
         valbufs[HW_ITEM_BACK][0] = 0;
@@ -5541,7 +6297,13 @@
         char valbufs[FWUPD_ITEM_COUNT][24];
 
         labels[FWUPD_ITEM_CURRENT] = "Current";
-        snprintf(valbufs[FWUPD_ITEM_CURRENT], 24, "%s.%d", ota_current_version().c_str(), BUILD_NUMBER);
+        // BUILD_NUMBER==0 means this build didn't come through the
+        // Makefile/platformio.ini's git-commit-count injection at all (see
+        // BUILD_NUMBER's own fallback, Boards.h) - unknown, not a real
+        // build 0, so the suffix is omitted rather than showing a
+        // misleading ".0".
+        if (BUILD_NUMBER != 0) snprintf(valbufs[FWUPD_ITEM_CURRENT], 24, "%s.%d", ota_current_version().c_str(), BUILD_NUMBER);
+        else                     snprintf(valbufs[FWUPD_ITEM_CURRENT], 24, "%s", ota_current_version().c_str());
 
         labels[FWUPD_ITEM_LATEST] = "Latest";
         if (fwupd_latest_ok) snprintf(valbufs[FWUPD_ITEM_LATEST], 24, "%s.%ld", ota_current_version().c_str(), fwupd_latest_build);

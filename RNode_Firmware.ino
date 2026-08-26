@@ -25,30 +25,11 @@
 // needs it earlier. Only the enum/macro/globals move up here; cp_name()/
 // cp_report_last() (which need DEBUG_LOG, from Utilities.h) stay below,
 // after Utilities.h's own include.
-#if MCU_VARIANT == MCU_ESP32
-  // Pinpointing the still-open loopTask task-watchdog stall (see
-  // feedback_sx126x_tx_rx_spi_mutex_race.md / project_sx1262_tx_poll_yield_
-  // fix.md) - a real, uncorrupted capture finally caught one, but the panic
-  // dump only shows both cores already idle by the time it fires (loopTask
-  // had silently blocked and never come back), not where. RTC_NOINIT_ATTR
-  // survives the watchdog's own software reset (unlike regular RAM), so the
-  // last checkpoint loopTask reached survives into the next boot, where it
-  // gets printed once, right after the reset-reason line above - cheap
-  // enough (two word writes, no serial I/O) to bracket every major loop()
-  // section without perturbing the timing that's supposed to be measured.
-  #define CP_MAGIC 0xC0FFEE42
-  // volatile is load-bearing here, not defensive: cp_report_last()'s one
-  // read happens (in this compilation's view of program order) before any
-  // of loop()'s writes below it - the compiler has no way to know a reset
-  // and reboot sits between them, so without volatile it's free to treat
-  // every CP() write as a dead store never observed within this execution,
-  // and reorder/coalesce/drop them. That's almost certainly why the first
-  // real capture reported a checkpoint far older than the last heartbeat
-  // before the crash - not a logic bug in CP() itself, a missing volatile.
-  RTC_NOINIT_ATTR volatile uint32_t g_cp_magic;
-  RTC_NOINIT_ATTR volatile uint16_t g_cp_id;
-  RTC_NOINIT_ATTR volatile uint32_t g_cp_millis;
-
+#if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
+  // Shared checkpoint IDs - what loop()/URNS.h/sx126x.cpp bracket their
+  // major sections with, regardless of which MCU. Storage backend (below)
+  // differs per platform; this enum just needs to be in scope for CP()/
+  // CPV() call sites to compile on both.
   enum {
     CP_NONE = 0,
     CP_LOOP_TOP,
@@ -91,40 +72,72 @@
     CP_TXQ_FLUSH_TRANSMIT,
     CP_TXQ_FLUSH_RECEIVE,
   };
+#endif
+
+#if MCU_VARIANT == MCU_ESP32
+  // Pinpointing the still-open loopTask task-watchdog stall (see
+  // feedback_sx126x_tx_rx_spi_mutex_race.md / project_sx1262_tx_poll_yield_
+  // fix.md) - a real, uncorrupted capture finally caught one, but the panic
+  // dump only shows both cores already idle by the time it fires (loopTask
+  // had silently blocked and never come back), not where. RTC_NOINIT_ATTR
+  // survives the watchdog's own software reset (unlike regular RAM), so the
+  // last checkpoint loopTask reached survives into the next boot, where it
+  // gets printed once, right after the reset-reason line above - cheap
+  // enough (two word writes, no serial I/O) to bracket every major loop()
+  // section without perturbing the timing that's supposed to be measured.
+  #define CP_MAGIC 0xC0FFEE42
+  // volatile is load-bearing here, not defensive: cp_report_last()'s one
+  // read happens (in this compilation's view of program order) before any
+  // of loop()'s writes below it - the compiler has no way to know a reset
+  // and reboot sits between them, so without volatile it's free to treat
+  // every CP() write as a dead store never observed within this execution,
+  // and reorder/coalesce/drop them. That's almost certainly why the first
+  // real capture reported a checkpoint far older than the last heartbeat
+  // before the crash - not a logic bug in CP() itself, a missing volatile.
+  RTC_NOINIT_ATTR volatile uint32_t g_cp_magic;
+  RTC_NOINIT_ATTR volatile uint16_t g_cp_id;
+  RTC_NOINIT_ATTR volatile uint32_t g_cp_millis;
 
   #define CP(x) do { g_cp_id = (x); g_cp_millis = millis(); } while (0)
+  // Same as CP(), but stashes a caller-supplied value (packet length/written
+  // count/etc, whatever's most useful to see for that checkpoint) in
+  // g_cp_millis instead of millis() - g_cp_millis is ESP32-only (RTC_NOINIT_
+  // ATTR), so this macro (not a bare `g_cp_millis = ...;` after CP()) is
+  // what keeps call sites portable to non-ESP32 builds via the #else below.
+  #define CPV(x, v) do { g_cp_id = (x); g_cp_millis = (v); } while (0)
+#elif MCU_VARIANT == MCU_NRF52
+  // nRF52 has no RTC_NOINIT-style region, but NRF_POWER->GPREGRET/GPREGRET2
+  // are two dedicated 8-bit registers that survive every reset except a
+  // genuine power-on (soft reset, pin reset, and - critically - the
+  // watchdog reset nrf52_wdt_init() below arms all preserve them), the same
+  // "outlives the reset that's about to happen" property RTC_NOINIT_ATTR
+  // gives ESP32 above, just one byte wide instead of a whole word. g_cp_id/
+  // g_cp_millis themselves are ordinary (non-retained) RAM, kept only so
+  // any future in-session diagnostic can read the full-width value; the
+  // GPREGRET mirror is what actually survives to the next boot for
+  // nrf52_cp_report_last() (below) to read back. Only the low byte of each
+  // fits - enough to identify which checkpoint (well under 256 entries)
+  // and coarsely which call (CPV's stashed length/count, truncated).
+  volatile uint16_t g_cp_id;
+  volatile uint32_t g_cp_millis;
+  #define CP(x) do { g_cp_id = (x); g_cp_millis = millis(); NRF_POWER->GPREGRET = (uint8_t)(x); } while (0)
+  #define CPV(x, v) do { g_cp_id = (x); g_cp_millis = (v); NRF_POWER->GPREGRET = (uint8_t)(x); NRF_POWER->GPREGRET2 = (uint8_t)(v); } while (0)
+
+  // Filled in by nrf52_cp_report_last() (below, after Utilities.h - it
+  // needs cp_name(), declared there) - has to live up here anyway, before
+  // Utilities.h's own #include, since Utilities.h pulls in Menu.h, and
+  // Menu.h's Hardware page (MENU_STATE_HW_LIST) reads these directly.
+  const char* nrf52_last_reset_reason = "POWERON";
+  const char* nrf52_last_cp_name = "NONE";
+  bool nrf52_had_prior_checkpoint = false;
 #else
   #define CP(x) do {} while (0)
+  #define CPV(x, v) do {} while (0)
 #endif
 
 #include "Utilities.h"
 
-#if MCU_VARIANT == MCU_ESP32
-  #include <esp_task_wdt.h>
-  #include <esp_heap_caps.h>
-  #include <esp_system.h>
-  #include <mbedtls/platform.h>
-
-  // Printed once at boot (see "RNode starting" below) so a reboot we didn't
-  // witness live still leaves a record of whether it was a plain power-on,
-  // a panic/abort, a watchdog trip, or something else, once the debug UART
-  // capture picks back up on the new boot.
-  const char* esp_reset_reason_str() {
-    switch (esp_reset_reason()) {
-      case ESP_RST_POWERON:   return "POWERON";
-      case ESP_RST_EXT:       return "EXT";
-      case ESP_RST_SW:        return "SW";
-      case ESP_RST_PANIC:     return "PANIC";
-      case ESP_RST_INT_WDT:   return "INT_WDT";
-      case ESP_RST_TASK_WDT:  return "TASK_WDT";
-      case ESP_RST_WDT:       return "WDT";
-      case ESP_RST_DEEPSLEEP: return "DEEPSLEEP";
-      case ESP_RST_BROWNOUT:  return "BROWNOUT";
-      case ESP_RST_SDIO:      return "SDIO";
-      default:                return "UNKNOWN";
-    }
-  }
-
+#if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
   const char* cp_name(uint16_t id) {
     switch (id) {
       case CP_NONE:                  return "NONE";
@@ -180,6 +193,33 @@
       default:                       return "UNKNOWN";
     }
   }
+#endif
+
+#if MCU_VARIANT == MCU_ESP32
+  #include <esp_task_wdt.h>
+  #include <esp_heap_caps.h>
+  #include <esp_system.h>
+  #include <mbedtls/platform.h>
+
+  // Printed once at boot (see "RNode starting" below) so a reboot we didn't
+  // witness live still leaves a record of whether it was a plain power-on,
+  // a panic/abort, a watchdog trip, or something else, once the debug UART
+  // capture picks back up on the new boot.
+  const char* esp_reset_reason_str() {
+    switch (esp_reset_reason()) {
+      case ESP_RST_POWERON:   return "POWERON";
+      case ESP_RST_EXT:       return "EXT";
+      case ESP_RST_SW:        return "SW";
+      case ESP_RST_PANIC:     return "PANIC";
+      case ESP_RST_INT_WDT:   return "INT_WDT";
+      case ESP_RST_TASK_WDT:  return "TASK_WDT";
+      case ESP_RST_WDT:       return "WDT";
+      case ESP_RST_DEEPSLEEP: return "DEEPSLEEP";
+      case ESP_RST_BROWNOUT:  return "BROWNOUT";
+      case ESP_RST_SDIO:      return "SDIO";
+      default:                return "UNKNOWN";
+    }
+  }
 
   // Call once at boot, right after the reset-reason line - prints where
   // loopTask was about to go last time, iff this boot followed a reset type
@@ -212,6 +252,73 @@
     return p;
   }
   void mbedtls_psram_free(void* p) { heap_caps_free(p); }
+#elif MCU_VARIANT == MCU_NRF52
+  // T096/T114 have no free UART (HAS_DEBUG_UART is false on both, Boards.h)
+  // and no SWD probe available in the field, so DEBUG_LOG() is a pure
+  // no-op here (Utilities.h) - there was previously no way to see where a
+  // hang happened short of reproducing it under a debugger. This mirrors
+  // the ESP32 block above (reset-reason capture + last-checkpoint
+  // readback), but surfaces the result on-screen (Menu.h's Hardware page -
+  // nrf52_last_reset_reason/nrf52_last_cp_name below) instead of over
+  // serial, since every nRF52 board with this checkpoint trail also has a
+  // display. Paired with nrf52_wdt_init()/nrf52_wdt_feed() (called from
+  // setup()/loop() below) so a genuine hang becomes a watchdog reset - and
+  // therefore an inspectable boot - instead of a silent lockup needing a
+  // manual power cycle.
+  const char* nrf52_reset_reason_str(uint32_t reasreg) {
+    // First match wins - a real reset can set more than one bit; the
+    // watchdog/lockup cases are what this trail exists to catch, so they're
+    // checked first.
+    if (reasreg & POWER_RESETREAS_DOG_Msk)      return "WATCHDOG";
+    if (reasreg & POWER_RESETREAS_LOCKUP_Msk)   return "LOCKUP";
+    if (reasreg & POWER_RESETREAS_SREQ_Msk)     return "SOFT";
+    if (reasreg & POWER_RESETREAS_RESETPIN_Msk) return "PIN";
+    if (reasreg & POWER_RESETREAS_OFF_Msk)      return "WAKE_OFF";
+    if (reasreg == 0)                           return "POWERON";
+    return "UNKNOWN";
+  }
+
+  // Call once at boot, before anything else's CP()/CPV() call this boot
+  // overwrites GPREGRET/GPREGRET2 - reads back whatever the *previous*
+  // boot's last checkpoint was.
+  void nrf52_cp_report_last() {
+    uint32_t reasreg = NRF_POWER->RESETREAS;
+    NRF_POWER->RESETREAS = reasreg; // write-1-to-clear, ready for next boot
+    nrf52_last_reset_reason = nrf52_reset_reason_str(reasreg);
+
+    // GPREGRET/GPREGRET2 aren't magic-guarded the way ESP32's g_cp_magic
+    // is above (no spare bits for a sentinel) - a power-on boot just reads
+    // back the register's power-on-reset default (0, i.e. CP_NONE), which
+    // is exactly the right "nothing to report" answer anyway.
+    uint8_t last_id = NRF_POWER->GPREGRET;
+    nrf52_had_prior_checkpoint = (reasreg != 0) && (last_id != CP_NONE);
+    if (nrf52_had_prior_checkpoint) { nrf52_last_cp_name = cp_name(last_id); }
+
+    g_cp_id = CP_NONE;
+    g_cp_millis = 0;
+    NRF_POWER->GPREGRET = CP_NONE;
+    NRF_POWER->GPREGRET2 = 0;
+  }
+
+  // 25s, matching the ESP32 task watchdog's own timeout (esp_task_wdt.h
+  // call sites, this file) - long enough that no known legitimate blocking
+  // operation (LittleFS eeprom_flush() retries, TCXO calibration,
+  // LORA_MODEM_TIMEOUT_MS's 20s TX-done poll) trips it, short enough that a
+  // real hang recovers in a reasonable time instead of sitting locked up
+  // indefinitely. NRF_WDT, once started, cannot be stopped or reconfigured
+  // short of a full chip reset - fine, it's armed once here and never
+  // needs to change again. CONFIG's SLEEP_Run bit keeps it counting
+  // through System ON sleep (this firmware's HAS_SLEEP path uses System
+  // OFF instead, which powers down far enough that the WDT can't matter
+  // either way).
+  void nrf52_wdt_init() {
+    NRF_WDT->CONFIG = (WDT_CONFIG_HALT_Pause << WDT_CONFIG_HALT_Pos) | (WDT_CONFIG_SLEEP_Run << WDT_CONFIG_SLEEP_Pos);
+    NRF_WDT->CRV = 819200UL; // 25000ms * 32768Hz / 1000
+    NRF_WDT->RREN = WDT_RREN_RR0_Msk;
+    NRF_WDT->TASKS_START = 1;
+  }
+
+  void nrf52_wdt_feed() { NRF_WDT->RR[0] = WDT_RR_RR_Reload; }
 #endif
 
 #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
@@ -328,6 +435,13 @@ void setup() {
   #if MCU_VARIANT == MCU_ESP32
     DEBUG_LOG("[Boot] reset reason: %s\r\n", esp_reset_reason_str());
     cp_report_last();
+  #elif MCU_VARIANT == MCU_NRF52
+    // No DEBUG_LOG on these boards (see nrf52_cp_report_last()'s own
+    // comment) - result goes to nrf52_last_reset_reason/nrf52_last_cp_name
+    // for Menu.h's Hardware page to show instead. Watchdog armed
+    // immediately after, before anything that could plausibly hang runs.
+    nrf52_cp_report_last();
+    nrf52_wdt_init();
   #endif
 
   #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
@@ -434,7 +548,7 @@ void setup() {
     boot_seq();
   #endif
 
-  #if BOARD_MODEL != BOARD_RAK4631 && BOARD_MODEL != BOARD_HELTEC_T114 && BOARD_MODEL != BOARD_HELTEC_T096 && BOARD_MODEL != BOARD_MESHPOE_S3 && BOARD_MODEL != BOARD_MESHADVENTURER_S3 && BOARD_MODEL != BOARD_PROMICRO && BOARD_MODEL != BOARD_AETHERNODE_S3 && BOARD_MODEL != BOARD_TECHO && BOARD_MODEL != BOARD_T3S3 && BOARD_MODEL != BOARD_TBEAM_S_V1 && BOARD_MODEL != BOARD_TBEAM_S_V3 && BOARD_MODEL != BOARD_HELTEC32_V4
+  #if BOARD_MODEL != BOARD_RAK4631 && BOARD_MODEL != BOARD_HELTEC_T114 && BOARD_MODEL != BOARD_HELTEC_T096 && BOARD_MODEL != BOARD_HELTEC_WTRACKER_V2 && BOARD_MODEL != BOARD_HELTEC_T1 && BOARD_MODEL != BOARD_MESHPOE_S3 && BOARD_MODEL != BOARD_MESHADVENTURER_S3 && BOARD_MODEL != BOARD_PROMICRO && BOARD_MODEL != BOARD_AETHERNODE_S3 && BOARD_MODEL != BOARD_TECHO && BOARD_MODEL != BOARD_T3S3 && BOARD_MODEL != BOARD_TBEAM_S_V1 && BOARD_MODEL != BOARD_TBEAM_S_V3 && BOARD_MODEL != BOARD_HELTEC32_V4 && BOARD_MODEL != BOARD_TBEAM_1W
     // Some boards need to wait until the hardware UART is set up before booting
     // the full firmware. In the case of the RAK4631 and Heltec T114, the line below will wait
     // until a serial connection is actually established with a master. Thus, it
@@ -498,6 +612,19 @@ void setup() {
         pinMode(pin_tcxo_enable, OUTPUT);
         digitalWrite(pin_tcxo_enable, HIGH);
     }
+  #endif
+
+  #if BOARD_MODEL == BOARD_TBEAM_1W
+    // pin_radio_en (GPIO40) powers the LDO feeding the whole XY16P35
+    // module (SX1262 + PA + LNA) - must be HIGH before any SPI access to
+    // the radio further down in this function. pin_fan_en (GPIO41) is the
+    // PA cooling fan - see its own comment in Boards.h for why this just
+    // leaves it on unconditionally rather than duty-cycling it.
+    pinMode(pin_radio_en, OUTPUT);
+    digitalWrite(pin_radio_en, HIGH);
+    delay(10);
+    pinMode(pin_fan_en, OUTPUT);
+    digitalWrite(pin_fan_en, HIGH);
   #endif
 
   // Initialise buffers
@@ -608,13 +735,16 @@ void setup() {
   #endif
 
   #if HAS_GPS == true
-    // ADDR_CONF_GNSS is a raw physical byte, not offset via eeprom_addr() -
-    // it resolves to a different (platform-appropriate) genuinely-free
-    // address per MCU_VARIANT - see its own comment, ROM.h.
+    // ADDR_CONF_GNSS is offset via eeprom_addr() like every other
+    // ADDR_CONF_* setting - see its own comment, ROM.h, for why this used
+    // to be a raw physical byte and why that collided with Device.h's
+    // firmware-hash storage on nRF52 (corrupted dev_firmware_hash_target,
+    // producing "Firmware Corrupt" on the next boot - confirmed on a real
+    // T114).
     #if HAS_EEPROM
-      uint8_t gnss_raw = EEPROM.read(ADDR_CONF_GNSS);
+      uint8_t gnss_raw = EEPROM.read(eeprom_addr(ADDR_CONF_GNSS));
     #elif MCU_VARIANT == MCU_NRF52
-      uint8_t gnss_raw = eeprom_read(ADDR_CONF_GNSS);
+      uint8_t gnss_raw = eeprom_read(eeprom_addr(ADDR_CONF_GNSS));
     #endif
     // Explicit ON/OFF only ever get written as GNSS_ENABLE_BYTE/
     // GNSS_DISABLE_BYTE (see gnss_conf_save()) - any other value (erased
@@ -623,7 +753,27 @@ void setup() {
     // either way.
     if (gnss_raw == GNSS_ENABLE_BYTE) gnss_enabled = true;
     else if (gnss_raw == GNSS_DISABLE_BYTE) gnss_enabled = false;
+
+    // Same eeprom_addr() convention and "never touched" handling as
+    // gnss_raw above, but stores a preset index
+    // (gnss_update_interval_presets_s, GNSS.h), not a byte-coded on/off -
+    // see gnss_interval_conf_save(), Utilities.h. An out-of-range index
+    // (including 0xFF/erased) leaves gnss_update_interval_s at its
+    // compiled default (GNSS_UPDATE_INTERVAL_DEFAULT, Boards.h - always
+    // Continuous/0 today).
+    #if HAS_EEPROM
+      uint8_t gnss_interval_raw = EEPROM.read(eeprom_addr(ADDR_CONF_GNSS_INTERVAL));
+    #elif MCU_VARIANT == MCU_NRF52
+      uint8_t gnss_interval_raw = eeprom_read(eeprom_addr(ADDR_CONF_GNSS_INTERVAL));
+    #endif
+    if (gnss_interval_raw < GNSS_UPDATE_INTERVAL_PRESET_COUNT) {
+      gnss_update_interval_s = gnss_update_interval_presets_s[gnss_interval_raw];
+    }
+
     gnss_init();
+    #if HAS_GNSS_DEBUG_MENU == true
+      gnss_gsv_fields_init();
+    #endif
   #endif
 
   #if HAS_URNS == true
@@ -974,6 +1124,12 @@ inline void kiss_write_packet() {
   #endif
 }
 
+// Deliberately NOT marked ISR_VECT despite only being called from
+// receive_callback() (which is) - doing so causes a real xtensa linker
+// failure ("dangerous relocation: l32r: literal placed after use"), not
+// just a cosmetic change. The resulting "ignoring attribute 'section'"
+// warning at the call sites below is harmless (one implicit IRAM section
+// wins, no functional difference) - leave it alone.
 inline void getPacketData(uint16_t len) {
   #if MCU_VARIANT != MCU_NRF52
     while (len-- && read_len < MTU) {
@@ -988,7 +1144,18 @@ inline void getPacketData(uint16_t len) {
   #endif
 }
 
-void ISR_VECT receive_callback(int packet_size) {
+// Explicit, stable IRAM section name instead of plain ISR_VECT (IRAM_ATTR).
+// IRAM_ATTR expands to __attribute__((section(".iram1." + __COUNTER__)))
+// (esp_attr.h) - PlatformIO's sketch preprocessor emits an extra
+// auto-generated prototype for this function elsewhere in the translation
+// unit, which independently expands ISR_VECT/IRAM_ATTR a second time at a
+// different __COUNTER__ value, producing two different section names for
+// the same symbol ("ignoring attribute... because it conflicts with
+// previous declaration"). A fixed, literal section name (still under the
+// ".iram1" prefix the linker script places in IRAM the same way) can't
+// collide with itself regardless of how many times it's expanded - same
+// placement, just spelled out instead of auto-numbered.
+void __attribute__((section(".iram1.receive_callback"))) receive_callback(int packet_size) {
   #if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
     BaseType_t int_mask;
   #endif
@@ -1240,11 +1407,12 @@ bool urns_enqueue_outgoing(const uint8_t* data, uint16_t len) {
 
   uint16_t start = queue_cursor;
   for (uint16_t i = 0; i < len; i++) {
-    packet_queue[queue_cursor++] = data[i];
+    packet_queue[queue_cursor] = data[i];
+    queue_cursor = queue_cursor + 1;
     if (queue_cursor == CONFIG_QUEUE_SIZE) queue_cursor = 0;
   }
   queued_bytes += len;
-  queue_height++;
+  queue_height = queue_height + 1;
   fifo16_push(&packet_starts, start);
   fifo16_push(&packet_lengths, len);
   current_packet_start = queue_cursor;
@@ -1252,15 +1420,17 @@ bool urns_enqueue_outgoing(const uint8_t* data, uint16_t len) {
   return true;
 }
 
-// Nothing in this codebase has ever needed a standalone default - lora_freq/
-// lora_bw/lora_sf/lora_cr/lora_txp are normally only ever set by a host's
-// CMD_FREQUENCY/CMD_BANDWIDTH/CMD_SF/CMD_CR/CMD_TXPOWER, and radio_locked
-// (update_radio_lock()) stays true - so startRadio() silently refuses to
-// run - until all four of the first five are set. Without this, the
-// onboard node's queued packets (urns_enqueue_outgoing() above) just sit
-// in packet_queue forever: tx_queue_handler() itself only runs inside
-// loop()'s `if (radio_online)` branch. User-specified values, not a
-// project default - real RF, real regulatory/interference stakes.
+// If a valid TNC config is already saved in EEPROM, validate_status() (this
+// file) already loaded it (eeprom_conf_load()) and started the radio before
+// this ever runs - the guard below makes this whole function a no-op in
+// that case, and the RNode Settings > Radio menu (Menu.h) is what edits
+// that saved config from then on. These literal values are only a one-time
+// seed for a truly virgin board that's never had a config saved - real RF,
+// real regulatory/interference stakes, so still a deliberate starting
+// point, not an arbitrary placeholder. Without a radio coming up somehow,
+// the onboard node's queued packets (urns_enqueue_outgoing() above) just
+// sit in packet_queue forever: tx_queue_handler() itself only runs inside
+// loop()'s `if (radio_online)` branch.
 void urns_radio_bringup() {
   if (!urns_ready || radio_online) return;
 
@@ -1271,6 +1441,14 @@ void urns_radio_bringup() {
   lora_txp  = 17;         // dBm
 
   startRadio();
+
+  // First-ever boot with no saved TNC config: persist these seed defaults
+  // so future boots load them via the existing eeprom_conf_load() path
+  // above, and the Radio menu shows/edits real EEPROM-backed values
+  // instead of this hardcoded fallback being silently re-applied forever.
+  if (radio_online && !eeprom_have_conf()) {
+    eeprom_conf_save();
+  }
 }
 #endif
 
@@ -1351,7 +1529,7 @@ void flush_queue(void) {
   if (!queue_flushing) {
     queue_flushing = true;
     if (!LED_DISPLAY_BLANKED) { led_tx_on(); }
-    #if HAS_DISPLAY && BOARD_MODEL == BOARD_HELTEC_T096
+    #if HAS_DISPLAY && (BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1)
       display_indicate_tx();
     #endif
 
@@ -1365,13 +1543,13 @@ void flush_queue(void) {
       uint16_t length = fifo16_pop(&packet_lengths);
 
       if (length >= MIN_L && length <= MTU) {
-        CP(CP_TXQ_FLUSH_COPY); g_cp_millis = length;
+        CPV(CP_TXQ_FLUSH_COPY, length);
         for (uint16_t i = 0; i < length; i++) {
           uint16_t pos = (start+i)%CONFIG_QUEUE_SIZE;
           tbuf[i] = packet_queue[pos];
         }
 
-        CP(CP_TXQ_FLUSH_TRANSMIT); g_cp_millis = length;
+        CPV(CP_TXQ_FLUSH_TRANSMIT, length);
         transmit(length);
       }
 
@@ -1404,7 +1582,7 @@ void flush_queue(void) {
 
   queue_flushing = false;
 
-  #if HAS_DISPLAY && BOARD_MODEL != BOARD_HELTEC_T096
+  #if HAS_DISPLAY && BOARD_MODEL != BOARD_HELTEC_T096 && BOARD_MODEL != BOARD_HELTEC_WTRACKER_V2 && BOARD_MODEL != BOARD_HELTEC_T1
     // on the T096 this is handled by display_indicate_tx() pre-transmit
     display_tx = true;
   #endif
@@ -1414,7 +1592,7 @@ void pop_queue() {
   if (!queue_flushing) {
     queue_flushing = true;
     if (!LED_DISPLAY_BLANKED) { led_tx_on(); }
-    #if HAS_DISPLAY && BOARD_MODEL == BOARD_HELTEC_T096
+    #if HAS_DISPLAY && (BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1)
       display_indicate_tx();
     #endif
 
@@ -1448,7 +1626,7 @@ void pop_queue() {
 
   queue_flushing = false;
 
-  #if HAS_DISPLAY && BOARD_MODEL != BOARD_HELTEC_T096
+  #if HAS_DISPLAY && BOARD_MODEL != BOARD_HELTEC_T096 && BOARD_MODEL != BOARD_HELTEC_WTRACKER_V2 && BOARD_MODEL != BOARD_HELTEC_T1
     // on the T096 this is handled by display_indicate_tx() pre-transmit
     display_tx = true;
   #endif
@@ -1551,16 +1729,16 @@ void transmit(uint16_t size) {
       // See project_meshpoe_s3_fem_rewire memory.
       DEBUG_LOG("[TX] start size=%u split=%d\r\n", (unsigned)size, (header & FLAG_SPLIT) ? 1 : 0);
 
-      CP(CP_TX_BEGIN_PACKET); g_cp_millis = size;
+      CPV(CP_TX_BEGIN_PACKET, size);
       LoRa->beginPacket();
       LoRa->write(header); written++;
 
-      CP(CP_TX_WRITE_LOOP); g_cp_millis = size;
+      CPV(CP_TX_WRITE_LOOP, size);
       for (uint16_t i=0; i < size; i++) {
         LoRa->write(tbuf[i]); written++;
 
         if (written == 255 && isSplitPacket(header)) {
-          CP(CP_TX_END_PACKET); g_cp_millis = written;
+          CPV(CP_TX_END_PACKET, written);
           if (!LoRa->endPacket()) {
             kiss_indicate_error(ERROR_MODEM_TIMEOUT);
             kiss_indicate_error(ERROR_TXFAILED);
@@ -1569,15 +1747,18 @@ void transmit(uint16_t size) {
           }
 
           add_airtime(written);
-          CP(CP_TX_BEGIN_PACKET); g_cp_millis = size;
+          CPV(CP_TX_BEGIN_PACKET, size);
           LoRa->beginPacket();
           LoRa->write(header);
           written = 1;
         }
       }
 
-      CP(CP_TX_END_PACKET); g_cp_millis = written;
+      CPV(CP_TX_END_PACKET, written);
       uint32_t _tx_t0 = millis();
+      // Only actually read below inside the DEBUG_LOG() call, which
+      // no-ops entirely on boards without HAS_DEBUG_UART.
+      (void)_tx_t0;
       int _tx_ok = LoRa->endPacket();
       DEBUG_LOG("[TX] end written=%u ok=%d dur=%lums\r\n", (unsigned)written, _tx_ok, (unsigned long)(millis() - _tx_t0));
       if (!_tx_ok) {
@@ -1621,7 +1802,7 @@ void serial_callback(uint8_t sbyte) {
         else        { l = 1; }
 
         if (l >= MIN_L) {
-            queue_height++;
+            queue_height = queue_height + 1;
             fifo16_push(&packet_starts, s);
             fifo16_push(&packet_lengths, l);
             current_packet_start = queue_cursor;
@@ -1692,8 +1873,9 @@ void serial_callback(uint8_t sbyte) {
                 ESCAPE = false;
             }
             if (queue_height < CONFIG_QUEUE_MAX_LENGTH && queued_bytes < CONFIG_QUEUE_SIZE) {
-              queued_bytes++;
-              packet_queue[queue_cursor++] = sbyte;
+              queued_bytes = queued_bytes + 1;
+              packet_queue[queue_cursor] = sbyte;
+              queue_cursor = queue_cursor + 1;
               if (queue_cursor == CONFIG_QUEUE_SIZE) queue_cursor = 0;
             }
         }
@@ -2453,7 +2635,6 @@ void serial_callback(uint8_t sbyte) {
                 if (sbyte == TFESC) sbyte = FESC;
                 ESCAPE = false;
             }
-            sbyte;
             led_set_intensity(sbyte);
             np_int_conf_save(sbyte);
         }
@@ -2826,7 +3007,7 @@ void tx_queue_handler() {
       cw_wait_target = csma_cw * csma_slot_ms;
     }
 
-    if (difs_wait_start == -1) {                                                  // DIFS wait not yet started
+    if (difs_wait_start == (unsigned long)-1) {                                   // DIFS wait not yet started
       if (medium_free()) { difs_wait_start = millis(); return; }                  // Set DIFS wait start time
       else               { return; } }                                            // Medium not yet free, continue waiting
     
@@ -2835,7 +3016,7 @@ void tx_queue_handler() {
       else {                                                                      // Medium is free, so continue waiting
         if (millis() < difs_wait_start+difs_ms) { return; }                       // DIFS has not yet passed, continue waiting
         else {                                                                    // DIFS has passed, and we are now in CW wait
-          if (cw_wait_start == -1) { cw_wait_start = millis(); return; }          // If we haven't started counting CW wait time, do it from now
+          if (cw_wait_start == (unsigned long)-1) { cw_wait_start = millis(); return; } // If we haven't started counting CW wait time, do it from now
           else {                                                                  // If we are already counting CW wait time, add it to the counter
             cw_wait_passed += millis()-cw_wait_start; cw_wait_start   = millis();
             if (cw_wait_passed < cw_wait_target) { return; }                      // Contention window wait time has not yet passed, continue waiting
@@ -2855,6 +3036,8 @@ void work_while_waiting() { loop(); }
 void loop() {
   #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
     esp_task_wdt_reset();
+  #elif MCU_VARIANT == MCU_NRF52
+    nrf52_wdt_feed();
   #endif
   CP(CP_LOOP_TOP);
   // housekeeping_task()/kiss_tx_task()/ws_tx_task() used to run as their
@@ -3112,6 +3295,24 @@ void loop() {
 void sleep_now() {
   #if HAS_SLEEP == true
     stopRadio(); // TODO: Check this on all platforms
+    #if HAS_GPS == true
+      // Power the GNSS receiver down too - previously left powered/awake
+      // straight through sleep on every HAS_SLEEP board that has one
+      // (Heltec32-V4, T096, T114), drawing current for no reason.
+      // gnss_set_enabled(false) (GNSS.h) already gates on whichever real
+      // power-control pin this specific board has via #ifdef
+      // (PIN_GPS_EN and/or PIN_GPS_STANDBY - Heltec32-V4 has both, T096
+      // only the former, T114 only the latter) and also calls
+      // GPS_SERIAL.end() to release the UART. Restored on wake by the
+      // normal boot path (gnss_init() re-applies the persisted
+      // gnss_enabled EEPROM default) - safe to mutate the in-RAM
+      // gnss_enabled flag here despite it also tracking the user's own
+      // Settings-menu preference, since neither deep sleep (ESP32) nor
+      // System OFF (nRF52, sd_power_gpregret_set() below) preserve
+      // ordinary RAM across the sleep boundary on either platform - wake
+      // re-runs setup() from scratch regardless of what this leaves it as.
+      gnss_set_enabled(false);
+    #endif
     #if PLATFORM == PLATFORM_ESP32
       #if BOARD_MODEL == BOARD_T3S3 || BOARD_MODEL == BOARD_XIAO_S3
         #if HAS_DISPLAY
@@ -3130,6 +3331,15 @@ void sleep_now() {
           digitalWrite(LORA_PA_CSD, LOW);
           digitalWrite(LORA_PA_PWR_EN, LOW);
           digitalWrite(Vext, HIGH);
+      #elif BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2
+          // Shut down the KCT8103L FEM (same pins/fixed-model pattern as
+          // BOARD_HELTEC_T096, unlike Heltec32_v4's runtime auto-detect
+          // above) and drop the shared VEXT line - powers down the TFT, GPS
+          // and GPS LNA together. gnss_set_enabled(false) already released
+          // the GPS UART above, so cutting its power here is safe.
+          digitalWrite(LORA_PA_CSD, LOW);
+          digitalWrite(LORA_PA_PWR_EN, LOW);
+          digitalWrite(PIN_WTV2_VEXT_EN, LOW);
       #endif
       #if PIN_DISP_SLEEP >= 0
         pinMode(PIN_DISP_SLEEP, OUTPUT);
@@ -3166,6 +3376,13 @@ void sleep_now() {
       #elif BOARD_MODEL == BOARD_HELTEC_T096
         digitalWrite(PIN_T096_TFT_BLGT, HIGH);
         digitalWrite(PIN_T096_TFT_EN, LOW);
+      #elif BOARD_MODEL == BOARD_HELTEC_T1
+        // BLGT is active-low here too (same HIGH-to-turn-off value as
+        // T096 above), but TFT_EN is the opposite polarity from T096's -
+        // active LOW, so HIGH (not LOW) is what turns the panel off (see
+        // Boards.h's own PIN_T1_TFT_EN comment).
+        digitalWrite(PIN_T1_TFT_BLGT, HIGH);
+        digitalWrite(PIN_T1_TFT_EN, HIGH);
       #elif BOARD_MODEL == BOARD_TECHO
         for (uint8_t i = display_intensity; i > 0; i--) { analogWrite(pin_backlight, i-1); delay(1); }
         epd_black(true); delay(300); epd_black(true); delay(300); epd_black(false);
