@@ -580,7 +580,7 @@ void urns_lxmf_loop() {
   // of the DIO0 ISR that used to call it directly. See that function's
   // own comment (above) for why.
   if (urns_rx_pending) {
-    CP(CP_URNS_HANDLE_INCOMING); g_cp_millis = urns_rx_staging_len;
+    CPV(CP_URNS_HANDLE_INCOMING, urns_rx_staging_len);
     DEBUG_LOG("[FS] handle_incoming enter len=%u\r\n", (unsigned)urns_rx_staging_len);
     _fs_t0 = millis();
     urns_lora_interface.handle_incoming(RNS::Bytes(urns_rx_staging_buf, urns_rx_staging_len));

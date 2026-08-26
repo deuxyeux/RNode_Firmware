@@ -332,7 +332,8 @@ void buzzer_wait_for_melody();
 	#include "Device.h"
 #endif
 
-// Network OTA updates (MeshPoE-S3 only) - must come after Device.h
+// Network OTA updates (HAS_OTA boards only, currently MeshAdventurer-S3 -
+// see OTA.h's own comment) - must come after Device.h
 // (dev_firmware_hash_target/device_save_firmware_hash) and after Remote.h/
 // Ethernet.h above (wifi_is_connected()/eth_is_connected).
 #if HAS_OTA == true
