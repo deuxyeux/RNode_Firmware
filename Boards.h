@@ -138,6 +138,23 @@
   #define BOARD_DIY_V1            0xF6 // DIY-V1
   #define BOARD_AETHERNODE_S3     0xF7 // Aethernode-S3
 
+  // Heltec Mesh Node T1 (nRF52840, HT-mesh-node-t1 core - already installed
+  // locally, unlike T096/T114's own CI-mirrored core). Same display/GNSS
+  // chip as BOARD_HELTEC_T096 (ST7735 160x80 + UC6580), no external FEM
+  // (bare SX1262, same as BOARD_HELTEC_T114), plus a buzzer behind a
+  // voltage-doubler circuit neither T096 nor T114 has. No physical unit
+  // available - pin mapping cross-checked between Meshtastic's own variant
+  // def (~/Development/meshtastic_firmware/variants/nrf52840/
+  // heltec_mesh_node_t1), MeshCore's (~/Development/MeshCore/variants/
+  // heltec_t1), and the vendor board package itself (~/.arduino15/
+  // packages/Heltec_nRF52/hardware/Heltec_nRF52/variants/HT-mesh-node-t1) -
+  // all three agree except GPS_RX_PIN/GPS_TX_PIN, where MeshCore has them
+  // swapped relative to the other two (see HAS_GPS below).
+  #define PRODUCT_HELTEC_T1 0xDA
+  #define BOARD_HELTEC_T1   0x47
+  #define MODEL_DF          0xDF // Heltec Mesh Node T1, 470-510 MHz
+  #define MODEL_E2          0xE2 // Heltec Mesh Node T1, 863-928 MHz
+
   #if defined(__AVR_ATmega1284P__)
     #define PLATFORM PLATFORM_AVR
     #define MCU_VARIANT MCU_1284P
@@ -1730,28 +1747,199 @@
       const int DISPLAY_BL_PIN = PIN_T096_TFT_BLGT;
       const int DISPLAY_RST = PIN_T096_TFT_RST;
 
+    #elif BOARD_MODEL == BOARD_HELTEC_T1
+      #undef MODEM
+      #define MODEM SX1262
+      #define HAS_EEPROM false
+      #undef HAS_DISPLAY
+      #define HAS_DISPLAY true
+      #define HAS_BLUETOOTH false
+      #undef HAS_BLE
+      #define HAS_BLE true
+      #define HAS_CONSOLE false
+      #undef HAS_PMU
+      #define HAS_PMU true
+      #define HAS_NP false
+      #define HAS_SD false
+      #undef HAS_TCXO
+      #define HAS_TCXO true
+      #define HAS_BUSY true
+      #undef HAS_INPUT
+      #define HAS_INPUT true
+      #undef HAS_SLEEP
+      #define HAS_SLEEP true
+
+      // RNode Settings menu (Menu.h), button-only navigation - same pattern
+      // as BOARD_HELTEC_T096 (no encoder on this board either). Shares
+      // T096's 160x80 ST7735 menu rendering path (Menu.h/Display.h's own
+      // BOARD_HELTEC_T096-grouped blocks) since it's the identical panel.
+      #define HAS_MENU true
+
+      #define DIO2_AS_RF_SWITCH true
+      #define CONFIG_UART_BUFFER_SIZE 6144
+      #define CONFIG_QUEUE_SIZE 6144
+      #define CONFIG_QUEUE_MAX_LENGTH 200
+      #define EEPROM_SIZE 296
+      #define EEPROM_OFFSET EEPROM_SIZE-EEPROM_RESERVED
+      #define BLE_MANUFACTURER "Heltec"
+      #define BLE_MODEL "T1"
+
+      // No external FEM/PA on this board (bare SX1262, no KCT8103L or
+      // similar chip in either reference variant.h) - same as
+      // BOARD_HELTEC_T114, unlike T096/WTRACKER_V2's KCT8103L. HAS_LORA_PA/
+      // HAS_LORA_LNA stay at their default false (Boards.h global-defaults
+      // block below).
+
+      // Piezo buzzer behind a voltage-doubler circuit - unique to this
+      // board among the nRF52 Heltec boards. PIN_BUZZER is the actual
+      // tone()/noTone() pin; the two multiplier pins are just held HIGH
+      // once at boot to enable the boost (Utilities.h's own
+      // BOARD_HELTEC_T1 branch in buzzer_init()), never toggled again -
+      // matches MeshCore's T1Board::begin(), the only reference driver
+      // that does anything with them.
+      // Vendor variant.h defines PIN_BUZZER too (same value, different
+      // token spelling, "(0+9)" vs "9") - #undef first to avoid a harmless
+      // macro-redefinition warning, same as PIN_GPS_EN/PPS/RESET below.
+      #define HAS_BUZZER true
+      #undef PIN_BUZZER
+      #define PIN_BUZZER 9
+      #define PIN_T1_BUZZER_MULT1 34
+      #define PIN_T1_BUZZER_MULT2 37
+
+      // LED (P0.16) - active LOW per both reference variant.h's
+      // (LED_STATE_ON=0/LOW), same polarity as BOARD_HELTEC_T114, unlike
+      // T096's active-HIGH LED - see Utilities.h's led_rx_on()/etc., joined
+      // to T114's branch there, not T096's.
+      const int pin_led_rx = 16;
+      const int pin_led_tx = 16;
+
+      // SPI (LoRa) - Meshtastic/MeshCore/vendor variant.h agree: CS=(32+11),
+      // MISO=(0+3), MOSI=(32+14), SCK=(32+13), RESET=(0+2), DIO1=(0+31,
+      // IRQ), BUSY=(0+29).
+      const int pin_cs = 43;
+      const int pin_sclk = 45;
+      const int pin_mosi = 46;
+      const int pin_miso = 3;
+      const int pin_reset = 2;
+      const int pin_busy = 29;
+      const int pin_dio = 31;
+      const int pin_tcxo_enable = -1;
+
+      const int pin_btn_usr1 = 42;
+
+      // Battery voltage sensing (measure_battery(), Power.h) goes through
+      // pin_vbat and a fixed volts-per-ADC-count constant, same mechanism
+      // as BOARD_HELTEC_T114/BOARD_PROMICRO - the RNode Settings menu's
+      // Hardware page exposes a recalibration knob as a %/of-default
+      // correction against this default (see BATTERY_V_SCALE_DEFAULT/
+      // battery_v_scale, Config.h/Power.h). Meshtastic/MeshCore variant.h:
+      // BATTERY_PIN (0+5), ADC_CTRL (0+11) (active HIGH, powers the
+      // divider) - both give an explicit ADC_MULTIPLIER (4.916) computed
+      // against a 12-bit/3.0V-reference read they set up explicitly
+      // (analogReadResolution(12)/analogReference(AR_INTERNAL_3_0)), which
+      // this codebase's own battery_v_scale mechanism has never set on any
+      // board (T114/T096 rely on the core's own ADC defaults instead) - so
+      // that constant isn't directly reusable here. Same core/MCU as T096,
+      // whose own empirically-tuned constant (0.017165) T114 already reuses
+      // as its own untested default for exactly this reason - following
+      // that precedent rather than introducing a differently-configured ADC
+      // setup with no hardware to verify it against.
+      #define HAS_BATTERY_DIVIDER true
+      #define BATTERY_V_SCALE_DEFAULT 0.017165
+
+      // ST7735S 160x80 TFT, identical panel to BOARD_HELTEC_T096 - shares
+      // that board's rendering pipeline (Display.h/Menu.h/Graphics.h)
+      // wholesale. This core also pre-wires a hardware SPI1 the same way
+      // T096's does (vendor variant.h: SPI_32MHZ_INTERFACE 1, SS1/MOSI1/
+      // MISO1/SCK1 statics), so the display object itself can reuse T096's
+      // exact `&SPI1` construction (Display.h) - only the enable/backlight
+      // pins and their polarity differ (active LOW here vs T096's active
+      // HIGH - vendor variant.h: TFT_VDD_ENABLE=0, TFT_LEDA_ENABLE=0).
+      // Meshtastic/MeshCore/vendor variant.h: ST7735_CS (0+12), ST7735_RS/
+      // DC (0+22), ST7735_SDA/MOSI (0+24), ST7735_SCK (32+0), ST7735_RESET
+      // (0+20), ST7735_BL (0+15), VTFT_CTRL (0+13).
+      #define DISPLAY_SCALE 1
+      #define USE_COLOR_DISPLAY true
+      #define PIN_T1_TFT_MOSI 24
+      #define PIN_T1_TFT_SCK 32
+      #define PIN_T1_TFT_SS 12
+      #define PIN_T1_TFT_DC 22
+      #define PIN_T1_TFT_RST 20
+      #define PIN_T1_TFT_BLGT 15
+      // Whole-panel power enable, active LOW (unlike T096's PIN_T096_TFT_EN,
+      // active HIGH) - driven from Display.h's own BOARD_HELTEC_T1 branch
+      // in display_init().
+      #define PIN_T1_TFT_EN 13
+
+      const int DISPLAY_DC = PIN_T1_TFT_DC;
+      const int DISPLAY_CS = PIN_T1_TFT_SS;
+      const int DISPLAY_MOSI = PIN_T1_TFT_MOSI;
+      const int DISPLAY_CLK = PIN_T1_TFT_SCK;
+      const int DISPLAY_BL_PIN = PIN_T1_TFT_BLGT;
+      const int DISPLAY_RST = PIN_T1_TFT_RST;
+
+      // Built-in UC6580 GNSS - same chipset as BOARD_HELTEC_T096, so
+      // GNSS.h's existing GPS_MODEL_UC6580 parser needs no changes. Unlike
+      // T096 (dedicated Serial2), this core's vendor variant.h binds the
+      // GPS UART to Serial1 (PIN_SERIAL1_RX/TX point at the GPS pins, not
+      // PIN_SERIAL2_RX/TX) - Serial1 is free here (KISS link is native USB
+      // CDC, same as T096), so GPS_SERIAL is set explicitly to Serial1.
+      //
+      // Meshtastic's and the vendor board package's own variant.h agree:
+      // MCU RX (wired to GPS TX-out) = (0+8) = 8, MCU TX (wired to GPS
+      // RX-in) = (0+7) = 7. MeshCore's variant.h has these swapped (RX=7,
+      // TX=8) - going with the vendor+Meshtastic majority since the vendor
+      // file is the primary source both almost certainly derive from.
+      // Worth double-checking against real hardware if GPS never locks.
+      #define HAS_GPS true
+      #define GPS_MODEL GPS_MODEL_UC6580
+      #define GPS_SERIAL Serial1
+      #define GPS_BAUD_RATE 115200
+      // Vendor variant.h defines PIN_GPS_RX/PPS/RESET/EN too (same values,
+      // different token spelling, e.g. "(0+8)" vs "8") - #undef first to
+      // avoid a harmless macro-redefinition warning, same as T096's own
+      // pattern above.
+      #undef PIN_GPS_RX
+      #define PIN_GPS_RX 8  // MCU RX - wired to GPS TX-out
+      #define PIN_GPS_TX 7  // MCU TX - wired to GPS RX-in
+      #undef PIN_GPS_PPS
+      #define PIN_GPS_PPS 41 // (32+9)
+      #undef PIN_GPS_RESET
+      #define PIN_GPS_RESET 26 // active LOW, needs a >100ms hold to reset
+      #undef PIN_GPS_EN
+      #define PIN_GPS_EN 4      // active LOW, standalone (not shared with
+                                 // the display, unlike WTRACKER_V2)
+      #define GNSS_DUTY_CYCLE_CAPABLE true // PIN_GPS_EN only - hard power-off, cold start every wake
+      #define GNSS_DUTY_CYCLE_HARD_ONLY true
+
     #elif BOARD_MODEL == BOARD_PROMICRO
       //TODO:
       // - Fix low output power
       // - Make compatible with non-TCXO radios
       // - Add PMU
+      #undef MODEM
       #define MODEM SX1262
       #define HAS_EEPROM false
       #define HAS_BLUETOOTH false
+      #undef HAS_BLE
       #define HAS_BLE true
       #define HAS_CONSOLE false
+      #undef HAS_PMU
       #define HAS_PMU true
       #define HAS_NP false
       #define HAS_SD false
+      #undef HAS_TCXO
       #define HAS_TCXO true
       #define HAS_BUSY true
       #define HAS_RF_SWITCH_RX_TX true
       #define DIO2_AS_RF_SWITCH true
       #define OCP_TUNED 0x38
+      #undef HAS_SLEEP
       #define HAS_SLEEP true
       #define BLE_MANUFACTURER "DIY"
       #define BLE_MODEL "ProMicro"
 
+      #undef HAS_INPUT
       #define HAS_INPUT true
       #define EEPROM_SIZE 296
       #define EEPROM_OFFSET EEPROM_SIZE-EEPROM_RESERVED

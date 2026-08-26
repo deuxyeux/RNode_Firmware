@@ -130,6 +130,28 @@ firmware-heltec_t114:
 firmware-heltec_t096:
 	arduino-cli compile --log --fqbn Heltec_nRF52:Heltec_nRF52:HT-n5262G -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xD2\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
 
+# Heltec Mesh Node T1 (Boards.h: BOARD_HELTEC_T1, 0x47) - nRF52840, same
+# display/GNSS chip as heltec_t096 above (ST7735 160x80 + UC6580), no
+# external FEM (bare SX1262, like heltec_t114), plus a buzzer. Unlike
+# heltec_t096/heltec_t114, this board's FQBN (HT-mesh-node-t1) is already
+# present in the locally installed Heltec_nRF52 core - no CI-mirrored core
+# version needed. No physical unit available - see Boards.h's own
+# BOARD_HELTEC_T1 comment for the cross-referenced pin sourcing.
+firmware-heltec_t1:
+	arduino-cli compile --log --fqbn Heltec_nRF52:Heltec_nRF52:HT-mesh-node-t1 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x47\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+
+# Heltec Wireless Tracker V2 (Boards.h: BOARD_HELTEC_WTRACKER_V2, 0x46) -
+# ESP32-S3FN8 (8MB flash, no PSRAM - unlike meshpoe_s3/meshadventurer_s3's
+# 16MB octal PSRAM above), SX1262 + KCT8103L FEM + ST7735S 160x80 TFT +
+# UC6580 GNSS - same display/GNSS/FEM as heltec_t096 above, just on ESP32-S3.
+# No physical unit available - see Boards.h's own BOARD_HELTEC_WTRACKER_V2
+# comment for the cross-referenced pin sourcing, same no-hardware-yet
+# precedent as tbeam_1w. default_8MB.csv matches both Meshtastic's and
+# MeshCore's own board.json for this board; upload.maximum_size is that
+# partition scheme's app0 slot size (0x330000).
+firmware-heltec_wtracker_v2:
+	arduino-cli compile --log --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=default_8MB" --build-property "build.flash_size=8MB" --build-property "upload.maximum_size=3342336" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x46\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+
 firmware-lora32_v10: check_bt_buffers
 	arduino-cli compile --log --fqbn esp32:esp32:ttgo-lora32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x39\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
 
@@ -156,6 +178,14 @@ firmware-meshpoe_s3: check_bt_buffers
 
 firmware-meshadventurer_s3: check_bt_buffers
 	arduino-cli compile --log --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,PSRAM=opi" -e --build-property "build.partitions=default_16MB" --build-property "build.flash_size=16MB" --build-property "upload.maximum_size=6553600" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF2\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+
+# LilyGO T-Beam 1W (ESP32-S3, 16MB flash, octal PSRAM - same profile as
+# MeshAdventurer-S3/MeshPoE-S3). One firmware image covers both the 433 and
+# 868 MHz variants - like every other multi-region board in this Makefile,
+# the region is a MODEL byte (MODEL_E5/MODEL_E6, Boards.h) written into
+# EEPROM at provisioning time, not a compile-time split.
+firmware-tbeam_1w: check_bt_buffers
+	arduino-cli compile --log --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,PSRAM=opi" -e --build-property "build.partitions=default_16MB" --build-property "build.flash_size=16MB" --build-property "upload.maximum_size=6553600" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x45\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
 
 firmware-rnode_ng_20: check_bt_buffers
 	arduino-cli compile --log --fqbn esp32:esp32:ttgo-lora32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x40\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
@@ -228,6 +258,10 @@ upload-meshadventurer_s3:
 #	rnodeconf /dev/ttyACM0 --firmware-hash $$(./partition_hashes ./build/esp32.esp32.esp32s3/RNode_Firmware.ino.bin)
 	@sleep 3
 #	python ./Release/esptool/esptool.py --chip esp32s3 --port /dev/ttyACM0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode qio --flash_freq 80m --flash_size 16MB 0xc90000 ./Release/console_image_meshadventurer_s3.bin
+
+upload-tbeam_1w:
+	arduino-cli upload -p /dev/ttyACM0 --fqbn esp32:esp32:esp32s3
+	@sleep 3
 
 upload-meshadventurer_s3_usb:
 	arduino-cli upload -p /dev/ttyUSB0 --fqbn esp32:esp32:esp32s3
@@ -330,6 +364,17 @@ upload-tdeck:
 	@sleep 3
 	python ./Release/esptool/esptool.py --chip esp32s3 --port /dev/ttyACM0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 80m --flash_size 4MB 0x210000 ./Release/console_image.bin
 
+# spiffs offset (0x670000) is default_8MB.csv's own spiffs partition
+# offset (see that file under the ESP32 arduino-cli core's tools/
+# partitions/) - different from the no_ota-scheme boards' 0x210000 above,
+# which is a 4MB-flash partition layout this board doesn't use.
+upload-heltec_wtracker_v2:
+	arduino-cli upload -p /dev/ttyACM0 --fqbn esp32:esp32:esp32s3
+	@sleep 1
+	rnodeconf /dev/ttyACM0 --firmware-hash $$(./partition_hashes ./build/esp32.esp32.esp32s3/RNode_Firmware.ino.bin)
+	@sleep 3
+	python ./Release/esptool/esptool.py --chip esp32s3 --port /dev/ttyACM0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 80m --flash_size 8MB 0x670000 ./Release/console_image.bin
+
 upload-tbeam_supreme:
 	arduino-cli upload -p /dev/ttyACM0 --fqbn esp32:esp32:esp32s3
 	@sleep 1
@@ -387,6 +432,11 @@ upload-heltec_t096:
 	@sleep 1
 	rnodeconf /dev/ttyACM0 --firmware-hash $$(./partition_hashes from_device /dev/ttyACM0)
 
+upload-heltec_t1:
+	arduino-cli upload -p /dev/ttyACM0 --fqbn Heltec_nRF52:Heltec_nRF52:HT-mesh-node-t1
+	@sleep 1
+	rnodeconf /dev/ttyACM0 --firmware-hash $$(./partition_hashes from_device /dev/ttyACM0)
+
 upload-promicro:
 	arduino-cli upload -p /dev/ttyACM0 --fqbn promicro:nrf52:nicenanov2
 	@sleep 6
@@ -404,11 +454,11 @@ upload-xiao_s3:
 	@sleep 3
 	python ./Release/esptool/esptool.py --chip esp32s3 --port /dev/ttyACM0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 80m --flash_size 4MB 0x210000 ./Release/console_image.bin
 
-firmware-all: firmware-aethernode firmware-aethernode_s3 firmware-diy_v1 firmware-featheresp32 firmware-heltec32_v2 firmware-heltec32_v2_extled firmware-heltec32_v3 firmware-heltec32_v4 firmware-heltec_t114 firmware-heltec_t096 firmware-lora32_v10 firmware-lora32_v10_extled firmware-lora32_v20 firmware-lora32_v21 firmware-lora32_v21_extled firmware-lora32_v21_tcxo firmware-meshadventurer firmware-meshpoe_s3 firmware-meshadventurer_s3 firmware-rnode_ng_20 firmware-rnode_ng_21 firmware-promicro firmware-rak4631 firmware-t3s3 firmware-t3s3_sx127x firmware-t3s3_sx1280_pa firmware-tbeam firmware-tbeam_supreme firmware-tbeam_supreme_v3 firmware-tbeam_sx126x firmware-tdeck firmware-techo firmware-xiao_s3 firmware-genericesp32
+firmware-all: firmware-aethernode firmware-aethernode_s3 firmware-diy_v1 firmware-featheresp32 firmware-heltec32_v2 firmware-heltec32_v2_extled firmware-heltec32_v3 firmware-heltec32_v4 firmware-heltec_t114 firmware-heltec_t096 firmware-lora32_v10 firmware-lora32_v10_extled firmware-lora32_v20 firmware-lora32_v21 firmware-lora32_v21_extled firmware-lora32_v21_tcxo firmware-meshadventurer firmware-meshpoe_s3 firmware-meshadventurer_s3 firmware-rnode_ng_20 firmware-rnode_ng_21 firmware-promicro firmware-rak4631 firmware-t3s3 firmware-t3s3_sx127x firmware-t3s3_sx1280_pa firmware-tbeam firmware-tbeam_1w firmware-tbeam_supreme firmware-tbeam_supreme_v3 firmware-tbeam_sx126x firmware-tdeck firmware-techo firmware-xiao_s3 firmware-genericesp32
 
 release: release-all
 
-release-all: console-site spiffs-image release-tbeam release-tbeam_sx1262 release-lora32_v10 release-lora32_v20 release-lora32_v21 release-lora32_v10_extled release-lora32_v20_extled release-lora32_v21_extled release-lora32_v21_tcxo release-featheresp32 release-genericesp32 release-heltec32_v2 release-heltec32_v3 release-heltec32_v4 release-heltec32_v2_extled release-heltec_t114 release-heltec_t096 release-techo release-rnode_ng_20 release-rnode_ng_21 release-t3s3 release-t3s3_sx127x release-t3s3_sx1280_pa release-tdeck release-tbeam_supreme release-tbeam_supreme_v3 release-rak4631 release-xiao_s3 release-hashes
+release-all: console-site spiffs-image release-tbeam release-tbeam_sx1262 release-tbeam_1w release-lora32_v10 release-lora32_v20 release-lora32_v21 release-lora32_v10_extled release-lora32_v20_extled release-lora32_v21_extled release-lora32_v21_tcxo release-featheresp32 release-genericesp32 release-heltec32_v2 release-heltec32_v3 release-heltec32_v4 release-heltec32_v2_extled release-heltec_t114 release-heltec_t096 release-techo release-rnode_ng_20 release-rnode_ng_21 release-t3s3 release-t3s3_sx127x release-t3s3_sx1280_pa release-tdeck release-tbeam_supreme release-tbeam_supreme_v3 release-rak4631 release-xiao_s3 release-hashes
 
 release-hashes:
 	python ./release_hashes.py > ./Release/release.json
@@ -670,6 +720,16 @@ release-meshadventurer_s3: check_bt_buffers console-site spiffs-image-meshadvent
 	zip --junk-paths ./Release/rnode_firmware_meshadventurer_s3.zip ./Release/esptool/esptool.py ./Release/console_image_meshadventurer_s3.bin build/rnode_firmware_meshadventurer_s3.boot_app0 build/rnode_firmware_meshadventurer_s3.bin build/rnode_firmware_meshadventurer_s3.bootloader build/rnode_firmware_meshadventurer_s3.partitions build/version.txt
 	rm -r build
 
+release-tbeam_1w: check_bt_buffers
+	arduino-cli compile --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,PSRAM=opi" -e --build-property "build.partitions=default_16MB" --build-property "build.flash_size=16MB" --build-property "upload.maximum_size=6553600" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x45\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_tbeam_1w.boot_app0
+	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bin build/rnode_firmware_tbeam_1w.bin
+	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_tbeam_1w.bootloader
+	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.partitions.bin build/rnode_firmware_tbeam_1w.partitions
+	echo "$(PROTO_VERSION).$(shell git rev-list --count HEAD)" > build/version.txt
+	zip --junk-paths ./Release/rnode_firmware_tbeam_1w.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_tbeam_1w.boot_app0 build/rnode_firmware_tbeam_1w.bin build/rnode_firmware_tbeam_1w.bootloader build/rnode_firmware_tbeam_1w.partitions build/version.txt
+	rm -r build
+
 release-meshadventurer: check_bt_buffers
 	arduino-cli compile --fqbn esp32:esp32:esp32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF4\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
 	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_meshadventurer.boot_app0
@@ -755,6 +815,23 @@ release-heltec_t096:
 	adafruit-nrfutil dfu genpkg --dev-type 0x0052 --application build/rnode_firmware_heltec_t096.hex Release/rnode_firmware_heltec_t096.zip
 	echo "$(PROTO_VERSION).$(shell git rev-list --count HEAD)" > build/version.txt
 	zip --junk-paths Release/rnode_firmware_heltec_t096.zip build/version.txt
+
+release-heltec_t1:
+	arduino-cli compile --fqbn Heltec_nRF52:Heltec_nRF52:HT-mesh-node-t1 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x47\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	cp build/Heltec_nRF52.Heltec_nRF52.HT-mesh-node-t1/RNode_Firmware.ino.hex build/rnode_firmware_heltec_t1.hex
+	adafruit-nrfutil dfu genpkg --dev-type 0x0052 --application build/rnode_firmware_heltec_t1.hex Release/rnode_firmware_heltec_t1.zip
+	echo "$(PROTO_VERSION).$(shell git rev-list --count HEAD)" > build/version.txt
+	zip --junk-paths Release/rnode_firmware_heltec_t1.zip build/version.txt
+
+release-heltec_wtracker_v2: check_bt_buffers
+	arduino-cli compile --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=default_8MB" --build-property "build.flash_size=8MB" --build-property "upload.maximum_size=3342336" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x46\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_heltec_wtracker_v2.boot_app0
+	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bin build/rnode_firmware_heltec_wtracker_v2.bin
+	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_heltec_wtracker_v2.bootloader
+	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.partitions.bin build/rnode_firmware_heltec_wtracker_v2.partitions
+	echo "$(PROTO_VERSION).$(shell git rev-list --count HEAD)" > build/version.txt
+	zip --junk-paths ./Release/rnode_firmware_heltec_wtracker_v2.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_heltec_wtracker_v2.boot_app0 build/rnode_firmware_heltec_wtracker_v2.bin build/rnode_firmware_heltec_wtracker_v2.bootloader build/rnode_firmware_heltec_wtracker_v2.partitions build/version.txt
+	rm -r build
 
 release-promicro:
 	arduino-cli compile --log --fqbn promicro:nrf52:nicenanov2:softdevice=s140v6 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF5\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""

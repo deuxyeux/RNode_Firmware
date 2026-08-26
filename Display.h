@@ -22,12 +22,12 @@
   #elif BOARD_MODEL == BOARD_HELTEC_T114
     #include <Adafruit_ST7789.h>
     #define COLOR565(r, g, b) (((r & 0xF8) << 8) | ((g & 0xFC) << 3) | ((b & 0xF8) >> 3))
-  #elif BOARD_MODEL == BOARD_HELTEC_T096
+  #elif BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1
     #include <Adafruit_ST7735.h>
     // The T096 panel is wired BGR: the high field drives blue, so red and
     // blue swap places compared to standard RGB565
     #define COLOR565(r, g, b) (((b & 0xF8) << 8) | ((g & 0xFC) << 3) | ((r & 0xF8) >> 3))
-  #elif BOARD_MODEL == BOARD_TBEAM_S_V1 || BOARD_MODEL == BOARD_TBEAM_S_V3
+  #elif BOARD_MODEL == BOARD_TBEAM_S_V1 || BOARD_MODEL == BOARD_TBEAM_S_V3 || BOARD_MODEL == BOARD_TBEAM_1W
     #include <Adafruit_SH110X.h>
   #else
     #include <Wire.h>
@@ -144,6 +144,12 @@
   #define SCL_OLED 18
   #define SDA_OLED 17
   #define DISP_CUSTOM_ADDR false
+#elif BOARD_MODEL == BOARD_TBEAM_1W
+  #define DISP_RST -1
+  #define DISP_ADDR 0x3C
+  #define SCL_OLED 9
+  #define SDA_OLED 8
+  #define DISP_CUSTOM_ADDR false
 #elif BOARD_MODEL == BOARD_TBEAM_S_V3
   #define DISP_RST -1
   #define DISP_ADDR 0x3D
@@ -174,12 +180,30 @@
   #define SSD1306_WHITE ST77XX_WHITE
   #define SSD1306_BLACK ST77XX_BLACK
   #define DISPLAY_IS_OLED false
+#elif BOARD_MODEL == BOARD_HELTEC_T1
+  // Same panel/driver/core family as BOARD_HELTEC_T096 above - this core
+  // also pre-wires SPI1 (vendor variant.h: SPI_32MHZ_INTERFACE 1), so the
+  // exact same construction applies, just this board's own pins.
+  Adafruit_ST7735 display = Adafruit_ST7735(&SPI1, DISPLAY_CS, DISPLAY_DC, DISPLAY_RST);
+  #define SSD1306_WHITE ST77XX_WHITE
+  #define SSD1306_BLACK ST77XX_BLACK
+  #define DISPLAY_IS_OLED false
+#elif BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2
+  // Same panel/driver as BOARD_HELTEC_T096 above, but this core has no
+  // pre-wired SPI1 global like the nRF52 Heltec core does - construct our
+  // own SPIClass bound to this board's own TFT pins (see display_init()'s
+  // own board branch below for the matching .begin() call).
+  SPIClass wtv2_tft_spi(FSPI);
+  Adafruit_ST7735 display = Adafruit_ST7735(&wtv2_tft_spi, DISPLAY_CS, DISPLAY_DC, DISPLAY_RST);
+  #define SSD1306_WHITE ST77XX_WHITE
+  #define SSD1306_BLACK ST77XX_BLACK
+  #define DISPLAY_IS_OLED false
 #elif BOARD_MODEL == BOARD_HELTEC_T114
   Adafruit_ST7789 display = Adafruit_ST7789(&SPI1, DISPLAY_CS, DISPLAY_DC, DISPLAY_RST);
   #define SSD1306_WHITE ST77XX_WHITE
   #define SSD1306_BLACK ST77XX_BLACK
   #define DISPLAY_IS_OLED false
-#elif BOARD_MODEL == BOARD_TBEAM_S_V1 || BOARD_MODEL == BOARD_TBEAM_S_V3
+#elif BOARD_MODEL == BOARD_TBEAM_S_V1 || BOARD_MODEL == BOARD_TBEAM_S_V3 || BOARD_MODEL == BOARD_TBEAM_1W
   Adafruit_SH1106G display = Adafruit_SH1106G(128, 64, &Wire, -1);
   #define SSD1306_WHITE SH110X_WHITE
   #define SSD1306_BLACK SH110X_BLACK
@@ -218,10 +242,10 @@ uint8_t display_unblank_intensity = display_intensity;
 bool display_blanked = false;
 bool display_tx = false;
 bool recondition_display = false;
-int disp_update_interval = 1000/disp_target_fps;
-int epd_update_interval = 1000/disp_target_fps;
+uint32_t disp_update_interval = 1000/disp_target_fps;
+uint32_t epd_update_interval = 1000/disp_target_fps;
 uint32_t last_page_flip = 0;
-int page_interval = 4000;
+uint32_t page_interval = 4000;
 bool device_signatures_ok();
 bool device_firmware_ok();
 
@@ -239,7 +263,7 @@ bool device_firmware_ok();
   #endif
 #endif
 
-#if BOARD_MODEL == BOARD_HELTEC_T096
+#if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1
   // The 80x160 panel gets a redesigned layout: 80x64 device area on top of
   // an 80x96 status area with a wider and taller waterfall. Bitmap art
   // stays 64px wide and is centered with a DISP_BM_X offset.
@@ -339,7 +363,7 @@ int waterfall_head = 0;
 #else
   #define WF_TX_SIZE 5
 #endif
-#if BOARD_MODEL == BOARD_HELTEC_T096
+#if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1
   // The KCT8103L LNA raises the idle noise reading; -120 keeps the graph
   // near zero at ambient instead of idling a fifth up the scale. The wider
   // 26-pixel waterfall gets headroom up to -40 before pegging full.
@@ -350,7 +374,7 @@ int waterfall_head = 0;
   #define WF_RSSI_MIN -135
 #endif
 #define WF_RSSI_SPAN (WF_RSSI_MAX-WF_RSSI_MIN)
-#if BOARD_MODEL == BOARD_HELTEC_T096
+#if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1
   #define WF_PIXEL_WIDTH 26
 #elif BOARD_MODEL == BOARD_HELTEC_T114
   // Runtime, not compile-time: landscape's stat_area_land is narrower than
@@ -375,7 +399,7 @@ int p_ad_y = 0;
 int p_as_x = 0;
 int p_as_y = 0;
 
-#if BOARD_MODEL == BOARD_HELTEC_T096
+#if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1
   // In landscape the status area is pushed as two regions: the icon and
   // waterfall cluster (stat rows 0..79) on the right half, and the status
   // strip (stat rows 80..95) at p_ss on the left half under the banner.
@@ -473,7 +497,7 @@ void update_area_positions() {
       p_as_y = 0;
       t114_wf_pixel_width = LWF_BORDER_W-4;
     }
-  #elif BOARD_MODEL == BOARD_HELTEC_T096
+  #elif BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1
     if (disp_mode == DISP_MODE_LANDSCAPE) {
       // Device area on the left half with the status strip under the
       // banner; icon/waterfall cluster fills the right half
@@ -527,7 +551,7 @@ void update_area_positions() {
 }
 
 uint8_t display_contrast = 0x00;
-#if BOARD_MODEL == BOARD_TBEAM_S_V1 || BOARD_MODEL == BOARD_TBEAM_S_V3
+#if BOARD_MODEL == BOARD_TBEAM_S_V1 || BOARD_MODEL == BOARD_TBEAM_S_V3 || BOARD_MODEL == BOARD_TBEAM_1W
   void set_contrast(Adafruit_SH1106G *display, uint8_t value) {
   }
 #elif BOARD_MODEL == BOARD_HELTEC_T114
@@ -557,7 +581,7 @@ uint8_t display_contrast = 0x00;
     uint8_t pwm = t114_backlight_gamma[value];
     analogWrite(PIN_T114_TFT_BLGT, 255-pwm);
   }
-#elif BOARD_MODEL == BOARD_HELTEC_T096
+#elif BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1
   // Perceived brightness follows duty^(1/gamma), not duty linearly, so a
   // linear duty cycle looks nearly full-bright until well below half scale
   // and then drops off fast. This table gamma-corrects (gamma 2.8) the
@@ -586,7 +610,13 @@ uint8_t display_contrast = 0x00;
   void set_contrast(Adafruit_ST7735 *display, uint8_t value) {
     // Backlight is active-low, so duty cycle is inverted.
     uint8_t pwm = t096_backlight_gamma[value];
-    analogWrite(PIN_T096_TFT_BLGT, 255-pwm);
+    #if BOARD_MODEL == BOARD_HELTEC_T096
+      analogWrite(PIN_T096_TFT_BLGT, 255-pwm);
+    #elif BOARD_MODEL == BOARD_HELTEC_T1
+      analogWrite(PIN_T1_TFT_BLGT, 255-pwm);
+    #else
+      analogWrite(PIN_WTV2_TFT_BLGT, 255-pwm);
+    #endif
   }
 #elif BOARD_MODEL == BOARD_TECHO
   void set_contrast(void *display, uint8_t value) {
@@ -693,6 +723,26 @@ bool display_init() {
     #elif BOARD_MODEL == BOARD_HELTEC_T096
       pinMode(PIN_T096_TFT_EN, OUTPUT);
       digitalWrite(PIN_T096_TFT_EN, HIGH);
+    #elif BOARD_MODEL == BOARD_HELTEC_T1
+      // Active LOW here (Boards.h's own PIN_T1_TFT_EN comment) - opposite
+      // polarity from T096's PIN_T096_TFT_EN above (vendor variant.h:
+      // TFT_VDD_ENABLE=0). Reuses T096's pre-wired SPI1 (Display.h's own
+      // BOARD_HELTEC_T1 display-object branch), so no SPI.begin() call is
+      // needed here the way BOARD_HELTEC_WTRACKER_V2 needs below.
+      pinMode(PIN_T1_TFT_EN, OUTPUT);
+      digitalWrite(PIN_T1_TFT_EN, LOW);
+    #elif BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2
+      // PIN_WTV2_VEXT_EN powers the TFT, GPS, and GPS LNA together (see
+      // Boards.h's own comment on that pin) - HIGH here brings up all three
+      // at once, same as T096's dedicated TFT_EN pin does just for the
+      // panel. This core has no pre-wired SPI1 like T096's nRF52 core, so
+      // the SPIClass declared alongside `display` above (Display.h's own
+      // BOARD_HELTEC_WTRACKER_V2 branch) needs an explicit .begin() call
+      // with this board's own TFT pins before display.initR() runs below.
+      pinMode(PIN_WTV2_VEXT_EN, OUTPUT);
+      digitalWrite(PIN_WTV2_VEXT_EN, HIGH);
+      delay(50);
+      wtv2_tft_spi.begin(DISPLAY_CLK, -1, DISPLAY_MOSI, DISPLAY_CS);
     #elif BOARD_MODEL == BOARD_MESHADVENTURER_S3 || BOARD_MODEL == BOARD_MESHPOE_S3
       Wire.setPins(SDA_OLED, SCL_OLED);
       Wire.begin();
@@ -710,7 +760,7 @@ bool display_init() {
         pinMode(pin_backlight, OUTPUT);
         analogWrite(pin_backlight, 0);
       #endif
-    #elif BOARD_MODEL == BOARD_TBEAM_S_V1 || BOARD_MODEL == BOARD_TBEAM_S_V3
+    #elif BOARD_MODEL == BOARD_TBEAM_S_V1 || BOARD_MODEL == BOARD_TBEAM_S_V3 || BOARD_MODEL == BOARD_TBEAM_1W
       Wire.begin(SDA_OLED, SCL_OLED);
     #elif BOARD_MODEL == BOARD_XIAO_S3
       Wire.begin(SDA_OLED, SCL_OLED);
@@ -767,10 +817,10 @@ bool display_init() {
     // hardware and adjust if the image is offset/clipped on first bring-up.
     display.init(135, 240);
     if (false) {
-    #elif BOARD_MODEL == BOARD_HELTEC_T096
+    #elif BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1
     display.initR(INITR_MINI160x80);
     if (false) {
-    #elif BOARD_MODEL == BOARD_TBEAM_S_V1 || BOARD_MODEL == BOARD_TBEAM_S_V3
+    #elif BOARD_MODEL == BOARD_TBEAM_S_V1 || BOARD_MODEL == BOARD_TBEAM_S_V3 || BOARD_MODEL == BOARD_TBEAM_1W
     if (!display.begin(display_address, true)) {
     #else
     if (!display.begin(SSD1306_SWITCHCAPVCC, display_address)) {
@@ -779,7 +829,7 @@ bool display_init() {
     } else {
       set_contrast(&display, display_contrast);
       if (display_rotation != 0xFF) {
-        #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_T114
+        #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1 || BOARD_MODEL == BOARD_HELTEC_T114
           // Native orientation (rotation 0) is portrait on both panels, so
           // rotations 1 and 3 yield landscape and 0/2 yield portrait.
           if (display_rotation == 1 || display_rotation == 3) {
@@ -814,7 +864,7 @@ bool display_init() {
         #elif BOARD_MODEL == BOARD_TBEAM
           disp_mode = DISP_MODE_LANDSCAPE;
           display.setRotation(0);
-        #elif BOARD_MODEL == BOARD_TBEAM_S_V1 || BOARD_MODEL == BOARD_TBEAM_S_V3
+        #elif BOARD_MODEL == BOARD_TBEAM_S_V1 || BOARD_MODEL == BOARD_TBEAM_S_V3 || BOARD_MODEL == BOARD_TBEAM_1W
           disp_mode = DISP_MODE_PORTRAIT;
           display.setRotation(1);
         #elif BOARD_MODEL == BOARD_HELTEC32_V2
@@ -829,7 +879,7 @@ bool display_init() {
         #elif BOARD_MODEL == BOARD_HELTEC_T114
           disp_mode = DISP_MODE_PORTRAIT;
           display.setRotation(0);
-        #elif BOARD_MODEL == BOARD_HELTEC_T096
+        #elif BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1
           disp_mode = DISP_MODE_LANDSCAPE;
           display.setRotation(1);
         #elif BOARD_MODEL == BOARD_RAK4631
@@ -897,9 +947,15 @@ bool display_init() {
         display.fillScreen(SSD1306_BLACK);
         pinMode(PIN_T114_TFT_BLGT, OUTPUT);
         set_contrast(&display, display_intensity);
-      #elif BOARD_MODEL == BOARD_HELTEC_T096
+      #elif BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1
         display.fillScreen(SSD1306_BLACK);
-        pinMode(PIN_T096_TFT_BLGT, OUTPUT);
+        #if BOARD_MODEL == BOARD_HELTEC_T096
+          pinMode(PIN_T096_TFT_BLGT, OUTPUT);
+        #elif BOARD_MODEL == BOARD_HELTEC_T1
+          pinMode(PIN_T1_TFT_BLGT, OUTPUT);
+        #else
+          pinMode(PIN_WTV2_TFT_BLGT, OUTPUT);
+        #endif
         set_contrast(&display, display_intensity);
       #endif
 
@@ -920,7 +976,7 @@ void fillRect(int16_t x, int16_t y, int16_t width, int16_t height, uint16_t colo
   display.fillRect(x, y, width, height, colour);
 }
 
-#if BOARD_MODEL == BOARD_HELTEC_T096
+#if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1
   // The T114 avoids flicker by keeping a back buffer in its ST7789 driver
   // and only pushing changed pixels to the panel (see ST7789.h). The
   // Adafruit ST7735 driver used here has no framebuffer, so keep a copy of
@@ -1203,7 +1259,7 @@ void fillRect(int16_t x, int16_t y, int16_t width, int16_t height, uint16_t colo
 
 // Draws a bitmap to the display and auto scales it based on the boards configured DISPLAY_SCALE
 void drawBitmap(int16_t startX, int16_t startY, const uint8_t* bitmap, int16_t bitmapWidth, int16_t bitmapHeight, uint16_t foregroundColour, uint16_t backgroundColour, int16_t srcRowBytes = 0) {
-  #if BOARD_MODEL == BOARD_HELTEC_T096
+  #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1
     {
       // The whole changed rect is assembled here and sent as a single DMA
       // transfer. Splitting the push into per-row writePixels calls (one
@@ -1520,7 +1576,7 @@ void drawBitmap(int16_t startX, int16_t startY, const uint8_t* bitmap, int16_t b
   #endif
 }
 
-#if BOARD_MODEL == BOARD_HELTEC_T096
+#if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1
 // Pushes menu_canvas (landscape, 160x80) to the panel as two 80-wide
 // column halves (left 0-79, right 80-159) rather than one 160-wide
 // push - drawBitmap()'s shared pushbuf and region cache are both sized/
@@ -1659,7 +1715,7 @@ void draw_bt_icon(int px, int py, Adafruit_GFX &gfx = stat_area) {
   if      (bt_state == BT_STATE_ON)        { bt_i = 1; }
   else if (bt_state == BT_STATE_PAIRING)   { bt_i = 2; }
   else if (bt_state == BT_STATE_CONNECTED) { bt_i = 3; }
-  #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_T114
+  #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1 || BOARD_MODEL == BOARD_HELTEC_T114
     // Lamp-style: the box fills dark blue when bluetooth is enabled, the
     // state icon stays light. The mono canvas holds a fully lit interior;
     // the colourizer separates icon pixels from fill via bm_bt directly.
@@ -1857,7 +1913,7 @@ void draw_eth_icon(int px, int py) {
 
 uint8_t charge_tick = 0;
 void draw_battery_bars(int px, int py, Adafruit_GFX &gfx = stat_area) {
-  #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_T114
+  #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1 || BOARD_MODEL == BOARD_HELTEC_T114
     battery_low_lit = false;
   #endif
   if (pmu_ready) {
@@ -1891,7 +1947,7 @@ void draw_battery_bars(int px, int py, Adafruit_GFX &gfx = stat_area) {
             gfx.drawBitmap(px-2, py-2, bm_plug, 17, 7, SSD1306_WHITE, SSD1306_BLACK);
           } else {
             // gfx.fillRect(px, py, 14, 3, SSD1306_BLACK);
-            #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_T114
+            #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1 || BOARD_MODEL == BOARD_HELTEC_T114
               // 2 sticks or fewer render the icon red
               battery_low_lit = battery_value <= 33;
             #endif
@@ -2070,7 +2126,7 @@ void draw_waterfall(int px, int py, Adafruit_GFX &gfx = stat_area) {
         for (uint8_t ti = 0; ti < WF_PIXEL_WIDTH/2; ti++) { gfx.drawPixel(px+ti*2+o, py+i, SSD1306_WHITE); }
       }
     } else if (ws == -1) {
-      #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_T114
+      #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1 || BOARD_MODEL == BOARD_HELTEC_T114
         // Anchor the checker phase to the entry, not the screen row, so
         // the pattern scrolls with the content instead of inverting in
         // place on every frame
@@ -2084,7 +2140,7 @@ void draw_waterfall(int px, int py, Adafruit_GFX &gfx = stat_area) {
     }
   }
 
-  #if (BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_T114) && USE_COLOR_DISPLAY == true
+  #if (BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1 || BOARD_MODEL == BOARD_HELTEC_T114) && USE_COLOR_DISPLAY == true
     // Row colours are looked up from waterfall_meta at push time, but rows
     // whose mono content matches what the panel already shows are skipped
     // by the diff and would keep the colour of the entry displayed there
@@ -2093,7 +2149,7 @@ void draw_waterfall(int px, int py, Adafruit_GFX &gfx = stat_area) {
   #endif
 }
 
-#if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_T114
+#if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1 || BOARD_MODEL == BOARD_HELTEC_T114
 // Battery voltage readout in the 19px gap between the battery bars and
 // the quality graph; "d.dV" in Org_01 is exactly 19px wide. Refreshed at
 // most every 5s so the jittering last decimal doesn't expand the display
@@ -2240,7 +2296,7 @@ void draw_node_uptime(int px, int py, Adafruit_GFX &gfx = stat_area) {
 bool stat_area_intialised = false;
 void draw_stat_area() {
   if (device_init_done) {
-    #if BOARD_MODEL == BOARD_HELTEC_T096
+    #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1
       if (!stat_area_intialised) {
         if (disp_mode == DISP_MODE_LANDSCAPE) {
           stat_area.drawBitmap(0, 0, bm_frame_t096_land, STAT_AREA_W, STAT_AREA_H, SSD1306_WHITE, SSD1306_BLACK);
@@ -2677,15 +2733,15 @@ void update_stat_area() {
       push_is_stat = false;
     #else
     if (disp_mode == DISP_MODE_PORTRAIT) {
-      #if BOARD_MODEL == BOARD_HELTEC_T096
+      #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1
         push_is_stat = true; push_stat_dy = 0;
       #endif
       drawBitmap(p_as_x, p_as_y, stat_area.getBuffer(), stat_area.width(), stat_area.height(), SSD1306_WHITE, SSD1306_BLACK);
-      #if BOARD_MODEL == BOARD_HELTEC_T096
+      #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1
         push_is_stat = false;
       #endif
     } else if (disp_mode == DISP_MODE_LANDSCAPE) {
-      #if BOARD_MODEL == BOARD_HELTEC_T096
+      #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1
         // Icon/waterfall cluster (stat rows 0..79) on the right half, the
         // status strip (stat rows 80..95) on the left half under the banner
         push_is_stat = true; push_stat_dy = 0;
@@ -2731,7 +2787,7 @@ void draw_disp_art(int16_t y, const uint8_t* bitmap, int16_t h) {
   #endif
 }
 
-#if BOARD_MODEL == BOARD_HELTEC_T096
+#if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1
 // Lights the TX lamp and pushes the status area immediately, so the
 // indication appears BEFORE the blocking transmission - the same way
 // led_tx_on() lights the physical LED beforehand. Also sets display_tx,
@@ -2816,7 +2872,7 @@ void draw_disp_datetime_line() {
 #endif
 
 void draw_disp_area() {
-  #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_T114
+  #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1 || BOARD_MODEL == BOARD_HELTEC_T114
     disp_banner_fg = 0;
   #endif
   if (!device_init_done || firmware_update_mode) {
@@ -2840,7 +2896,7 @@ void draw_disp_area() {
     // framebuffer feature no longer depends on Bluetooth's internal pairing
     // bookkeeping being flawless.
     if (!disp_ext_fb or bt_state == BT_STATE_PAIRING) {
-      #if BOARD_MODEL != BOARD_HELTEC_T096 && BOARD_MODEL != BOARD_HELTEC_T114
+      #if BOARD_MODEL != BOARD_HELTEC_T096 && BOARD_MODEL != BOARD_HELTEC_WTRACKER_V2 && BOARD_MODEL != BOARD_HELTEC_T1 && BOARD_MODEL != BOARD_HELTEC_T114
         // The "unsigned.io" branding strip (bm_def/bm_def_lc's top 8 rows -
         // matches the airtime/channel-load panel's own fillRect(0,8,...)
         // boundary a few lines down, which was already deliberately
@@ -2889,6 +2945,10 @@ void draw_disp_area() {
         // 80x64 vs the monochrome boards' 64x64 - same height, so the
         // same fixed Y positions below still fit), so it's included here.
         bool show_gnss_page = false;
+        // Only actually read below inside guards that explicitly exclude
+        // BOARD_HELTEC_T114 (it has its own dedicated alternation
+        // elsewhere) - genuinely unused on that board specifically.
+        (void)show_gnss_page;
         #if HAS_GPS == true && BOARD_MODEL != BOARD_HELTEC_T114
           #ifndef RADIO_PARAMS_PAGE_MS
             #define RADIO_PARAMS_PAGE_MS 10000
@@ -3013,7 +3073,7 @@ void draw_disp_area() {
         }
 
       } else {
-        #if BOARD_MODEL == BOARD_HELTEC_T096
+        #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1
           // Full-width header: left-aligned art with the unsigned.io strip
           // and zigzag extended to the whole 80px width
           if (device_signatures_ok()) { disp_area.drawBitmap(0, 0, bm_def_lc_t096, disp_area.width(), 23, SSD1306_WHITE, SSD1306_BLACK); }
@@ -3065,6 +3125,11 @@ void draw_disp_area() {
         bool show_wifi_ip = false;
         bool show_eth_ip = false;
         bool show_datetime = false;
+        // Each only actually read below inside its own HAS_WIFI/HAS_ETHERNET/
+        // HAS_RTC guard - on a board with none of those (e.g. T096), all
+        // three go genuinely unused; silence rather than remove, since
+        // they're real on boards that do have the capability.
+        (void)show_wifi_ip; (void)show_eth_ip; (void)show_datetime;
         if (wifi_ip_ready && disp_page == 1) {
           display_alt = true;
           show_wifi_ip = true;
@@ -3092,7 +3157,7 @@ void draw_disp_area() {
           if ((bt_dh[14] >> 4)         == 0x01) { ofsc += 8; }
           if ((bt_dh[15] & 0b00001111) == 0x01) { ofsc += 8; }
           if ((bt_dh[15] >> 4)         == 0x01) { ofsc += 8; }
-          #if BOARD_MODEL == BOARD_HELTEC_T096
+          #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1
             // Right-aligned to the screen edge with 3px padding, mirroring
             // the left-aligned RNode logo above
             disp_area.setCursor(31+ofsc, 32); disp_area.printf("%02X%02X", bt_dh[14], bt_dh[15]);
@@ -3105,7 +3170,7 @@ void draw_disp_area() {
       if (!hw_ready || radio_error || !device_firmware_ok()) {
         if (!device_firmware_ok()) {
           draw_disp_art(37, bm_fw_corrupt, 27);
-          #if (BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_T114) && USE_COLOR_DISPLAY == true
+          #if (BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1 || BOARD_MODEL == BOARD_HELTEC_T114) && USE_COLOR_DISPLAY == true
             disp_banner_fg = COLOR_BANNER_ALERT;
           #endif
         } else {
@@ -3117,7 +3182,7 @@ void draw_disp_area() {
         }
       } else if (bt_state == BT_STATE_PAIRING and bt_ssp_pin != 0) {
         char *pin_str = (char*)malloc(DISP_PIN_SIZE+1);
-        sprintf(pin_str, "%06d", bt_ssp_pin);
+        sprintf(pin_str, "%06lu", (unsigned long)bt_ssp_pin);
 
         draw_disp_art(37, bm_pairing, 27);
         for (int i = 0; i < DISP_PIN_SIZE; i++) {
@@ -3128,7 +3193,8 @@ void draw_disp_area() {
         free(pin_str);
       } else {
         if (millis()-last_page_flip >= page_interval) {
-          disp_page = (++disp_page%pages);
+          disp_page++;
+          disp_page %= pages;
           last_page_flip = millis();
           if (not community_fw and disp_page == 0) disp_page = 1;
         }
@@ -3187,7 +3253,7 @@ void draw_disp_area() {
           if (disp_page == 0) {
             if (true || device_signatures_ok()) {
               draw_disp_art(37, bm_checks, 27);
-              #if (BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_T114) && USE_COLOR_DISPLAY == true
+              #if (BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1 || BOARD_MODEL == BOARD_HELTEC_T114) && USE_COLOR_DISPLAY == true
                 disp_banner_fg = COLOR_BANNER_OK;
               #endif
             } else {
@@ -3196,7 +3262,7 @@ void draw_disp_area() {
           } else if (disp_page == 1) {
             if (!console_active) {
               draw_disp_art(37, bm_hwok, 27);
-              #if (BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_T114) && USE_COLOR_DISPLAY == true
+              #if (BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1 || BOARD_MODEL == BOARD_HELTEC_T114) && USE_COLOR_DISPLAY == true
                 disp_banner_fg = COLOR_BANNER_OK;
               #endif
             } else {
@@ -3204,7 +3270,7 @@ void draw_disp_area() {
             }
           } else if (disp_page == 2) {
             draw_disp_art(37, bm_version, 27);
-            #if (BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_T114) && USE_COLOR_DISPLAY == true
+            #if (BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1 || BOARD_MODEL == BOARD_HELTEC_T114) && USE_COLOR_DISPLAY == true
               disp_banner_fg = COLOR_BANNER_OK;
             #endif
             // MAJ.MIN plus a "-BBB" BUILD_NUMBER suffix needs more room than
@@ -3232,34 +3298,39 @@ void draw_disp_area() {
             disp_area.drawLine(vbase+7, 37+19, vbase+8, 37+19, SSD1306_BLACK);
             disp_area.drawLine(vbase+7, 37+20, vbase+8, 37+20, SSD1306_BLACK);
 
-            // "-BBB" suffix: last 3 digits of BUILD_NUMBER (0 on any board
-            // not built through the Makefile's git-commit-count injection,
-            // see BUILD_NUMBER's own fallback, Boards.h), same bm_n_uh digit
-            // font as MAJ.MIN above, right after MIN_VERS. Separator mark
-            // uses the same 2x2 dot technique as the MAJ/MIN decimal point
-            // above (a plain drawFastHLine wasn't visible here) rather than
-            // an actual "-" glyph.
-            int16_t min_end = vbase + vpitch*2+vgap + 8;
-            disp_area.drawLine(min_end-1, 37+19, min_end+0, 37+19, SSD1306_BLACK);
-            disp_area.drawLine(min_end-1, 37+20, min_end+0, 37+20, SSD1306_BLACK);
-            // Not tied to the dot's position above - there's a 3px gap to
-            // the dot now, comfortably clear of its solid-background
-            // bitmap overwriting the dot's right pixel (see prior note -
-            // that's what shaved it to 1px wide before a gap existed).
-            int16_t bbase = min_end+3;
-            long build_num = ((long)BUILD_NUMBER) % 1000;
-            char *b_str = (char*)malloc(3+1);
-            sprintf(b_str, "%03ld", build_num);
-            for (int i = 0; i < 3; i++) {
-              uint8_t numeric = b_str[i]-48; uint8_t bm_offset = numeric*5;
-              int16_t dxp = bbase+i*8;
-              disp_area.drawBitmap(dxp, 37+16, bm_n_uh+bm_offset, 8, 5, SSD1306_WHITE, SSD1306_BLACK);
+            // "-BBB" suffix: last 3 digits of BUILD_NUMBER, same bm_n_uh
+            // digit font as MAJ.MIN above, right after MIN_VERS. Separator
+            // mark uses the same 2x2 dot technique as the MAJ/MIN decimal
+            // point above (a plain drawFastHLine wasn't visible here)
+            // rather than an actual "-" glyph. BUILD_NUMBER==0 means the
+            // build didn't come through the Makefile/platformio.ini's
+            // git-commit-count injection at all (see BUILD_NUMBER's own
+            // fallback, Boards.h) - unknown, not a real build 0, so the
+            // suffix is skipped entirely rather than showing a misleading
+            // "-000".
+            if (BUILD_NUMBER != 0) {
+              int16_t min_end = vbase + vpitch*2+vgap + 8;
+              disp_area.drawLine(min_end-1, 37+19, min_end+0, 37+19, SSD1306_BLACK);
+              disp_area.drawLine(min_end-1, 37+20, min_end+0, 37+20, SSD1306_BLACK);
+              // Not tied to the dot's position above - there's a 3px gap to
+              // the dot now, comfortably clear of its solid-background
+              // bitmap overwriting the dot's right pixel (see prior note -
+              // that's what shaved it to 1px wide before a gap existed).
+              int16_t bbase = min_end+3;
+              long build_num = ((long)BUILD_NUMBER) % 1000;
+              char *b_str = (char*)malloc(3+1);
+              sprintf(b_str, "%03ld", build_num);
+              for (int i = 0; i < 3; i++) {
+                uint8_t numeric = b_str[i]-48; uint8_t bm_offset = numeric*5;
+                int16_t dxp = bbase+i*8;
+                disp_area.drawBitmap(dxp, 37+16, bm_n_uh+bm_offset, 8, 5, SSD1306_WHITE, SSD1306_BLACK);
+              }
+              free(b_str);
             }
-            free(b_str);
           } else if (disp_page == 3) {
             if (!console_active) {
               draw_disp_art(37, bm_hwok, 27);
-              #if (BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_T114) && USE_COLOR_DISPLAY == true
+              #if (BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1 || BOARD_MODEL == BOARD_HELTEC_T114) && USE_COLOR_DISPLAY == true
                 disp_banner_fg = COLOR_BANNER_OK;
               #endif
             } else {
@@ -3402,7 +3473,7 @@ void draw_disp_area() {
 void update_disp_area() {
   draw_disp_area();
 
-  #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_T114
+  #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1 || BOARD_MODEL == BOARD_HELTEC_T114
     static uint16_t banner_fg_prev = 0;
     if (disp_banner_fg != banner_fg_prev) {
       banner_fg_prev = disp_banner_fg;
@@ -3443,7 +3514,7 @@ void update_disp_area() {
   #else
     drawBitmap(p_ad_x, p_ad_y, disp_area.getBuffer(), disp_area.width(), disp_area.height(), SSD1306_WHITE, SSD1306_BLACK);
   #endif
-  #if BOARD_MODEL != BOARD_HELTEC_T096 && BOARD_MODEL != BOARD_HELTEC_T114
+  #if BOARD_MODEL != BOARD_HELTEC_T096 && BOARD_MODEL != BOARD_HELTEC_WTRACKER_V2 && BOARD_MODEL != BOARD_HELTEC_T1 && BOARD_MODEL != BOARD_HELTEC_T114
   if (disp_mode == DISP_MODE_LANDSCAPE) {
     if (device_init_done && !firmware_update_mode && !disp_ext_fb) {
       drawLine(0, 0, 0, 63, SSD1306_WHITE);
@@ -3455,7 +3526,7 @@ void update_disp_area() {
 void display_recondition() {
   #if PLATFORM == PLATFORM_ESP32
     for (uint8_t iy = 0; iy < disp_area.height(); iy++) {
-      unsigned char rand_seg [] = {random(0xFF),random(0xFF),random(0xFF),random(0xFF),random(0xFF),random(0xFF),random(0xFF),random(0xFF)};
+      unsigned char rand_seg [] = {(unsigned char)random(0xFF),(unsigned char)random(0xFF),(unsigned char)random(0xFF),(unsigned char)random(0xFF),(unsigned char)random(0xFF),(unsigned char)random(0xFF),(unsigned char)random(0xFF),(unsigned char)random(0xFF)};
       stat_area.drawBitmap(0, iy, rand_seg, 64, 1, SSD1306_WHITE, SSD1306_BLACK);
       disp_area.drawBitmap(0, iy, rand_seg, 64, 1, SSD1306_WHITE, SSD1306_BLACK);
     }
@@ -3519,7 +3590,7 @@ void update_display(bool blank = false) {
         }
       #endif
 
-      #if BOARD_MODEL == BOARD_HELTEC_T114 || BOARD_MODEL == BOARD_HELTEC_T096
+      #if BOARD_MODEL == BOARD_HELTEC_T114 || BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1
         // Backlight is already set by set_contrast() above
       #elif BOARD_MODEL != BOARD_TDECK && BOARD_MODEL != BOARD_TECHO
         display.clearDisplay();
@@ -3534,12 +3605,15 @@ void update_display(bool blank = false) {
   } else {
     if (millis()-last_disp_update >= disp_update_interval) {
       uint32_t current = millis();
+      // Only actually read below inside a BOARD_MODEL == BOARD_TECHO guard -
+      // genuinely unused on every other board.
+      (void)current;
       if (display_contrast != display_intensity) {
         display_contrast = display_intensity;
         set_contrast(&display, display_contrast);
       }
 
-      #if BOARD_MODEL == BOARD_HELTEC_T114 || BOARD_MODEL == BOARD_HELTEC_T096
+      #if BOARD_MODEL == BOARD_HELTEC_T114 || BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1
         // Backlight is already set by set_contrast() above
       #elif BOARD_MODEL != BOARD_TDECK && BOARD_MODEL != BOARD_TECHO
         display.clearDisplay();
@@ -3558,7 +3632,7 @@ void update_display(bool blank = false) {
         #if HAS_MENU == true
           static bool menu_was_open = false;
           bool menu_open_now = menu_is_open();
-          #if BOARD_MODEL == BOARD_HELTEC_T096
+          #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1
             // The menu always shows in landscape, regardless of the
             // Orientation the user has picked for the main screen (the
             // menu_canvas above is landscape-shaped, 160x80, and would
@@ -3646,7 +3720,7 @@ void update_display(bool blank = false) {
 
           if (menu_open_now) {
             draw_settings_menu_disp();
-            #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_T114
+            #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1 || BOARD_MODEL == BOARD_HELTEC_T114
               push_menu_canvas();
             #endif
           } else
@@ -3672,7 +3746,7 @@ void update_display(bool blank = false) {
           last_epd_refresh = millis();
           epd_blanked = false;
         }
-      #elif BOARD_MODEL != BOARD_TDECK && BOARD_MODEL != BOARD_HELTEC_T096 && BOARD_MODEL != BOARD_HELTEC_T114
+      #elif BOARD_MODEL != BOARD_TDECK && BOARD_MODEL != BOARD_HELTEC_T096 && BOARD_MODEL != BOARD_HELTEC_WTRACKER_V2 && BOARD_MODEL != BOARD_HELTEC_T1 && BOARD_MODEL != BOARD_HELTEC_T114
         display.display();
       #endif
 
@@ -3693,7 +3767,7 @@ void display_unblank() {
     if (display_blanked) {
       analogWrite(PIN_T114_TFT_BLGT, 0);
     }
-  #elif BOARD_MODEL == BOARD_HELTEC_T096
+  #elif BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1
     // Only force the backlight to full when actually waking from a
     // blanked/dimmed state. This is called unconditionally on every
     // button/encoder event to keep the away-timer alive (see
@@ -3703,7 +3777,13 @@ void display_unblank() {
     // Brightness field, display_intensity) back to maximum on every
     // single menu tap.
     if (display_blanked) {
-      analogWrite(PIN_T096_TFT_BLGT, 0);
+      #if BOARD_MODEL == BOARD_HELTEC_T096
+        analogWrite(PIN_T096_TFT_BLGT, 0);
+      #elif BOARD_MODEL == BOARD_HELTEC_T1
+        analogWrite(PIN_T1_TFT_BLGT, 0);
+      #else
+        analogWrite(PIN_WTV2_TFT_BLGT, 0);
+      #endif
     }
   #endif
 }

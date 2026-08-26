@@ -260,7 +260,7 @@ const unsigned char bm_frame [] PROGMEM = {
 };
 
 
-#if BOARD_MODEL == BOARD_HELTEC_T096
+#if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1
 // 80x96 status area frame for the 160x80 ST7735 TFT
 const unsigned char bm_frame_t096 [] PROGMEM = {
    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,

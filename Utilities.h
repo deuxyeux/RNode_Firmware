@@ -505,6 +505,19 @@ uint8_t boot_vector = 0x00;
         NRF_GPIO_PIN_NOSENSE
       );
     #endif
+
+    #if BOARD_MODEL == BOARD_HELTEC_T1
+      // T1's piezo buzzer sits behind a voltage-doubler circuit gated by
+      // two extra pins (Meshtastic's/MeshCore's variant.h:
+      // PIN_BUZZER_VOLTAGE_MULTIPLIER_1/2) - both held HIGH permanently to
+      // enable the boost, never toggled again afterward (matches
+      // MeshCore's own T1Board::begin(), the only reference driver that
+      // actually does anything with these two pins).
+      pinMode(PIN_T1_BUZZER_MULT1, OUTPUT);
+      pinMode(PIN_T1_BUZZER_MULT2, OUTPUT);
+      digitalWrite(PIN_T1_BUZZER_MULT1, HIGH);
+      digitalWrite(PIN_T1_BUZZER_MULT2, HIGH);
+    #endif
   }
 
   // Avoid tone()'s duration overload: its internal auto-stop timer can
@@ -940,8 +953,10 @@ void set_rns_link_state(uint8_t new_state) {
 	void led_tx_off() { digitalWrite(pin_led_tx, LOW); }
 	void led_id_on()  { }
 	void led_id_off() { }
-  #elif BOARD_MODEL == BOARD_HELTEC_T114
-    // Heltec T114 pulls pins LOW to turn on
+  #elif BOARD_MODEL == BOARD_HELTEC_T114 || BOARD_MODEL == BOARD_HELTEC_T1
+    // Heltec T114 pulls pins LOW to turn on - same polarity as T1's LED
+    // (both reference variant.h's for T1: LED_STATE_ON=0/LOW), unlike
+    // T096's active-HIGH LED below.
     void led_rx_on()  { digitalWrite(pin_led_rx, LOW); }
     void led_rx_off() {	digitalWrite(pin_led_rx, HIGH); }
     void led_tx_on()  { digitalWrite(pin_led_tx, LOW); }
@@ -1919,7 +1934,7 @@ void kiss_indicate_disp() {
 		// distinguishable by length alone (the disp_area/stat_area split's
 		// default geometry and a raw DISP_W x DISP_H buffer both happen to
 		// total the same byte count on boards that have a Settings menu).
-		#if HAS_MENU == true && BOARD_MODEL != BOARD_HELTEC_T096 && BOARD_MODEL != BOARD_HELTEC_T114
+		#if HAS_MENU == true && BOARD_MODEL != BOARD_HELTEC_T096 && BOARD_MODEL != BOARD_HELTEC_WTRACKER_V2 && BOARD_MODEL != BOARD_HELTEC_T1 && BOARD_MODEL != BOARD_HELTEC_T114
 			// The menu draws straight to display's own buffer instead of
 			// disp_area/stat_area (which it never touches), so reading those
 			// while the menu is open would return stale main-screen content
@@ -2490,7 +2505,7 @@ bool eeprom_product_valid() {
 	#elif PLATFORM == PLATFORM_ESP32
 	if (rval == PRODUCT_RNODE || rval == BOARD_RNODE_NG_20 || rval == BOARD_RNODE_NG_21 || rval == PRODUCT_HMBRW || rval == PRODUCT_TBEAM || rval == PRODUCT_T32_10 || rval == PRODUCT_T32_20 || rval == PRODUCT_T32_21 || rval == PRODUCT_H32_V2 || rval == PRODUCT_H32_V3 || rval == PRODUCT_H32_V4 || rval == PRODUCT_TDECK_V1 || rval == PRODUCT_TBEAM_S_V1 || rval == PRODUCT_TBEAM_S_V3 || rval == PRODUCT_XIAO_S3) {
 	#elif PLATFORM == PLATFORM_NRF52
-	if (rval == PRODUCT_RAK4631 || rval == PRODUCT_HELTEC_T114 || rval == PRODUCT_HELTEC_T096 || rval == PRODUCT_TECHO || rval == PRODUCT_HMBRW) {
+	if (rval == PRODUCT_RAK4631 || rval == PRODUCT_HELTEC_T114 || rval == PRODUCT_HELTEC_T096 || rval == PRODUCT_HELTEC_T1 || rval == PRODUCT_TECHO || rval == PRODUCT_HMBRW) {
 	#else
 	if (false) {
 	#endif
@@ -2542,6 +2557,8 @@ bool eeprom_model_valid() {
   if (model == MODEL_C6 || model == MODEL_C7) {
   #elif BOARD_MODEL == BOARD_HELTEC_T096
   if (model == MODEL_D3 || model == MODEL_D5) {
+  #elif BOARD_MODEL == BOARD_HELTEC_T1
+  if (model == MODEL_DF || model == MODEL_E2) {
   #elif BOARD_MODEL == BOARD_RAK4631
   if (model == MODEL_11 || model == MODEL_12) {
 	#elif BOARD_MODEL == BOARD_HUZZAH32
