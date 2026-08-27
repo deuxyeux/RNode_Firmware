@@ -77,7 +77,10 @@
     #define MENU_FONT TEXT_ENTRY_FONT
     #define MENU_CONTENT_W (MENU_CANVAS_W - 8) // 4px margin each side
     #define MENU_LIST_ROW_H 20
-    #define MENU_LIST_VISIBLE_ROWS 8
+    // 8 rows (22 to 22+8*20=182) left 37px of clear space before the footer
+    // hline at MENU_CANVAS_H-21=219 - room for one more 20px row (182-202)
+    // with 17px still spare; a 10th would collide with the footer hline.
+    #define MENU_LIST_VISIBLE_ROWS 9
     #define MENU_LIST_TOP_Y 22
     // Tamsyn6x12's ascent is 9px (glyph top sits 9px above the baseline,
     // per its own GFXglyph yOffset=-9) - a 7px offset (right for Org_01's

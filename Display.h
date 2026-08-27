@@ -3207,6 +3207,9 @@ void draw_disp_area() {
         sprintf(pin_str, "%06lu", (unsigned long)bt_ssp_pin);
 
         draw_disp_art(37, bm_pairing, 27);
+        #if (BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1 || BOARD_MODEL == BOARD_HELTEC_T114) && USE_COLOR_DISPLAY == true
+          disp_banner_fg = COLOR_BT_ON;
+        #endif
         for (int i = 0; i < DISP_PIN_SIZE; i++) {
           uint8_t numeric = pin_str[i]-48;
           uint8_t offset = numeric*5;
@@ -3386,7 +3389,15 @@ void draw_disp_area() {
       // clears this region too (it clears the whole canvas), so without
       // this running unconditionally afterward it would just go blank
       // instead of showing stale content.
-      if (radio_online) {
+      // Radio-offline case: with no live radio params to show, this box
+      // only opens at all if GNSS is enabled - straight to the GNSS page,
+      // no alternation (see show_gnss_page below). Radio-online behavior
+      // is unchanged.
+      #if HAS_GPS == true
+        if (radio_online || gnss_enabled) {
+      #else
+        if (radio_online) {
+      #endif
         // disp_area itself is always 135 wide (reused as-is for
         // landscape, see STAT_AREA_LAND_W's own comment), but landscape
         // only pushes/draws its own narrower left slice of it
@@ -3419,17 +3430,28 @@ void draw_disp_area() {
         // BOARD_HELTEC_T114, every other board's layout is untouched).
         int16_t rp_y_off = (disp_mode == DISP_MODE_LANDSCAPE) ? -1 : 0;
 
-        // Alternates this box with a GNSS info page (same fields as the
-        // Settings menu's own GNSS page, Menu.h) every RADIO_PARAMS_PAGE_MS
-        // while the receiver is enabled - static locals so the toggle/timer
-        // persist across calls without a global. Reset (and held on the
-        // radio page) the instant gnss_enabled goes false, so there's no
-        // stale mid-cycle GNSS page left on screen and no switching at all
-        // while it's off, per the user's request.
+        // While the radio's online: alternates this box with a GNSS info
+        // page (same fields as the Settings menu's own GNSS page, Menu.h)
+        // every RADIO_PARAMS_PAGE_MS while the receiver is enabled - static
+        // locals so the toggle/timer persist across calls without a
+        // global. Reset (and held on the radio page) the instant
+        // gnss_enabled goes false, so there's no stale mid-cycle GNSS page
+        // left on screen and no switching at all while it's off, per the
+        // user's request.
+        //
+        // While the radio's offline: no live params exist to alternate
+        // with, and the outer radio_online||gnss_enabled gate above means
+        // GNSS being enabled is the only reason this box is even open -
+        // GNSS just stays up full-time instead of toggling against a
+        // blank/meaningless radio-params page. Per user request: there's
+        // no reason to hide GNSS info just because the radio isn't
+        // running.
         bool show_gnss_page = false;
         #if HAS_GPS == true
           #define RADIO_PARAMS_PAGE_MS 10000
-          {
+          if (!radio_online) {
+            show_gnss_page = true;
+          } else {
             static unsigned long radio_params_last_switch_ms = millis();
             static bool radio_params_toggle = false;
             if (!gnss_enabled) {
