@@ -170,7 +170,18 @@ void BLESerial::onWrite(BLECharacteristic *characteristic) {
 void BLESerial::SetupSerialService() {
   SerialService = ble_server->createService(BLE_SERIAL_SERVICE_UUID);
 
-  RxCharacteristic = SerialService->createCharacteristic(BLE_RX_UUID, BLECharacteristic::PROPERTY_WRITE);
+  // setAccessPermissions(ESP_GATT_PERM_*_ENC_MITM) below is the real
+  // enforcement mechanism under Bluedroid, but a silent no-op under NimBLE
+  // (BLECharacteristic::setAccessPermissions()'s whole body only exists
+  // under CONFIG_BLUEDROID_ENABLED - our actual backend is NimBLE, so it
+  // was doing nothing there). The PROPERTY_*_ENC/PROPERTY_*_AUTHEN flags
+  // passed into createCharacteristic() below are NimBLE's own real
+  // mechanism instead (mapped to BLE_GATT_CHR_F_*_ENC/_AUTHEN) - they're
+  // literal no-op 0 under Bluedroid (BLECharacteristic.h's own comment:
+  // "Not supported by Bluedroid. Use setAccessPermissions() instead"), so
+  // passing both here covers whichever backend is actually compiled in.
+  RxCharacteristic = SerialService->createCharacteristic(BLE_RX_UUID,
+    BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_ENC | BLECharacteristic::PROPERTY_WRITE_AUTHEN);
   RxCharacteristic->setAccessPermissions(ESP_GATT_PERM_WRITE_ENC_MITM);
   RxCharacteristic->setWriteProperty(true);
   RxCharacteristic->setCallbacks(this);
@@ -178,7 +189,8 @@ void BLESerial::SetupSerialService() {
   // NimBLE auto-adds the 2902 (CCCD) descriptor whenever a characteristic
   // has notify/indicate enabled - manually adding one is deprecated
   // (BLE2902 will be removed) and was already redundant here.
-  TxCharacteristic = SerialService->createCharacteristic(BLE_TX_UUID, BLECharacteristic::PROPERTY_NOTIFY);
+  TxCharacteristic = SerialService->createCharacteristic(BLE_TX_UUID,
+    BLECharacteristic::PROPERTY_NOTIFY | BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_READ_ENC | BLECharacteristic::PROPERTY_READ_AUTHEN);
   TxCharacteristic->setAccessPermissions(ESP_GATT_PERM_READ_ENC_MITM);
   TxCharacteristic->setNotifyProperty(true);
   TxCharacteristic->setReadProperty(true);

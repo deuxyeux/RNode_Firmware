@@ -541,6 +541,18 @@ char bt_da[BT_DEV_ADDR_LEN];
       bt_allow_pairing = false;
       // See the ESP32 HAS_BLUETOOTH bt_stop() for why this is needed.
       bt_ssp_pin = 0;
+      // Also needed, unlike the ESP32 HAS_BLUETOOTH version: bt_get_passkey()
+      // (below) only calls bt_update_passkey() - the only place that sets
+      // bt_ssp_pin non-zero again - when pairing_pin is 0. Without this,
+      // pairing_pin survives this cancel at its old nonzero value, so the
+      // next bt_enable_pairing() -> bt_get_passkey() skips regenerating it,
+      // leaving bt_ssp_pin stuck at 0 forever even though bt_state correctly
+      // returns to BT_STATE_PAIRING - which silently kept the on-device
+      // pairing banner (Display.h, gates on bt_ssp_pin != 0) from ever
+      // reappearing after a cancel (button short-tap, CMD_BT_CTRL 0x00, or
+      // the long-hold console-entry path - anything that calls bt_stop()
+      // rather than bt_disable_pairing(), which already reset this).
+      pairing_pin = 0;
       bt_state = BT_STATE_OFF;
     }
   }
@@ -749,7 +761,14 @@ char bt_da[BT_DEV_ADDR_LEN];
     kiss_indicate_btpin();
   }
 
-  void bt_debond_all() { }
+  void bt_debond_all() {
+    // Was a no-op - CMD_BT_UNPAIR silently did nothing on nRF52. Mirrors
+    // the ESP32 HAS_BLE version's own "just wipe stored bond keys, don't
+    // touch any active connection" semantics - Bluefruit.Periph.clearBonds()
+    // wraps bond_clear_prph() (Bluefruit52Lib), which deletes and recreates
+    // the peripheral-role bond directory on internal flash.
+    Bluefruit.Periph.clearBonds();
+  }
 
   void update_bt() {
     // Apply any RNS link-state transition a BLE callback deferred (see
