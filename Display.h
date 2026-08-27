@@ -3283,7 +3283,7 @@ void draw_disp_area() {
             // hardware per board as they're tested - canvas width (DISP_BM_X/
             // DISP_BM_W) varies enough between boards that this may still
             // need small per-board nudges.
-            int16_t vbase = DISP_BM_X+4;
+            int16_t vbase = DISP_BM_X+2;
             uint8_t vpitch = 8; uint8_t vgap = 3;
             char *v_str = (char*)malloc(3+1);
             sprintf(v_str, "%01d%02d", MAJ_VERS, MIN_VERS);
