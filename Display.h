@@ -246,6 +246,10 @@ uint32_t disp_update_interval = 1000/disp_target_fps;
 uint32_t epd_update_interval = 1000/disp_target_fps;
 uint32_t last_page_flip = 0;
 uint32_t page_interval = 4000;
+// The system-time banner (disp_page == 4, draw_disp_systime_line() below)
+// gets its own longer dwell - a clock reading needs more than a glance to
+// actually read, unlike a short WiFi IP or MAC address.
+#define SYSTIME_PAGE_INTERVAL_MS 10000
 bool device_signatures_ok();
 bool device_firmware_ok();
 
@@ -2800,12 +2804,16 @@ void display_indicate_tx() {
 #endif
 
 #define START_PAGE 0
-// One extra rotating info page for Date/Time when HAS_RTC - same "always
-// in the rotation, falls back to the BT MAC page when not applicable"
-// treatment as the WiFi/Ethernet IP pages below, just conditional on
-// HAS_RTC since (unlike WiFi/Ethernet) it's still a rare board capability,
-// not worth extending the rotation on every other board for.
-#if HAS_RTC == true
+// One extra rotating info page for the system-time banner when a time
+// source (RTC or GNSS) is present - same "always in the rotation, falls
+// back to the BT MAC page when not applicable" treatment as the WiFi/
+// Ethernet IP pages below, just conditional on HAS_RTC/HAS_GPS since
+// (unlike WiFi/Ethernet) it's still not universal, not worth extending the
+// rotation on every other board for. Excluded on T114 specifically - it
+// already has its own dedicated time/GNSS banner in its own board-specific
+// bottom box further down in draw_disp_area() (the BOARD_HELTEC_T114
+// block), so this top-area carousel page would just be a duplicate.
+#if (HAS_RTC == true || HAS_GPS == true) && BOARD_MODEL != BOARD_HELTEC_T114
   const uint8_t pages = 5;
 #else
   const uint8_t pages = 4;
@@ -2822,11 +2830,15 @@ uint8_t disp_page = START_PAGE;
   // RTC.h is #include'd later (Utilities.h) than this file, same reason
   // the WiFi/Ethernet globals above are forward-declared rather than
   // #include'd directly.
-  extern bool rtc_present;
-  uint32_t rtc_get_unixtime();
   void rtc_civil_from_days(int32_t z, int32_t &y, uint32_t &m, uint32_t &d);
-  bool rtc_time_valid();
-  uint32_t rtc_apply_tz_offset(uint32_t utc_epoch);
+#endif
+#if HAS_RTC == true || HAS_GPS == true
+  // system_time_utc()/system_time_valid()/apply_tz_offset() are defined in
+  // Utilities.h, right after RTC.h's own #include - also later than this
+  // file, same reasoning as above.
+  bool system_time_valid();
+  uint32_t system_time_utc();
+  uint32_t apply_tz_offset(uint32_t utc_epoch);
 #endif
 
 #if HAS_WIFI || HAS_ETHERNET
@@ -2844,22 +2856,32 @@ void draw_disp_ip_line(const char* label, IPAddress ip) {
 }
 #endif
 
-#if HAS_RTC == true
+#if HAS_RTC == true || HAS_GPS == true
 // Date on the label row, time on the value row - unlike draw_disp_ip_line()
 // above, both are fixed-width (always the same digit count), so neither
 // needs that function's per-glyph width math to right-align - a plain
 // left-aligned print is already stable. Shows local (Timezone-shifted)
-// time - see rtc_apply_tz_offset(), RTC.h - same as the RTC Settings
-// page's own Time/Date rows.
-void draw_disp_datetime_line() {
-  uint32_t epoch = rtc_apply_tz_offset(rtc_get_unixtime());
+// time - see apply_tz_offset(), Utilities.h - same as the RTC/GNSS
+// Settings pages' own Time/Date rows. system_time_utc() (Utilities.h)
+// already prefers a real RTC chip over GNSS when both are present, so this
+// one function covers both cases - no separate GNSS-only banner needed.
+void draw_disp_systime_line() {
+  uint32_t epoch = apply_tz_offset(system_time_utc());
   int32_t days = (int32_t)(epoch / 86400UL);
   uint32_t rem  = epoch % 86400UL;
   uint8_t hh = (uint8_t)(rem / 3600); rem %= 3600;
   uint8_t mi = (uint8_t)(rem / 60);
   uint8_t ss = (uint8_t)(rem % 60);
   int32_t yy; uint32_t mo, dd;
-  rtc_civil_from_days(days, yy, mo, dd);
+  // Whichever civil-from-days conversion is actually available - RTC.h's
+  // own copy when there's a chip, GNSS.h's self-contained copy otherwise
+  // (RTC.h doesn't compile in at all without HAS_RTC, see that file's own
+  // comment on why it isn't shared).
+  #if HAS_RTC == true
+    rtc_civil_from_days(days, yy, mo, dd);
+  #else
+    gnss_civil_from_days(days, yy, mo, dd);
+  #endif
 
   char date_str[11]; sprintf(date_str, "%04d-%02u-%02u", (int)yy, mo, dd);
   char time_str[9];  sprintf(time_str, "%02u:%02u:%02u", hh, mi, ss);
@@ -3107,38 +3129,38 @@ void draw_disp_area() {
 
         bool wifi_ip_ready = false;
         bool eth_ip_ready = false;
-        bool rtc_time_ready = false;
+        bool systime_ready = false;
         #if HAS_WIFI
           wifi_ip_ready = wifi_is_connected();
         #endif
         #if HAS_ETHERNET
           eth_ip_ready = eth_is_connected;
         #endif
-        #if HAS_RTC == true
-          rtc_time_ready = rtc_time_valid();
+        #if HAS_RTC == true || HAS_GPS == true
+          systime_ready = system_time_valid();
         #endif
 
         // Page 1 dwells on the WiFi IP, page 3 on the Ethernet IP, page 4
-        // (HAS_RTC only) on Date/Time - each for a full page_interval, same
-        // as the original single WiFi IP page.
+        // (HAS_RTC/HAS_GPS only) on system time - each for a full
+        // page_interval, same as the original single WiFi IP page.
         bool display_alt = false;
         bool show_wifi_ip = false;
         bool show_eth_ip = false;
-        bool show_datetime = false;
+        bool show_systime = false;
         // Each only actually read below inside its own HAS_WIFI/HAS_ETHERNET/
-        // HAS_RTC guard - on a board with none of those (e.g. T096), all
-        // three go genuinely unused; silence rather than remove, since
+        // HAS_RTC||HAS_GPS guard - on a board with none of those (e.g. T096),
+        // all three go genuinely unused; silence rather than remove, since
         // they're real on boards that do have the capability.
-        (void)show_wifi_ip; (void)show_eth_ip; (void)show_datetime;
+        (void)show_wifi_ip; (void)show_eth_ip; (void)show_systime;
         if (wifi_ip_ready && disp_page == 1) {
           display_alt = true;
           show_wifi_ip = true;
         } else if (eth_ip_ready && disp_page == 3) {
           display_alt = true;
           show_eth_ip = true;
-        } else if (rtc_time_ready && disp_page == 4) {
+        } else if (systime_ready && disp_page == 4) {
           display_alt = true;
-          show_datetime = true;
+          show_systime = true;
         }
         if (display_alt) {
           #if HAS_WIFI
@@ -3147,8 +3169,8 @@ void draw_disp_area() {
           #if HAS_ETHERNET
             if (show_eth_ip) { draw_disp_ip_line("Eth IP:", eth_device_ip); }
           #endif
-          #if HAS_RTC == true
-            if (show_datetime) { draw_disp_datetime_line(); }
+          #if HAS_RTC == true || HAS_GPS == true
+            if (show_systime) { draw_disp_systime_line(); }
           #endif
         } else {
           disp_area.setFont(SMALL_FONT); disp_area.setTextWrap(false); disp_area.setTextColor(SSD1306_WHITE); disp_area.setTextSize(2);
@@ -3192,7 +3214,8 @@ void draw_disp_area() {
         }
         free(pin_str);
       } else {
-        if (millis()-last_page_flip >= page_interval) {
+        uint32_t current_page_interval = (disp_page == 4) ? SYSTIME_PAGE_INTERVAL_MS : page_interval;
+        if (millis()-last_page_flip >= current_page_interval) {
           disp_page++;
           disp_page %= pages;
           last_page_flip = millis();

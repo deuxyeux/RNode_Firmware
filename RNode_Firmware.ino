@@ -1296,6 +1296,56 @@ void urns_sync_time_from_rtc() {
   #endif
 }
 
+#if HAS_GPS == true && HAS_RTC == false
+  bool urns_gnss_time_synced = false;
+
+  // GPS-direct counterpart to urns_sync_time_from_rtc() above, for
+  // HAS_URNS boards with GNSS but no RTC chip (e.g. heltec32v4pa_urns,
+  // platformio.ini) - without either time source, RNS::Utilities::OS's
+  // clock never leaves its millis()-since-boot default and every LXMF
+  // message/path timestamp reports 1970-01-01. Thin wrapper around GNSS.h's
+  // own generic gnss_system_time_now() (which does the actual GNSS-to-epoch
+  // conversion/millis-anchoring, shared with the main-screen time banner) -
+  // this just pushes that already-synced value into RNS::Utilities::OS/
+  // microStore. Called from gnss_update() itself (GNSS.h) right after it
+  // decodes a fresh NMEA sentence, not from urns_init() like the RTC path -
+  // a GPS fix takes real time to acquire after boot (unlike an always-live
+  // RTC chip), so it can't run synchronously before Transport::start() the
+  // way the RTC sync deliberately does (see that function's own comment on
+  // why running before Transport::start() matters - sweep() evicting valid
+  // records against a bogus near-zero clock). One-shot per boot, same as
+  // the RTC path and same as gnss_sync_system_time() itself: fires once
+  // GNSS first reports a valid fix, not re-armed afterward - GPS time
+  // doesn't drift the way a free-running local oscillator does, so there's
+  // no ongoing correction to make, and constant resyncing would just mean
+  // constant flash writes via writeTimeOffset() below for no benefit.
+  // Net effect: the very first boot before any GPS fix/persisted offset
+  // ever existed can still hit the same sweep()-eviction risk the RTC
+  // ordering avoids (nothing to seed the clock with until a fix arrives,
+  // partway through loop() - after Transport::start() already ran) -
+  // every boot after that first successful sync starts from a decent
+  // persisted offset (readTimeOffset(), Reticulum.cpp) even before this
+  // fires again.
+  void urns_sync_time_from_gnss() {
+    if (urns_gnss_time_synced) return;
+    if (!gnss_system_time_valid()) return;
+
+    uint32_t epoch = gnss_system_time_now();
+    uint64_t current_ltime_ms = RNS::Utilities::OS::ltime();
+    uint64_t target_ltime_ms = (uint64_t)epoch * 1000ULL;
+    uint64_t new_offset = RNS::Utilities::OS::getTimeOffset() + (target_ltime_ms - current_ltime_ms);
+    RNS::Utilities::OS::setTimeOffset(new_offset);
+    RNS::Reticulum::writeTimeOffset();
+    // See urns_sync_time_from_rtc()'s own comment on why microStore needs
+    // re-seeding separately here too.
+    microStore::set_time_offset(RNS::Utilities::OS::getTimeOffset() / 1000);
+
+    urns_gnss_time_synced = true;
+    DEBUG_LOG("[URNS] time sync: GNSS unixtime=%lu, OS::time() now=%.0f\r\n",
+      (unsigned long)epoch, RNS::Utilities::OS::time());
+  }
+#endif
+
 bool urns_enqueue_outgoing(const uint8_t* data, uint16_t len) {
   // A host KISS frame is currently being assembled byte-by-byte into this
   // same circular buffer (serial_callback(), driven from serial_poll() in

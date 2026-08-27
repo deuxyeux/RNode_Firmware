@@ -447,7 +447,7 @@
   #if HAS_RTC == true
     #define RTC_ITEM_TIME     0   // read-only readout, local (Timezone-shifted)
     #define RTC_ITEM_DATE     1   // read-only readout, local (Timezone-shifted)
-    #define RTC_ITEM_TIMEZONE 2   // display-only UTC offset - see rtc_get_tz_offset_qh(), RTC.h
+    #define RTC_ITEM_TIMEZONE 2   // display-only UTC offset - see get_tz_offset_qh(), Utilities.h
     #define RTC_ITEM_SET      3   // opens the sequential Set Time/Date editor
     // Only present where rtc_sync_ntp() (RTC.h) actually compiles - see
     // its own MCU_VARIANT/HAS_WIFI/HAS_ETHERNET guard.
@@ -489,28 +489,19 @@
       #define GNSS_NEXT_1 GNSS_NEXT_0
     #endif
 
-    // Module identity (gnss_module_status_text()/gnss_chip_name(), GNSS.h)
-    // vs. Duty State - a mutually exclusive slot, not two separate rows.
-    // Plain "Module" (chip name once detected, DETECTING.../NOT DETECTED
-    // otherwise - matters most on boards where the receiver is an
-    // optional add-on, like MeshAdventurer-S3's ATGM336H) only lives here
-    // when there's no Diagnostics page to relocate it to. Once Diagnostics
-    // exists (HAS_GNSS_DEBUG_MENU true), Module always moves there
-    // (GNSS_DIAG_ITEM_MODULE below) and this slot either shows the more
-    // actionable "Duty State" (ACTIVE/HOLD/SLEEP, on boards that actually
-    // duty-cycle) or disappears entirely (on debug-menu boards with no
-    // duty-cycle capability at all, e.g. MeshAdventurer-S3's AT6558 - no
-    // PIN_GPS_EN/PIN_GPS_STANDBY to gate power with, so there's no duty
-    // state to show instead).
-    #if HAS_GNSS_DEBUG_MENU == true && GNSS_DUTY_CYCLE_CAPABLE == true
-      #define GNSS_ITEM_DUTY_STATE GNSS_NEXT_1 // read-only
-      #define GNSS_NEXT_2 (GNSS_NEXT_1 + 1)
-    #elif HAS_GNSS_DEBUG_MENU == true
-      #define GNSS_NEXT_2 GNSS_NEXT_1
-    #else
-      #define GNSS_ITEM_MODULE GNSS_NEXT_1 // read-only
-      #define GNSS_NEXT_2 (GNSS_NEXT_1 + 1)
-    #endif
+    // Duty State (gnss_pstate_text(), GNSS.h) - universal across every
+    // HAS_GPS board now, not just ones with both Diagnostics and duty-cycle
+    // capability. Chip identity (former "Module" row, gnss_chip_name()) is
+    // no longer shown here at all - per user request, boards with
+    // Diagnostics (HAS_GNSS_DEBUG_MENU) still expose it there
+    // (GNSS_DIAG_ITEM_MODULE below), boards without it just don't show
+    // chip identity in the menu anymore. On a board that can't actually
+    // duty-cycle (GNSS_DUTY_CYCLE_CAPABLE false), gnss_pstate_text() simply
+    // always reads ACTIVE (or OFF when disabled) - still accurate, just
+    // static, since gnss_duty_cycle_update() (GNSS.h) never leaves ACTIVE
+    // there.
+    #define GNSS_ITEM_DUTY_STATE GNSS_NEXT_1 // read-only
+    #define GNSS_NEXT_2 (GNSS_NEXT_1 + 1)
 
     #define GNSS_ITEM_FIX        GNSS_NEXT_2       // read-only
     #define GNSS_ITEM_SATELLITES (GNSS_NEXT_2 + 1) // read-only
@@ -523,7 +514,14 @@
     // valid but Fix/Satellites still 0 confirms sentence parsing works
     // end-to-end and it's an antenna/sky-visibility issue, not firmware.
     #define GNSS_ITEM_TIME       (GNSS_NEXT_2 + 5) // read-only
-    #define GNSS_NEXT_3          (GNSS_NEXT_2 + 6)
+    // Display-only UTC offset, same field/EEPROM byte/editor as RTC_ITEM_
+    // TIMEZONE below (get_tz_offset_qh()/apply_tz_offset(), Utilities.h) -
+    // shown here too since GNSS is a real time source in its own right on
+    // boards with no RTC chip at all. Shows on both pages when a board has
+    // both (same value either way, editable from either) - simplest,
+    // avoids extra suppression logic for a harmless redundancy.
+    #define GNSS_ITEM_TIMEZONE   (GNSS_NEXT_2 + 6)
+    #define GNSS_NEXT_3          (GNSS_NEXT_2 + 7)
 
     #if HAS_GNSS_DEBUG_MENU == true
       #define GNSS_ITEM_DIAGNOSTICS GNSS_NEXT_3 // opens MENU_STATE_GNSS_DIAG
@@ -541,7 +539,7 @@
       // Uses the Hardware page's _NEXT_-chaining convention (more
       // conditional rows here than the flat two-branch GNSS_ITEM_* style
       // above handles cleanly).
-      #define GNSS_DIAG_ITEM_MODULE      0   // gnss_chip_name() - chip identity moved here from the main GNSS_ITEM_MODULE row
+      #define GNSS_DIAG_ITEM_MODULE      0   // gnss_chip_name() - chip identity, not shown on the main GNSS page at all anymore
       #define GNSS_DIAG_ITEM_FIX_QUALITY 1
       #define GNSS_DIAG_ITEM_FIX_MODE    2
       #define GNSS_DIAG_ITEM_HDOP        3
@@ -825,9 +823,9 @@
     #endif
 
     // No GPS chip-identification item here (removed - redundant with GNSS
-    // chip identity, which lives on the GNSS page itself: GNSS_ITEM_MODULE
-    // on boards without a Diagnostics page, or GNSS_DIAG_ITEM_MODULE on the
-    // Diagnostics page for boards that have one).
+    // chip identity, which only lives on the Diagnostics page now for
+    // boards that have one: GNSS_DIAG_ITEM_MODULE. The main GNSS page no
+    // longer shows chip identity at all, on any board.)
     #define HW_NEXT_A3 HW_NEXT_A2
 
     #if HAS_WIFI == true
@@ -1688,13 +1686,21 @@
     // Which of the 6 fields above is currently being adjusted - 0=Year,
     // 1=Month, 2=Day, 3=Hour, 4=Minute, 5=Second (see step_rtc_field()).
     uint8_t rtc_edit_field_idx = 0;
+  #endif
 
+  #if HAS_RTC == true || HAS_GPS == true
     // Working copy while inside MENU_STATE_RTC_TZ_EDIT - quarter-hours
     // from UTC, synced fresh from the live value on entry (see
-    // rtc_get_tz_offset_qh(), RTC.h) and committed immediately on
+    // get_tz_offset_qh(), Utilities.h) and committed immediately on
     // confirm (tz_conf_save(), Utilities.h) - display-only, nothing to
-    // reboot or re-init, same reasoning as Ethernet's Speed field.
+    // reboot or re-init, same reasoning as Ethernet's Speed field. Shared
+    // by both the RTC page's and the GNSS page's own Timezone row (same
+    // EEPROM byte, same editor) - see tz_edit_return_state below for how
+    // it knows which list to return to.
     int8_t staged_tz_offset_qh = 0;
+    // Which list opened MENU_STATE_RTC_TZ_EDIT - MENU_STATE_RTC_LIST or
+    // MENU_STATE_GNSS_LIST - so confirm can return to the right one.
+    uint8_t tz_edit_return_state = MENU_STATE_RTC_LIST;
   #endif
 
   #if HAS_GPS == true
@@ -2278,10 +2284,14 @@
       if (staged_rtc_day > max_day) staged_rtc_day = max_day;
     }
 
+  #endif
+
+  #if HAS_RTC == true || HAS_GPS == true
     // "UTC" for a zero offset, else "+HH:MM"/"-HH:MM" - quarter-hour steps
-    // (see TZ_OFFSET_QH_MIN/MAX, RTC.h) can land on a non-zero minute part
-    // (e.g. UTC+05:30), so this always prints both fields rather than
-    // special-casing whole hours.
+    // (see TZ_OFFSET_QH_MIN/MAX, Utilities.h) can land on a non-zero minute
+    // part (e.g. UTC+05:30), so this always prints both fields rather than
+    // special-casing whole hours. Shared by both the RTC and GNSS pages'
+    // own Timezone rows.
     void format_tz_offset(int8_t offset_qh, char *buf) {
       if (offset_qh == 0) { sprintf(buf, "UTC"); return; }
       int16_t total_min = (int16_t)offset_qh * 15;
@@ -2298,7 +2308,9 @@
       else      { if (v < TZ_OFFSET_QH_MIN) v = TZ_OFFSET_QH_MIN; if (v > TZ_OFFSET_QH_MAX) v = TZ_OFFSET_QH_MAX; }
       staged_tz_offset_qh = (int8_t)v;
     }
+  #endif
 
+  #if HAS_RTC == true
     #if MCU_VARIANT == MCU_ESP32 && (HAS_WIFI == true || HAS_ETHERNET == true)
       // Only the success result auto-dismisses (menu_draw_popup_timed()) -
       // nothing to acknowledge there, whereas an error is worth making
@@ -2690,8 +2702,13 @@
         int32_t days = rtc_days_from_civil(staged_rtc_year, staged_rtc_month, staged_rtc_day);
         uint32_t epoch = (uint32_t)days * 86400UL + (uint32_t)staged_rtc_hour * 3600UL + (uint32_t)staged_rtc_minute * 60UL + staged_rtc_second;
         rtc_set_unixtime(epoch);
-      } else if (menu_state == MENU_STATE_RTC_TZ_EDIT) {
-        uint8_t live_raw = (uint8_t)(rtc_get_tz_offset_qh() + TZ_OFFSET_RAW_ZERO);
+      }
+    #endif
+    #if HAS_RTC == true || HAS_GPS == true
+      // Same flush-in-progress reasoning as above - reachable from either
+      // the RTC or GNSS page's own Timezone row now (tz_edit_return_state).
+      if (menu_state == MENU_STATE_RTC_TZ_EDIT) {
+        uint8_t live_raw = (uint8_t)(get_tz_offset_qh() + TZ_OFFSET_RAW_ZERO);
         uint8_t new_raw  = (uint8_t)(staged_tz_offset_qh + TZ_OFFSET_RAW_ZERO);
         if (new_raw != live_raw) { tz_conf_save(new_raw); }
       }
@@ -2882,7 +2899,12 @@
       } else if (menu_state == MENU_STATE_RTC_EDIT) {
         buzzer_encoder_tick_melody();
         step_rtc_field(rtc_edit_field_idx, dir, wrap);
-      } else if (menu_state == MENU_STATE_RTC_TZ_EDIT) {
+      }
+    #endif
+    #if HAS_RTC == true || HAS_GPS == true
+      // Reachable from either the RTC or GNSS page's own Timezone row now
+      // (tz_edit_return_state) - not RTC-list-specific.
+      else if (menu_state == MENU_STATE_RTC_TZ_EDIT) {
         buzzer_encoder_tick_melody();
         step_tz_offset(dir, wrap);
       }
@@ -3538,7 +3560,8 @@
         } else if (rtc_menu_cursor == RTC_ITEM_TIMEZONE) {
           // Sync fresh from the live value, same immediate-commit
           // reasoning as Set Time/Date above.
-          staged_tz_offset_qh = rtc_get_tz_offset_qh();
+          staged_tz_offset_qh = get_tz_offset_qh();
+          tz_edit_return_state = MENU_STATE_RTC_LIST;
           menu_state = MENU_STATE_RTC_TZ_EDIT;
         }
         #if MCU_VARIANT == MCU_ESP32 && (HAS_WIFI == true || HAS_ETHERNET == true)
@@ -3593,14 +3616,6 @@
           rtc_set_unixtime(epoch);
           menu_state = MENU_STATE_RTC_LIST;
         }
-      } else if (menu_state == MENU_STATE_RTC_TZ_EDIT) {
-        // Commits straight to EEPROM here rather than staging until SAVE &
-        // EXIT - display-only, nothing to reboot or re-init, same
-        // immediate-commit pattern as Set Time/Date above.
-        uint8_t live_raw = (uint8_t)(rtc_get_tz_offset_qh() + TZ_OFFSET_RAW_ZERO);
-        uint8_t new_raw  = (uint8_t)(staged_tz_offset_qh + TZ_OFFSET_RAW_ZERO);
-        if (new_raw != live_raw) { tz_conf_save(new_raw); }
-        menu_state = MENU_STATE_RTC_LIST;
       }
       // No MENU_STATE_STATUS_POPUP branch here - it's not reached via this
       // path at all. menu_button_press()/menu_encoder_button()/
@@ -3618,6 +3633,12 @@
           // reasoning as RTC's own Timezone field above.
           staged_gnss_enabled = gnss_enabled;
           menu_state = MENU_STATE_GNSS_EDIT;
+        } else if (gnss_menu_cursor == GNSS_ITEM_TIMEZONE) {
+          // Sync fresh from the live value, same immediate-commit
+          // reasoning as RTC's own Timezone field.
+          staged_tz_offset_qh = get_tz_offset_qh();
+          tz_edit_return_state = MENU_STATE_GNSS_LIST;
+          menu_state = MENU_STATE_RTC_TZ_EDIT;
         }
         #if HAS_GNSS_DEBUG_MENU == true
           else if (gnss_menu_cursor == GNSS_ITEM_DIAGNOSTICS) {
@@ -3674,6 +3695,19 @@
           menu_state = MENU_STATE_GNSS_DIAG;
         }
       #endif
+    #endif
+    #if HAS_RTC == true || HAS_GPS == true
+      else if (menu_state == MENU_STATE_RTC_TZ_EDIT) {
+        // Commits straight to EEPROM here rather than staging until SAVE &
+        // EXIT - display-only, nothing to reboot or re-init, same
+        // immediate-commit pattern as Set Time/Date above. Returns to
+        // whichever list opened it - the RTC page's or the GNSS page's own
+        // Timezone row (tz_edit_return_state).
+        uint8_t live_raw = (uint8_t)(get_tz_offset_qh() + TZ_OFFSET_RAW_ZERO);
+        uint8_t new_raw  = (uint8_t)(staged_tz_offset_qh + TZ_OFFSET_RAW_ZERO);
+        if (new_raw != live_raw) { tz_conf_save(new_raw); }
+        menu_state = tz_edit_return_state;
+      }
     #endif
     #if HAS_ESPNOW == true
       else if (menu_state == MENU_STATE_ESPNOW_LIST) {
@@ -5311,9 +5345,9 @@
 
         // Time/Date are shown in local (Timezone-shifted) time - everything
         // else in this firmware (CMD_TIME, rtc_sync_ntp(), the RTC chip
-        // itself) stays strictly UTC; rtc_apply_tz_offset() (RTC.h) only
+        // itself) stays strictly UTC; apply_tz_offset() (Utilities.h) only
         // shifts this display copy of the epoch.
-        uint32_t epoch = rtc_apply_tz_offset(rtc_get_unixtime());
+        uint32_t epoch = apply_tz_offset(rtc_get_unixtime());
         int32_t days = (int32_t)(epoch / 86400UL);
         uint32_t rem  = epoch % 86400UL;
         uint8_t hh = (uint8_t)(rem / 3600); rem %= 3600;
@@ -5331,7 +5365,7 @@
         else              sprintf(valbufs[RTC_ITEM_DATE], "N/A");
 
         labels[RTC_ITEM_TIMEZONE] = "Timezone";
-        format_tz_offset(rtc_get_tz_offset_qh(), valbufs[RTC_ITEM_TIMEZONE]);
+        format_tz_offset(get_tz_offset_qh(), valbufs[RTC_ITEM_TIMEZONE]);
 
         #if MCU_VARIANT == MCU_ESP32 && (HAS_WIFI == true || HAS_ETHERNET == true)
           labels[RTC_ITEM_SYNC_NTP] = "Sync via NTP";
@@ -5352,10 +5386,6 @@
         draw_menu_list_disp("RTC", labels, valbufs, RTC_ITEM_COUNT, rtc_menu_cursor);
       } else if (menu_state == MENU_STATE_RTC_EDIT) {
         draw_menu_datetime_edit_disp(rtc_edit_field_idx);
-      } else if (menu_state == MENU_STATE_RTC_TZ_EDIT) {
-        char valbuf[8];
-        format_tz_offset(staged_tz_offset_qh, valbuf);
-        draw_menu_edit_disp("TIMEZONE", valbuf);
       }
     #endif
     #if HAS_GPS == true
@@ -5373,33 +5403,15 @@
           else                                                            sprintf(valbufs[GNSS_ITEM_UPDATE_INTERVAL], "%u hour", (unsigned)(gnss_update_interval_s / 3600));
         #endif
 
-        #if HAS_GNSS_DEBUG_MENU == true && GNSS_DUTY_CYCLE_CAPABLE == true
-          // Module identity moved to the Diagnostics page (GNSS_DIAG_ITEM_
-          // MODULE) - this row shows the verbose duty-cycle state instead,
-          // since that's the more actionable at-a-glance status once
-          // Diagnostics exists as the place to check chip identity/
-          // detection.
-          labels[GNSS_ITEM_DUTY_STATE] = "Duty State";
-          sprintf(valbufs[GNSS_ITEM_DUTY_STATE], "%s", gnss_pstate_text());
-        #elif HAS_GNSS_DEBUG_MENU == true
-          // Module identity moved to Diagnostics, and this board has no
-          // duty-cycle capability to show instead (see GNSS_ITEM_* enum's
-          // own comment) - the slot is omitted entirely rather than left
-          // showing something that isn't there.
-        #else
-          labels[GNSS_ITEM_MODULE] = "Module";
-          #if GNSS_DUTY_CYCLE_CAPABLE == true
-            // While duty-cycling is active, this doubles as a SEARCHING/
-            // SLEEPING indicator (gnss_duty_state_text(), GNSS.h) instead of
-            // the usual chip-presence text, so the page doesn't look stuck
-            // during a sleep interval.
-            const char *gnss_module_row_text = gnss_duty_state_text();
-            if (gnss_module_row_text == NULL) gnss_module_row_text = gnss_module_status_text();
-            sprintf(valbufs[GNSS_ITEM_MODULE], "%s", gnss_module_row_text);
-          #else
-            sprintf(valbufs[GNSS_ITEM_MODULE], "%s", gnss_module_status_text());
-          #endif
-        #endif
+        // Chip identity no longer shown here at all (per user request) -
+        // boards with Diagnostics (HAS_GNSS_DEBUG_MENU) still expose it
+        // there (GNSS_DIAG_ITEM_MODULE below). Universal across every
+        // HAS_GPS board now - gnss_pstate_text() (GNSS.h) already returns
+        // a correct static "ACTIVE"/"OFF" on boards that can't actually
+        // duty-cycle, since gnss_duty_cycle_update() never leaves ACTIVE
+        // there.
+        labels[GNSS_ITEM_DUTY_STATE] = "Duty State";
+        sprintf(valbufs[GNSS_ITEM_DUTY_STATE], "%s", gnss_pstate_text());
 
         labels[GNSS_ITEM_FIX] = "Fix";
         if (gnss_has_fix()) {
@@ -5439,6 +5451,9 @@
         labels[GNSS_ITEM_TIME] = "GNSS Time";
         if (gnss_time_valid()) sprintf(valbufs[GNSS_ITEM_TIME], "%02u:%02u:%02u", gnss_time_hour(), gnss_time_minute(), gnss_time_second());
         else                    sprintf(valbufs[GNSS_ITEM_TIME], "N/A");
+
+        labels[GNSS_ITEM_TIMEZONE] = "Timezone";
+        format_tz_offset(get_tz_offset_qh(), valbufs[GNSS_ITEM_TIMEZONE]);
 
         #if HAS_GNSS_DEBUG_MENU == true
           labels[GNSS_ITEM_DIAGNOSTICS] = "Diagnostics";
@@ -5565,6 +5580,13 @@
           draw_menu_list_disp("SATS IN VIEW", labels, valbufs, row_count, gnss_diag_sats_cursor);
         }
       #endif
+    #endif
+    #if HAS_RTC == true || HAS_GPS == true
+      else if (menu_state == MENU_STATE_RTC_TZ_EDIT) {
+        char valbuf[8];
+        format_tz_offset(staged_tz_offset_qh, valbuf);
+        draw_menu_edit_disp("TIMEZONE", valbuf);
+      }
     #endif
     #if HAS_ESPNOW == true
       else if (menu_state == MENU_STATE_ESPNOW_LIST) {

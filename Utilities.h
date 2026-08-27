@@ -237,11 +237,13 @@ void drot_conf_save(uint8_t val);
 #endif
 #if HAS_RTC == true
   void kiss_indicate_time();
-  void tz_conf_save(uint8_t val);
 #endif
 #if HAS_GPS == true
   void gnss_conf_save(bool is_enabled);
   void gnss_interval_conf_save(uint8_t preset_index);
+#endif
+#if HAS_RTC == true || HAS_GPS == true
+  void tz_conf_save(uint8_t val);
 #endif
 #if MCU_VARIANT == MCU_ESP32 && HAS_RTC == true && (HAS_WIFI == true || HAS_ETHERNET == true)
   void kiss_indicate_ntp_sync(uint8_t status);
@@ -253,6 +255,14 @@ void buzzer_lxmf_rx_melody();
 void buzzer_wait_for_melody();
 
 #if HAS_GPS == true
+  #if HAS_URNS == true && HAS_RTC == false
+    // Forward declaration - defined in RNode_Firmware.ino, further down
+    // than this #include. Called directly from gnss_update() (GNSS.h)
+    // right after it decodes a fresh NMEA sentence, rather than
+    // unconditionally every loop() tick regardless of whether any new
+    // GNSS data actually arrived that tick.
+    void urns_sync_time_from_gnss();
+  #endif
   // Must come before Display.h below - the T114 branch of draw_disp_area()
   // (Display.h) reads gnss_enabled/gnss_* accessors directly to alternate
   // the radio-parameters box with a GNSS info page.
@@ -331,6 +341,84 @@ void buzzer_wait_for_melody();
 
 #if HAS_RTC == true
   #include "RTC.h"
+#endif
+
+#if HAS_RTC == true || HAS_GPS == true
+  // Unified system-time layer - RTC and GNSS.h are both already #include'd
+  // by this point (whichever apply), so this can call straight into either.
+  // RTC takes priority when present: a real chip is instantly live at boot,
+  // no fix/connection needed, unlike GNSS which has to wait for a fix.
+  // Whatever's forward-declared for these in Display.h (included earlier
+  // than this point) must match - see that file's own comment.
+  bool system_time_valid() {
+    #if HAS_RTC == true
+      if (rtc_time_valid()) return true;
+    #endif
+    #if HAS_GPS == true
+      if (gnss_system_time_valid()) return true;
+    #endif
+    return false;
+  }
+
+  // Returns 0 if no time source is currently valid.
+  uint32_t system_time_utc() {
+    #if HAS_RTC == true
+      if (rtc_time_valid()) return rtc_get_unixtime();
+    #endif
+    #if HAS_GPS == true
+      if (gnss_system_time_valid()) return gnss_system_time_now();
+    #endif
+    return 0;
+  }
+
+  // Display-only UTC offset (set via tz_conf_save() below, from the RTC/
+  // GNSS settings pages' shared Timezone field, Menu.h) - whichever clock
+  // feeds system_time_utc() above stays strictly UTC; this offset is
+  // applied only when rendering time for a human to read (Menu.h's RTC/
+  // GNSS pages, Display.h's time banner). Deliberately not a full
+  // timezone - no DST rules, no IANA database, just a fixed
+  // minutes-from-UTC shift, per [[project note: "simple time display
+  // offset" requested over full timezone support]].
+  //
+  // Used to live in RTC.h, RTC-exclusive - moved here since it's pure
+  // EEPROM+math with no actual chip dependency, and GNSS-only boards need
+  // the exact same offset. Same EEPROM address (ADDR_CONF_TZ, ROM.h) and
+  // byte encoding as before, just no longer gated on HAS_RTC alone.
+  //
+  // Stored as raw+64 quarter-hours (not a plain signed value) so 0x00/0xFF
+  // (unset/erased EEPROM) fall outside the valid range and unambiguously
+  // mean "never configured" - same convention as vsr_conf_save()/
+  // bvs_conf_save() (Utilities.h).
+  #define TZ_OFFSET_QH_MIN    -48  // UTC-12:00
+  #define TZ_OFFSET_QH_MAX     56  // UTC+14:00
+  #define TZ_OFFSET_RAW_ZERO   64  // raw EEPROM byte encoding UTC+00:00 (qh=0)
+
+  int8_t get_tz_offset_qh() {
+    #if HAS_EEPROM
+      uint8_t raw = EEPROM.read(eeprom_addr(ADDR_CONF_TZ));
+    #elif MCU_VARIANT == MCU_NRF52
+      uint8_t raw = eeprom_read(eeprom_addr(ADDR_CONF_TZ));
+    #endif
+    int16_t qh = (int16_t)raw - TZ_OFFSET_RAW_ZERO;
+    if (qh < TZ_OFFSET_QH_MIN || qh > TZ_OFFSET_QH_MAX) return 0; // unset/erased -> UTC
+    return (int8_t)qh;
+  }
+
+  // Shifts a UTC unix timestamp by the configured display offset - the
+  // result is NOT a real unix time (it's "local wall-clock seconds", the
+  // same trick RTC.h's own epoch/civil-calendar math already works on
+  // regardless) - only ever feed it to a days_from_civil()/civil_from_days()
+  // pair for display, never back into rtc_set_unixtime() or over the wire.
+  uint32_t apply_tz_offset(uint32_t utc_epoch) {
+    return (uint32_t)((int64_t)utc_epoch + (int64_t)get_tz_offset_qh() * 900);
+  }
+
+  // No live-apply step needed (unlike e.g. ethspd_conf_save()) - every
+  // reader re-derives the offset fresh from EEPROM on each display refresh,
+  // nothing to reboot or re-init.
+  void tz_conf_save(uint8_t val) {
+    eeprom_update(eeprom_addr(ADDR_CONF_TZ), val);
+  }
 #endif
 
 #if HAS_INPUT == true
@@ -2787,16 +2875,10 @@ void bvs_conf_save(uint8_t val) {
 }
 #endif
 
-#if HAS_RTC == true
-// Persists the RTC display-only UTC offset (ADDR_CONF_TZ, ROM.h) - see
-// rtc_get_tz_offset_qh() (RTC.h) for the raw-byte encoding. No live-apply
-// step needed (unlike e.g. ethspd_conf_save()) - every reader re-derives
-// the offset fresh from EEPROM on each display refresh, nothing to reboot
-// or re-init.
-void tz_conf_save(uint8_t val) {
-	eeprom_update(eeprom_addr(ADDR_CONF_TZ), val);
-}
-#endif
+// tz_conf_save() used to live here, RTC-exclusive - moved further down
+// (system_time_utc()'s own section) alongside get_tz_offset_qh()/
+// apply_tz_offset(), since GNSS-only boards need it too. Same EEPROM
+// address/encoding, just no longer gated on HAS_RTC.
 
 #if HAS_GPIO_MENU == true
 // Persists a physical peripheral-pin reassignment - currently the buzzer

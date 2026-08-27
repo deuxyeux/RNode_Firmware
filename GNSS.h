@@ -82,6 +82,69 @@ uint16_t gnss_date_year()  { return gps_parser.date.year(); }
 uint8_t  gnss_date_month() { return gps_parser.date.month(); }
 uint8_t  gnss_date_day()   { return gps_parser.date.day(); }
 
+// Howard Hinnant's days-from-civil / civil-from-days algorithms (public
+// domain) - a self-contained copy for GNSS.h's own use, deliberately not
+// shared with RTC.h's identical rtc_days_from_civil()/rtc_civil_from_days()
+// (RTC.h only compiles in at all when HAS_RTC is true, so this file can't
+// depend on it - see system_time_utc()'s own comment, Utilities.h, for why
+// GNSS needs to work as a time source independently of any RTC chip).
+int32_t gnss_days_from_civil(int32_t y, uint32_t m, uint32_t d) {
+  y -= (m <= 2);
+  int32_t era = (y >= 0 ? y : y - 399) / 400;
+  uint32_t yoe = (uint32_t)(y - era * 400);
+  uint32_t doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+  uint32_t doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+  return era * 146097 + (int32_t)doe - 719468;
+}
+
+void gnss_civil_from_days(int32_t z, int32_t &y, uint32_t &m, uint32_t &d) {
+  z += 719468;
+  int32_t era = (z >= 0 ? z : z - 146096) / 146097;
+  uint32_t doe = (uint32_t)(z - era * 146097);
+  uint32_t yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+  y = (int32_t)yoe + era * 400;
+  uint32_t doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+  uint32_t mp = (5 * doy + 2) / 153;
+  d = doy - (153 * mp + 2) / 5 + 1;
+  m = mp + (mp < 10 ? 3 : -9);
+  y += (m <= 2);
+}
+
+// Generic GNSS-seeded system clock - independent of HAS_URNS (unlike the
+// urns_sync_time_from_gnss() consumer below, RNode_Firmware.ino, which now
+// just reads this) and independent of HAS_RTC (system_time_utc(),
+// Utilities.h, prefers a real RTC chip when present and only falls back to
+// this). Millis()-anchored: seeded once from a GNSS fix, then free-runs off
+// millis() between fixes rather than re-reading raw GNSS date/time fields
+// on every call, which would go stale/unavailable the moment the receiver
+// loses fix or is duty-cycle-slept (gnss_duty_cycle_update() above).
+bool gnss_system_time_synced = false;
+uint32_t gnss_system_time_epoch_at_sync = 0; // unix seconds, UTC, at the sync moment
+uint32_t gnss_system_time_millis_at_sync = 0;
+
+// Called from gnss_update() below, right after it decodes a fresh NMEA
+// sentence - not re-armed after the first success, same one-shot reasoning
+// urns_sync_time_from_gnss() originally had: GPS time doesn't drift the way
+// a free-running local oscillator does, so there's no ongoing correction to
+// make once synced.
+void gnss_sync_system_time() {
+  if (gnss_system_time_synced) return;
+  if (!gnss_date_valid() || !gnss_time_valid()) return;
+
+  int32_t days = gnss_days_from_civil(gnss_date_year(), gnss_date_month(), gnss_date_day());
+  gnss_system_time_epoch_at_sync = (uint32_t)days * 86400UL + (uint32_t)gnss_time_hour() * 3600UL +
+    (uint32_t)gnss_time_minute() * 60UL + gnss_time_second();
+  gnss_system_time_millis_at_sync = millis();
+  gnss_system_time_synced = true;
+}
+
+bool gnss_system_time_valid() { return gnss_system_time_synced; }
+
+uint32_t gnss_system_time_now() {
+  if (!gnss_system_time_synced) return 0;
+  return gnss_system_time_epoch_at_sync + (millis() - gnss_system_time_millis_at_sync) / 1000UL;
+}
+
 // Module presence auto-detection - relevant on any HAS_GPS board, but
 // especially MeshAdventurer-S3's ATGM336H, an optional add-on most builds
 // don't have installed (GNSS_ENABLED_DEFAULT false there, Boards.h): a user
@@ -125,16 +188,6 @@ void gnss_detect_reset() {
   gnss_detect_baseline_sentences = gps_parser.passedChecksum();
   gnss_detect_attempts = 0;
   gnss_detect_last_attempt_ms = millis();
-}
-
-// "Module" rather than gnss_chip_name() while probing/absent - the chip
-// name (Boards.h's GPS_MODEL) is just a compile-time label for whichever
-// chip this board is wired for, not proof it's actually there.
-const char *gnss_module_status_text() {
-  if (!gnss_enabled)                            return "N/A";
-  if (gnss_detect_state == GNSS_DETECT_PRESENT)  return gnss_chip_name();
-  if (gnss_detect_state == GNSS_DETECT_ABSENT)   return "N/A";
-  return "DETECTING...";
 }
 
 // Duty-cycled acquisition - lets a board that can actually gate GNSS power
@@ -421,15 +474,24 @@ void gnss_duty_cycle_update() {
   }
 }
 
-// Settings menu (Menu.h) state label for the GNSS page's Module row -
-// only meaningful once duty-cycling is actually in play (a configured
-// interval, on a capable board) and the module's presence is already
-// confirmed; returns NULL otherwise so the menu falls back to
-// gnss_module_status_text()'s existing PRESENT/ABSENT/DETECTING text.
-const char *gnss_duty_state_text() {
-  if (gnss_update_interval_s == GNSS_UPDATE_INTERVAL_CONTINUOUS || !GNSS_DUTY_CYCLE_CAPABLE) return NULL;
-  if (gnss_detect_state != GNSS_DETECT_PRESENT) return NULL;
-  return (gnss_pstate == GNSS_PSTATE_SLEEP) ? "SLEEPING" : "SEARCHING";
+// Settings menu (Menu.h) label for the GNSS page's universal Duty State
+// row - distinguishes ACTIVE vs. HOLD (fix already acquired, holding
+// awake) rather than folding both into one collapsed word, and reads a
+// static "ACTIVE"/"OFF" on boards that can't actually duty-cycle (see
+// gnss_duty_cycle_update() above - gnss_pstate never leaves ACTIVE there).
+const char *gnss_pstate_text() {
+  // gnss_duty_cycle_update() (and thus gnss_pstate itself) only ever runs
+  // while gnss_enabled (see gnss_update()) - disabling GNSS just freezes
+  // gnss_pstate wherever it was (defaulting to ACTIVE at declaration/
+  // reset), which would otherwise misleadingly read as "still searching"
+  // while the receiver is actually fully powered off.
+  if (!gnss_enabled) return "OFF";
+  switch (gnss_pstate) {
+    case GNSS_PSTATE_ACTIVE: return "ACTIVE";
+    case GNSS_PSTATE_HOLD:   return "HOLD";
+    case GNSS_PSTATE_SLEEP:  return "SLEEP";
+    default:                 return "?";
+  }
 }
 
 // Verbose GNSS diagnostics (Menu.h's MENU_STATE_GNSS_DIAG/_GNSS_DIAG_SATS)
@@ -594,25 +656,6 @@ const char *gnss_duty_state_text() {
     return total == 0 ? 0 : (uint8_t)((gnss_checksum_passed() * 100UL) / total);
   }
 
-  // Duty-cycle internals, verbose counterpart to gnss_duty_state_text()'s
-  // collapsed SEARCHING/SLEEPING label above - distinguishes ACTIVE vs.
-  // HOLD (fix already acquired, holding awake) rather than folding both
-  // into one word.
-  const char *gnss_pstate_text() {
-    // gnss_duty_cycle_update() (and thus gnss_pstate itself) only ever
-    // runs while gnss_enabled (see gnss_update()) - disabling GNSS just
-    // freezes gnss_pstate wherever it was (defaulting to ACTIVE at
-    // declaration/reset), which would otherwise misleadingly read as
-    // "still searching" while the receiver is actually fully powered off.
-    // Same "N/A while disabled" reasoning as gnss_module_status_text().
-    if (!gnss_enabled) return "OFF";
-    switch (gnss_pstate) {
-      case GNSS_PSTATE_ACTIVE: return "ACTIVE";
-      case GNSS_PSTATE_HOLD:   return "HOLD";
-      case GNSS_PSTATE_SLEEP:  return "SLEEP";
-      default:                 return "?";
-    }
-  }
   uint32_t gnss_duty_predicted_lock_s() { return gnss_duty_predicted_lock_ms / 1000; }
   // Seconds until gnss_duty_wake_at_ms, 0 if not currently asleep or
   // already past due - same signed-subtraction idiom gnss_duty_cycle_
@@ -638,7 +681,19 @@ const char *gnss_duty_state_text() {
 // (RNode_Firmware.ino), same as encoder_process()/menu_button_process().
 void gnss_update() {
   while (gnss_enabled && GPS_SERIAL.available()) {
-    gps_parser.encode(GPS_SERIAL.read());
+    if (gps_parser.encode(GPS_SERIAL.read())) {
+      // Fires only on a freshly-decoded sentence, not idle polling. Cheap/
+      // no-op most of the time even here: gnss_sync_system_time() early-
+      // returns immediately once already synced, and most sentence types
+      // (e.g. GSV) don't carry a date/time field anyway.
+      gnss_sync_system_time();
+      // Pushes the now-synced clock into RNS::Utilities::OS/microStore too,
+      // on top of gnss_system_time_* above - see its own comment
+      // (RNode_Firmware.ino) for why HAS_URNS boards need that separately.
+      #if HAS_URNS == true && HAS_RTC == false
+        urns_sync_time_from_gnss();
+      #endif
+    }
   }
 
   #if HAS_GNSS_DEBUG_MENU == true
