@@ -244,10 +244,15 @@
   // tradeoff for this test, not something newly missed.
   unsigned long g_last_kiss_stats_check_ms = 0;
   void housekeeping_poll() {
-    char debug_buf[DEBUG_LOG_MSG_LEN];
-    if (xQueueReceive(g_debug_log_queue, debug_buf, 0) == pdTRUE) {
-      Serial0.print(debug_buf);
-    }
+    // g_debug_log_queue/DEBUG_LOG_MSG_LEN only exist under HAS_DEBUG_UART
+    // (Utilities.h) - true on every HAS_URNS board until heltec32v4pa_urns
+    // (platformio.ini), which has HAS_URNS true but no debug UART wired up.
+    #if HAS_DEBUG_UART == true
+      char debug_buf[DEBUG_LOG_MSG_LEN];
+      if (xQueueReceive(g_debug_log_queue, debug_buf, 0) == pdTRUE) {
+        Serial0.print(debug_buf);
+      }
+    #endif
     char cmd_buf[CMD_LOG_MSG_LEN];
     if (xQueueReceive(g_cmd_log_queue, cmd_buf, 0) == pdTRUE) {
       serial_write(FEND);
@@ -320,7 +325,9 @@ void setup() {
     // g_cmd_log_queue (Utilities.h). xQueueSend() doesn't need a consumer
     // running yet; entries just sit queued until housekeeping_poll()
     // (this file, called from loop()) starts draining them.
-    g_debug_log_queue = xQueueCreate(DEBUG_LOG_QUEUE_DEPTH, DEBUG_LOG_MSG_LEN);
+    #if HAS_DEBUG_UART == true
+      g_debug_log_queue = xQueueCreate(DEBUG_LOG_QUEUE_DEPTH, DEBUG_LOG_MSG_LEN);
+    #endif
     g_cmd_log_queue = xQueueCreate(CMD_LOG_QUEUE_DEPTH, CMD_LOG_MSG_LEN);
   #endif
   #if HAS_OTA == true

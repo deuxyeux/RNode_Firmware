@@ -1059,7 +1059,13 @@
       #define HAS_WIFI true
       #undef HAS_PMU
       #define HAS_PMU true
-      #define HAS_CONSOLE true
+      // Guarded (unlike every other board's unconditional HAS_CONSOLE
+      // define) so a build-flag variant env can force it off with
+      // -DHAS_CONSOLE=false - see [env:heltec32v4pa_urns] (platformio.ini),
+      // same #ifndef mechanism as HAS_URNS's own global fallback below.
+      #ifndef HAS_CONSOLE
+        #define HAS_CONSOLE true
+      #endif
       #undef HAS_EEPROM
       #define HAS_EEPROM true
       #undef HAS_INPUT
