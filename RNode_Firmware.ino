@@ -3205,9 +3205,10 @@ void loop() {
     CP(CP_MENU_PROCESS);
     menu_button_process();
     menu_timeout_process();
-    #if HAS_WIFI == true || HAS_ETHERNET == true
-      menu_popup_process();
-    #endif
+    // menu_popup_process() (Menu.h) is unconditional now - see its own
+    // declaration's comment for why (Radio submenu popups need it on
+    // every HAS_MENU board, not just HAS_WIFI/HAS_ETHERNET ones).
+    menu_popup_process();
   #endif
 
   if (memory_low) {

@@ -782,8 +782,10 @@
   #define URNS_RADIO_ITEM_SF    2
   #define URNS_RADIO_ITEM_CR    3
   #define URNS_RADIO_ITEM_TXP   4
-  #define URNS_RADIO_ITEM_BACK  5
-  #define URNS_RADIO_ITEM_COUNT 6
+  #define URNS_RADIO_ITEM_START 5
+  #define URNS_RADIO_ITEM_CLEAR 6
+  #define URNS_RADIO_ITEM_BACK  7
+  #define URNS_RADIO_ITEM_COUNT 8
 
   #if HAS_SENSORS == true
     // Fully read-only - no editable fields, so unlike GNSS's own list above
@@ -1222,13 +1224,17 @@
     }
   #endif
 
-  // Sync GPS (RTC.h/rtc_sync_gps()) only ever needs this where HAS_RTC is
-  // also true - HAS_GPS alone (e.g. T096/T114, no HAS_RTC) would pull in
-  // this block for nothing, and its T096/T114-specific footprint-tracking
-  // branch just below has never been built against a board with no
-  // WiFi/Ethernet of its own, so guarding on bare HAS_GPS risks surfacing
-  // bugs in a path nothing would actually use.
-  #if HAS_WIFI == true || HAS_ETHERNET == true || (HAS_GPS == true && HAS_RTC == true)
+  // Used to be gated behind HAS_WIFI || HAS_ETHERNET || (HAS_GPS && HAS_RTC)
+  // - back when the only consumers were WiFi/Ethernet's own Clear Static
+  // and Sync GPS (RTC.h/rtc_sync_gps(), which only needs this where HAS_RTC
+  // is also true). Now unconditional: the Radio submenu's Start/Stop
+  // Radio and Clear Settings actions (menu_confirm_select()'s
+  // MENU_STATE_URNS_RADIO_LIST branch) use menu_open_popup() too, and that
+  // submenu is present on every HAS_MENU board regardless of WiFi/
+  // Ethernet/GPS/RTC - T114 (HAS_GPS, no HAS_RTC, no WiFi/Ethernet) hit a
+  // real "ACTION_POPUP_MS not declared" build failure from exactly this
+  // gap before this was widened.
+
     // Menu-open popup state (MENU_STATE_STATUS_POPUP) - dismissed by any
     // input, returning to menu_popup_return_state. menu_button_press()/
     // menu_encoder_button()/menu_encoder_rotate() each special-case
@@ -1328,7 +1334,6 @@
         menu_state = menu_popup_return_state;
       }
     }
-  #endif
 
   #if HAS_NP == true
     uint8_t staged_np_brightness = 0;   // 0-255, scales existing NeoPixel colors
@@ -1965,6 +1970,29 @@
       staged_lora_txp = (uint8_t)v;
     }
 
+    // Sane starting values for any field still at its Config.h "never
+    // configured" sentinel (0/0/0/0xFF) - seeded the moment the user opens
+    // ANY Radio submenu field for editing, so e.g. Frequency starts at a
+    // usable 868.000 MHz instead of the encoder having to be cranked up
+    // from 0.000 one 25kHz detent at a time. Also what makes Coding Rate's
+    // display flip from "Unset" to "4/5" (see radio_unset in the list-view
+    // draw code) the moment any other field is touched - extending that
+    // same "touch one, the rest fill in" behavior to Bandwidth/SF/TX Power
+    // too, per user request. Reuses urns_radio_bringup()'s own seed values
+    // (RNode_Firmware.ino) for bw/sf/txp for consistency, except frequency,
+    // which the user asked for as a plain round 868.000 MHz rather than
+    // that function's 868.825 MHz.
+    #define URNS_RADIO_DEFAULT_FREQ 868000000UL
+    #define URNS_RADIO_DEFAULT_BW   125000UL
+    #define URNS_RADIO_DEFAULT_SF   10
+    #define URNS_RADIO_DEFAULT_TXP  17
+    void urns_radio_seed_defaults_if_unset() {
+      if (staged_lora_freq == 0)   staged_lora_freq = URNS_RADIO_DEFAULT_FREQ;
+      if (staged_lora_bw   == 0)   staged_lora_bw   = URNS_RADIO_DEFAULT_BW;
+      if (staged_lora_sf   == 0)   staged_lora_sf   = URNS_RADIO_DEFAULT_SF;
+      if (staged_lora_txp  == 255) staged_lora_txp  = URNS_RADIO_DEFAULT_TXP;
+    }
+
   #if MENU_HAS_HW_PAGE == true && HAS_VSENSE == true
     // Stored/edited as ratio*10 (e.g. 110 = 11.0) - 1 and 254 keep clear of
     // the 0x00/0xFF "unset, use board default" sentinels vsr_conf_save()
@@ -2538,6 +2566,15 @@
         lora_sf   = staged_lora_sf;
         lora_cr   = staged_lora_cr;
         lora_txp  = staged_lora_txp;
+        // eeprom_conf_save() below only writes when radio_online is already
+        // true (Utilities.h) - true by the time this runs on a board with a
+        // previously-saved config (boot-time validate_status() already
+        // started it), but never true on a virgin board with no saved
+        // config and no HAS_URNS bring-up (urns_radio_bringup(),
+        // RNode_Firmware.ino) to seed it. Without this, the very first Save
+        // & Exit on a fresh board would silently no-op the write and reboot
+        // straight back into the same unconfigured state.
+        if (!radio_online) startRadio();
         eeprom_conf_save();
         hard_reset();
       }
@@ -2768,16 +2805,14 @@
   void menu_encoder_rotate(int8_t dir, bool wrap) {
     menu_last_activity_ms = millis();
     display_unblank();
-    #if HAS_WIFI == true || HAS_ETHERNET == true
-      if (menu_state == MENU_STATE_STATUS_POPUP) {
-        // Not a real navigable screen - any input at all dismisses it,
-        // rotation included, rather than the usual per-state handling
-        // below.
-        buzzer_encoder_tick_melody();
-        menu_state = menu_popup_return_state;
-        return;
-      }
-    #endif
+    if (menu_state == MENU_STATE_STATUS_POPUP) {
+      // Not a real navigable screen - any input at all dismisses it,
+      // rotation included, rather than the usual per-state handling
+      // below.
+      buzzer_encoder_tick_melody();
+      menu_state = menu_popup_return_state;
+      return;
+    }
     if (menu_state == MENU_STATE_LIST) {
       buzzer_encoder_tick_melody();
       menu_cursor = menu_clamp_cursor(menu_cursor, dir, MENU_ITEM_COUNT, wrap);
@@ -3122,17 +3157,15 @@
     menu_last_activity_ms = millis();
     display_unblank();
 
-    #if HAS_WIFI == true || HAS_ETHERNET == true
-      if (menu_state == MENU_STATE_STATUS_POPUP) {
-        // Not a real navigable screen - any input (short click or long
-        // press alike) dismisses it, rather than the usual short=confirm/
-        // long=commit-and-exit split below (which would otherwise close
-        // the *entire* menu on a long press here, not just this popup).
-        buzzer_encoder_click_melody();
-        menu_state = menu_popup_return_state;
-        return;
-      }
-    #endif
+    if (menu_state == MENU_STATE_STATUS_POPUP) {
+      // Not a real navigable screen - any input (short click or long
+      // press alike) dismisses it, rather than the usual short=confirm/
+      // long=commit-and-exit split below (which would otherwise close
+      // the *entire* menu on a long press here, not just this popup).
+      buzzer_encoder_click_melody();
+      menu_state = menu_popup_return_state;
+      return;
+    }
 
     #if HAS_LXMF == true
       if (menu_state == MENU_STATE_MSNGR_TEXT_ENTRY && msngr_kb_chord_used) {
@@ -4037,7 +4070,46 @@
       else if (menu_state == MENU_STATE_URNS_RADIO_LIST) {
         if (urns_radio_menu_cursor == URNS_RADIO_ITEM_BACK) {
           menu_state = MENU_STATE_LIST;
+        } else if (urns_radio_menu_cursor == URNS_RADIO_ITEM_START) {
+          // Fire-and-forget action, not a staged field - acts on the live
+          // lora_* globals directly (same ones startRadio() itself reads),
+          // not the staged_lora_* copies above, since those only take
+          // effect after menu_commit_and_exit()'s eeprom_conf_save() +
+          // hard_reset(). Mirrors the host's own CMD_RADIO_STATE 0x00/0x01
+          // handlers (RNode_Firmware.ino) - same stopRadio()/startRadio()
+          // calls, just triggered from the on-device menu instead of a KISS
+          // command. Label itself flips Start/Stop based on radio_online -
+          // see the list-view draw code above.
+          if (radio_online) {
+            stopRadio();
+            menu_open_popup("STOPPED", MENU_STATE_URNS_RADIO_LIST);
+          } else if (console_active) {
+            menu_open_popup("HOST ATTACHED", MENU_STATE_URNS_RADIO_LIST);
+          } else {
+            bool started = startRadio();
+            if (started)          menu_open_popup("STARTED", MENU_STATE_URNS_RADIO_LIST);
+            else if (radio_locked) menu_open_popup("UNSET", MENU_STATE_URNS_RADIO_LIST);
+            else                   menu_open_popup("FAILED", MENU_STATE_URNS_RADIO_LIST);
+          }
+          menu_popup_auto_dismiss_at = millis() + ACTION_POPUP_MS;
+        } else if (urns_radio_menu_cursor == URNS_RADIO_ITEM_CLEAR) {
+          // Immediate action, not staged/deferred to the whole menu's own
+          // SAVE & EXIT (unlike e.g. WIFI_ITEM_CLEAR above) -
+          // eeprom_conf_delete() (Utilities.h) is a single, complete write
+          // (ADDR_CONF_OK -> 0x00) with nothing else left to commit
+          // afterwards, so there's no reason to make the user Save & Exit
+          // (and take another reboot) just to make a clear stick. Also
+          // resets live/staged lora_* back to Config.h's own "never
+          // configured" values so the list immediately reads "Unset"
+          // without needing a reboot to see it take effect.
+          if (radio_online) stopRadio();
+          lora_freq = 0; lora_bw = 0; lora_sf = 0; lora_cr = 5; lora_txp = 255;
+          staged_lora_freq = 0; staged_lora_bw = 0; staged_lora_sf = 0; staged_lora_cr = 5; staged_lora_txp = 255;
+          eeprom_conf_delete();
+          menu_open_popup("CLEARED", MENU_STATE_URNS_RADIO_LIST);
+          menu_popup_auto_dismiss_at = millis() + ACTION_POPUP_MS;
         } else {
+          urns_radio_seed_defaults_if_unset();
           menu_state = MENU_STATE_URNS_RADIO_EDIT;
         }
       } else if (menu_state == MENU_STATE_URNS_RADIO_EDIT) {
@@ -4214,21 +4286,19 @@
   void menu_button_press(unsigned long duration) {
     menu_last_activity_ms = millis();
     display_unblank();
-    #if HAS_WIFI == true || HAS_ETHERNET == true
-      if (menu_state == MENU_STATE_STATUS_POPUP) {
-        // Not a real navigable screen - a single short tap dismisses it
-        // immediately, no need for the usual double-tap-pending wait
-        // (there's nothing to go "back" from here) or to wait for a long
-        // press. See MENU_POPUP_DISMISS_MIN_MS's own comment for why this
-        // doesn't reuse the normal 200ms short-tap dead zone.
-        if (duration >= MENU_POPUP_DISMISS_MIN_MS) {
-          menu_btn_pending = false;
-          buzzer_encoder_click_melody();
-          menu_state = menu_popup_return_state;
-        }
-        return;
+    if (menu_state == MENU_STATE_STATUS_POPUP) {
+      // Not a real navigable screen - a single short tap dismisses it
+      // immediately, no need for the usual double-tap-pending wait
+      // (there's nothing to go "back" from here) or to wait for a long
+      // press. See MENU_POPUP_DISMISS_MIN_MS's own comment for why this
+      // doesn't reuse the normal 200ms short-tap dead zone.
+      if (duration >= MENU_POPUP_DISMISS_MIN_MS) {
+        menu_btn_pending = false;
+        buzzer_encoder_click_melody();
+        menu_state = menu_popup_return_state;
       }
-    #endif
+      return;
+    }
     if (duration < 200) {
       unsigned long now = millis();
       if (menu_btn_pending && (now - menu_btn_last_click) <= MENU_BTN_DOUBLE_TAP_WINDOW) {
@@ -6004,21 +6074,42 @@
         const char *labels[URNS_RADIO_ITEM_COUNT];
         char valbufs[URNS_RADIO_ITEM_COUNT][24];
 
+        // Config.h's default initializers (freq/bw/sf=0, txp=0xFF) are what
+        // every one of these fields reads as before eeprom_conf_load() ever
+        // runs - i.e. genuinely never configured, not just "coincidentally
+        // zero". Coding Rate's own unconfigured default is 5, which is also
+        // a legal CR (4/5), so it can't be told apart from a real value on
+        // its own - only shown as unset when the other four agree nothing's
+        // been saved yet.
+        bool radio_unset = (staged_lora_freq == 0 && staged_lora_bw == 0 &&
+          staged_lora_sf == 0 && staged_lora_txp == 255);
+
         labels[URNS_RADIO_ITEM_FREQ] = "Frequency";
-        sprintf(valbufs[URNS_RADIO_ITEM_FREQ], "%lu.%03lu", (unsigned long)(staged_lora_freq / 1000000), (unsigned long)((staged_lora_freq / 1000) % 1000));
+        if (staged_lora_freq == 0) sprintf(valbufs[URNS_RADIO_ITEM_FREQ], "Unset");
+        else sprintf(valbufs[URNS_RADIO_ITEM_FREQ], "%lu.%03lu", (unsigned long)(staged_lora_freq / 1000000), (unsigned long)((staged_lora_freq / 1000) % 1000));
 
         labels[URNS_RADIO_ITEM_BW] = "Bandwidth";
-        if (staged_lora_bw >= 1000) sprintf(valbufs[URNS_RADIO_ITEM_BW], "%lukHz", (unsigned long)(staged_lora_bw / 1000));
-        else                        sprintf(valbufs[URNS_RADIO_ITEM_BW], "%luHz", (unsigned long)staged_lora_bw);
+        if (staged_lora_bw == 0)         sprintf(valbufs[URNS_RADIO_ITEM_BW], "Unset");
+        else if (staged_lora_bw >= 1000) sprintf(valbufs[URNS_RADIO_ITEM_BW], "%lukHz", (unsigned long)(staged_lora_bw / 1000));
+        else                             sprintf(valbufs[URNS_RADIO_ITEM_BW], "%luHz", (unsigned long)staged_lora_bw);
 
         labels[URNS_RADIO_ITEM_SF] = "Spreading Factor";
-        sprintf(valbufs[URNS_RADIO_ITEM_SF], "%u", staged_lora_sf);
+        if (staged_lora_sf == 0) sprintf(valbufs[URNS_RADIO_ITEM_SF], "Unset");
+        else sprintf(valbufs[URNS_RADIO_ITEM_SF], "%u", staged_lora_sf);
 
         labels[URNS_RADIO_ITEM_CR] = "Coding Rate";
-        sprintf(valbufs[URNS_RADIO_ITEM_CR], "%u", staged_lora_cr);
+        if (radio_unset) sprintf(valbufs[URNS_RADIO_ITEM_CR], "Unset");
+        else sprintf(valbufs[URNS_RADIO_ITEM_CR], "4/%u", staged_lora_cr);
 
         labels[URNS_RADIO_ITEM_TXP] = "TX Power";
-        sprintf(valbufs[URNS_RADIO_ITEM_TXP], "%udBm", staged_lora_txp);
+        if (staged_lora_txp == 255) sprintf(valbufs[URNS_RADIO_ITEM_TXP], "Unset");
+        else sprintf(valbufs[URNS_RADIO_ITEM_TXP], "%udBm", staged_lora_txp);
+
+        labels[URNS_RADIO_ITEM_START] = radio_online ? "Stop Radio" : "Start Radio";
+        valbufs[URNS_RADIO_ITEM_START][0] = 0;
+
+        labels[URNS_RADIO_ITEM_CLEAR] = "Clear Settings";
+        valbufs[URNS_RADIO_ITEM_CLEAR][0] = 0;
 
         labels[URNS_RADIO_ITEM_BACK] = "BACK";
         valbufs[URNS_RADIO_ITEM_BACK][0] = 0;
@@ -6037,7 +6128,7 @@
           sprintf(valbuf, "%u", staged_lora_sf);
           draw_menu_edit_disp("SPREADING FACTOR", valbuf);
         } else if (urns_radio_menu_cursor == URNS_RADIO_ITEM_CR) {
-          sprintf(valbuf, "%u", staged_lora_cr);
+          sprintf(valbuf, "4/%u", staged_lora_cr);
           draw_menu_edit_disp("CODING RATE", valbuf);
         } else {
           sprintf(valbuf, "%u dBm", staged_lora_txp);
@@ -6070,27 +6161,25 @@
         draw_menu_list_disp("SENSORS", labels, valbufs, SENSORS_ITEM_COUNT, sensors_menu_cursor);
       }
     #endif
-    #if HAS_WIFI == true || HAS_ETHERNET == true
-      else if (menu_state == MENU_STATE_STATUS_POPUP) {
-        // update_display() (Display.h) unconditionally clears the whole
-        // screen before calling draw_settings_menu_disp() on every normal
-        // redraw cycle - so "superimposed on the screen underneath" only
-        // holds up if that screen gets redrawn fresh every time too, not
-        // just once when the popup first opened. Temporarily swapping in
-        // menu_popup_return_state and recursing draws exactly whatever
-        // menu_confirm_select() would show at that state (RTC/WiFi/
-        // Ethernet list, ...); the box goes on top of that, not a blank
-        // screen. Safe to recurse - the substituted state can never itself
-        // be MENU_STATE_STATUS_POPUP, so this is always exactly one level
-        // deep.
-        uint8_t real_state = menu_state;
-        menu_state = menu_popup_return_state;
-        draw_settings_menu_disp();
-        menu_state = real_state;
+    else if (menu_state == MENU_STATE_STATUS_POPUP) {
+      // update_display() (Display.h) unconditionally clears the whole
+      // screen before calling draw_settings_menu_disp() on every normal
+      // redraw cycle - so "superimposed on the screen underneath" only
+      // holds up if that screen gets redrawn fresh every time too, not
+      // just once when the popup first opened. Temporarily swapping in
+      // menu_popup_return_state and recursing draws exactly whatever
+      // menu_confirm_select() would show at that state (RTC/WiFi/
+      // Ethernet list, ...); the box goes on top of that, not a blank
+      // screen. Safe to recurse - the substituted state can never itself
+      // be MENU_STATE_STATUS_POPUP, so this is always exactly one level
+      // deep.
+      uint8_t real_state = menu_state;
+      menu_state = menu_popup_return_state;
+      draw_settings_menu_disp();
+      menu_state = real_state;
 
-        draw_menu_status_rect(menu_popup_text);
-      }
-    #endif
+      draw_menu_status_rect(menu_popup_text);
+    }
     #if MENU_HAS_HW_PAGE == true
       else if (menu_state == MENU_STATE_HW_LIST) {
         const char *labels[HW_ITEM_COUNT];

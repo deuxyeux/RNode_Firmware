@@ -210,6 +210,7 @@ void db_conf_save(uint8_t val);
 void di_conf_save(uint8_t dint);
 int lora_txp_max();
 void eeprom_conf_save();
+void eeprom_conf_delete();
 void snd_conf_save(bool is_enabled);
 void wr_conf_save(uint8_t mode);
 void drot_conf_save(uint8_t val);
@@ -372,6 +373,10 @@ void buzzer_wait_for_melody();
 // main button (HAS_MENU) or additionally with a rotary encoder
 // (HAS_ENCODER) - see Boards.h.
 #if HAS_MENU == true
+  // Forward declarations - defined in RNode_Firmware.ino, further down than
+  // this #include. Needed for the Radio submenu's Start/Stop Radio item.
+  bool startRadio();
+  void stopRadio();
   #include "Menu.h"
 #endif
 #if HAS_ENCODER == true
