@@ -1677,9 +1677,14 @@ void update_airtime() {
     // seen on otherwise-idle runs too. The actual write happens in
     // housekeeping_task() (this file), on its own dedicated task,
     // specifically so a hang there can't take loopTask down with it.
-    #if MCU_VARIANT == MCU_ESP32
+    #if MCU_VARIANT == MCU_ESP32 && HAS_URNS == true
+      // g_kiss_stats_pending only exists on this exact board class (see its
+      // own declaration, this file) - the deferred-report mechanism it
+      // drives exists specifically for URNS's deeper loopTask call stack.
+      // Non-URNS ESP32 boards never had that hazard/mechanism, so they fall
+      // through to the plain direct call below, same as nRF52.
       if (millis() > 10000) {
-        // g_kiss_stats_pending = true;
+        g_kiss_stats_pending = true;
       }
     #else
       kiss_indicate_channel_stats();

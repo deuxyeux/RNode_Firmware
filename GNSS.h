@@ -34,6 +34,23 @@ TinyGPSPlus gps_parser;
 // optional add-on most builds don't have installed.
 bool gnss_enabled = GNSS_ENABLED_DEFAULT;
 
+// Manual, session-only override for the generic OLED path's GNSS info panel
+// (draw_disp_area(), Display.h) - set true only by the "Show GNSS Banner"
+// GNSS-menu action (Menu.h), never persisted to EEPROM and never cleared
+// except by reboot. Only actually changes anything while the radio is off:
+// it lets the panel open at all in that state (Display.h's outer gate is
+// otherwise radio_online-only), where it then stays shown full-time since
+// there's no airtime/channel-load data to alternate with anyway. The
+// instant radio_online goes true again, Display.h falls back to the normal
+// airtime/GNSS alternation on its own - this flag doesn't suppress that.
+// An earlier version tied this to radio_online/gnss_enabled automatically
+// instead of a menu action, which collided with the idle-status carousel
+// (checks passed/hardware OK/version, Display.h) that keeps redrawing over
+// the same screen region for the device's whole uptime, not just at boot -
+// an explicit user action sidesteps that by skipping the carousel outright
+// while pinned, rather than trying to schedule around it.
+bool gnss_banner_forced = false;
+
 const char *gnss_chip_name() {
   #if GPS_MODEL == GPS_MODEL_UC6580
     return "UC6580";
@@ -59,7 +76,21 @@ double   gnss_altitude_meters() { return gps_parser.altitude.meters(); }
 // chip just isn't seeing enough sky yet, rather than a deeper parsing
 // problem. Independent of gnss_has_fix() - check its own validity, not
 // location's.
-bool    gnss_time_valid()  { return gps_parser.time.isValid(); }
+//
+// Same TinyGPSTime::commit() quirk as gnss_date_valid() below (isValid()
+// goes true the moment any sentence's time term is processed at all, even
+// if the term itself was blank - a Void-status sentence sent before the
+// receiver has a real UTC time), so isValid() alone can read true with
+// hour()/minute()/second() all still at the "00:00:00" sentinel. Unlike
+// day() for the date sentinel, 00:00:00 is also a legitimate real UTC
+// time once a day - but only for the one second the world is actually at
+// UTC midnight, so treating an exact zero as "not yet real" is the same
+// safe-in-practice tradeoff gnss_date_valid() already makes, not a new
+// one. Without this, the tz-shifted display banners (Display.h,
+// gnss_local_time()) would render this stale sentinel as a real time in
+// whatever timezone is configured (e.g. a device at UTC+3 briefly reading
+// "03:00:00" instead of "N/A" right after boot, before any real fix).
+bool    gnss_time_valid()  { return gps_parser.time.isValid() && !(gps_parser.time.hour() == 0 && gps_parser.time.minute() == 0 && gps_parser.time.second() == 0); }
 uint8_t gnss_time_hour()   { return gps_parser.time.hour(); }
 uint8_t gnss_time_minute() { return gps_parser.time.minute(); }
 uint8_t gnss_time_second() { return gps_parser.time.second(); }

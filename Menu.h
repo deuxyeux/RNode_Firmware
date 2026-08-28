@@ -158,7 +158,10 @@
     // from plain row-centering).
     #define MENU_ICON_Y_NUDGE 0
   #else
-    #define MENU_ROW_TEXT_X_ICONS (MENU_ROW_ICON_X + MENU_ROW_ICON_COL_W + MENU_ROW_ICON_GAP)
+    // -8: requested cut to the icon/label gap on non-T114 boards (-5, then
+    // a further -3 after a look on real hardware), same "nudge the shared
+    // column, don't touch per-icon widths" idiom T114 uses above.
+    #define MENU_ROW_TEXT_X_ICONS (MENU_ROW_ICON_X + MENU_ROW_ICON_COL_W + MENU_ROW_ICON_GAP - 8)
     #define MENU_ICON_Y_NUDGE 0
   #endif
   // Deliberately not MENU_ROW_TEXT_X_ICONS - that column is sized for the
@@ -528,9 +531,27 @@
 
     #if HAS_GNSS_DEBUG_MENU == true
       #define GNSS_ITEM_DIAGNOSTICS GNSS_NEXT_3 // opens MENU_STATE_GNSS_DIAG
-      #define GNSS_NEXT_4 (GNSS_NEXT_3 + 1)
+      #define GNSS_NEXT_3A (GNSS_NEXT_3 + 1)
     #else
-      #define GNSS_NEXT_4 GNSS_NEXT_3
+      #define GNSS_NEXT_3A GNSS_NEXT_3
+    #endif
+
+    // One-shot action, not a toggle - pins draw_disp_area()'s generic OLED
+    // GNSS panel (Display.h) on screen full-time, including with the radio
+    // off, until the next reboot (gnss_banner_forced, GNSS.h - RAM-only,
+    // never persisted, no way back from the menu). Last real row before
+    // BACK, on purpose - a rarely-needed manual override shouldn't sit
+    // ahead of the actual live readouts above it. Not offered on T114: its
+    // GNSS content already lives in a separate, always-visible box below
+    // the main 64x64 canvas (a different board-specific branch further down
+    // in draw_disp_area()), never sharing screen space with the RNode/ID
+    // banner or the checks/hardware-OK/version carousel the way the generic
+    // path's panel does, so there's nothing here for T114 to fix.
+    #if BOARD_MODEL != BOARD_HELTEC_T114
+      #define GNSS_ITEM_SHOW_BANNER GNSS_NEXT_3A
+      #define GNSS_NEXT_4 (GNSS_NEXT_3A + 1)
+    #else
+      #define GNSS_NEXT_4 GNSS_NEXT_3A
     #endif
 
     #define GNSS_ITEM_BACK  GNSS_NEXT_4
@@ -3649,6 +3670,19 @@
             menu_state = MENU_STATE_GNSS_DIAG;
           }
         #endif
+        #if BOARD_MODEL != BOARD_HELTEC_T114
+          else if (gnss_menu_cursor == GNSS_ITEM_SHOW_BANNER) {
+            // One-shot, not a toggle - matches what was actually asked for:
+            // pin the panel on screen until a hard reboot, with no menu path
+            // back to the RNode/ID+carousel view. Closes the whole settings
+            // menu immediately (same discard-and-close used by the idle
+            // timeout, menu_timeout_process()) rather than returning to this
+            // list - the point is to see the banner right away, not to sit
+            // in the menu after triggering it.
+            gnss_banner_forced = true;
+            menu_close_without_saving();
+          }
+        #endif
         #if GNSS_DUTY_CYCLE_CAPABLE == true
           else if (gnss_menu_cursor == GNSS_ITEM_UPDATE_INTERVAL) {
             // Sync fresh from the live value (by matching it back to its
@@ -4379,7 +4413,23 @@
   // sit visually off-center in their reserved column just from being
   // narrower than MENU_ROW_ICON_COL_W and left-anchored, e.g. bm_menu_icon_urns
   // (7px, the narrowest) - default nullptr/0, same opt-in pattern as icons.
-  void draw_menu_list_disp(const char *title, const char **labels, char valbufs[][24], uint8_t count, uint8_t cursor, const uint8_t **icons = nullptr, const uint8_t *icon_widths = nullptr, const int8_t *icon_dx = nullptr) {
+  // icon_col_shared: true (default) reserves MENU_ROW_TEXT_X_ICONS for every
+  // row once any icons[] table is passed at all - right for lists where
+  // most/every row has its own icon (RNODE SETTINGS, MESSENGER's top
+  // screen), so a future icon-less row would still land in the same
+  // column. false shifts only the individual rows that actually have an
+  // icon (icons[i] set) and leaves the rest at the plain x=8 the list used
+  // before any of its rows had one - for a list like GNSS where a single
+  // row (Show GNSS Banner) is the exception, not the rule.
+  // text_dx is a per-row nudge (px) added on top of whatever text_x the
+  // rules above already picked - unlike icon_dx (which only re-centers a
+  // narrow icon inside its already-reserved column), this widens the gap
+  // itself for one row without touching MENU_ROW_ICON_COL_W/
+  // MENU_ROW_TEXT_X_ICONS and so without shifting every other row in the
+  // list too - e.g. MESSENGER's Inbox row, whose bm_menu_icon_inbox glyph
+  // (Graphics.h) reads visually wider than MENU_ICON_W_INBOX gives it
+  // credit for. Default nullptr/0, same opt-in pattern as icon_dx.
+  void draw_menu_list_disp(const char *title, const char **labels, char valbufs[][24], uint8_t count, uint8_t cursor, const uint8_t **icons = nullptr, const uint8_t *icon_widths = nullptr, const int8_t *icon_dx = nullptr, bool icon_col_shared = true, const int8_t *text_dx = nullptr) {
     MENU_GFX.setFont(MENU_FONT);
     MENU_GFX.setTextSize(1);
     MENU_GFX.setTextColor(SSD1306_WHITE);
@@ -4411,7 +4461,7 @@
       const uint8_t *row_icon = nullptr;
       uint8_t row_icon_w = 0;
       uint8_t icon_x = MENU_ROW_ICON_X;
-      if (icons) {
+      if (icons && icon_col_shared) {
         // Explicit per-list table (RNODE SETTINGS, MESSENGER's top screen)
         // - column reserved uniformly across every row so labels stay
         // aligned whether or not that particular row has art.
@@ -4421,6 +4471,15 @@
           row_icon_w = icon_widths[i];
           icon_x += icon_dx ? icon_dx[i] : 0;
         }
+      } else if (icons && icons[i]) {
+        // icon_col_shared == false - a single-icon exception (GNSS's Show
+        // GNSS Banner row): only this row's own label shifts to make room
+        // for its icon, every other row keeps the plain x=8 the list used
+        // before this row existed.
+        text_x = MENU_ROW_TEXT_X_ICONS;
+        row_icon = icons[i];
+        row_icon_w = icon_widths[i];
+        icon_x += icon_dx ? icon_dx[i] : 0;
       } else if (strcmp(labels[i], "BACK") == 0) {
         // No explicit table (every plain submenu list) - BACK still gets
         // bm_menu_icon_back automatically, so none of its ~20 call sites
@@ -4433,6 +4492,7 @@
         row_icon_w = MENU_ICON_W_BACK;
         text_x = MENU_BACK_TEXT_X;
       }
+      if (text_dx) text_x += text_dx[i];
       if (row_icon) {
         // Vertically centered in the row rather than top-aligned - on the
         // 11px-row boards row_h - MENU_ICON_H (10px) is only 1px of slack,
@@ -5395,6 +5455,12 @@
       else if (menu_state == MENU_STATE_GNSS_LIST) {
         const char *labels[GNSS_ITEM_COUNT];
         char valbufs[GNSS_ITEM_COUNT][24];
+        // Same "reserve the column, leave every other row iconless" pattern
+        // as the top-level RNODE SETTINGS list (draw_settings_menu_disp())
+        // - only Show GNSS Banner below actually sets one.
+        const uint8_t *icons[GNSS_ITEM_COUNT] = { nullptr };
+        uint8_t icon_widths[GNSS_ITEM_COUNT] = { 0 };
+        int8_t icon_dx[GNSS_ITEM_COUNT] = { 0 };
 
         labels[GNSS_ITEM_ENABLED] = "Enabled";
         sprintf(valbufs[GNSS_ITEM_ENABLED], gnss_enabled ? "ON" : "OFF");
@@ -5463,10 +5529,17 @@
           sprintf(valbufs[GNSS_ITEM_DIAGNOSTICS], ">"); // opens a submenu, not an inline value
         #endif
 
+        #if BOARD_MODEL != BOARD_HELTEC_T114
+          labels[GNSS_ITEM_SHOW_BANNER] = "Show GNSS Banner";
+          valbufs[GNSS_ITEM_SHOW_BANNER][0] = 0;
+          icons[GNSS_ITEM_SHOW_BANNER] = bm_menu_icon_display;
+          icon_widths[GNSS_ITEM_SHOW_BANNER] = MENU_ICON_W_DISPLAY;
+        #endif
+
         labels[GNSS_ITEM_BACK] = "BACK";
         valbufs[GNSS_ITEM_BACK][0] = 0;
 
-        draw_menu_list_disp("GNSS", labels, valbufs, GNSS_ITEM_COUNT, gnss_menu_cursor);
+        draw_menu_list_disp("GNSS", labels, valbufs, GNSS_ITEM_COUNT, gnss_menu_cursor, icons, icon_widths, icon_dx, false);
       } else if (menu_state == MENU_STATE_GNSS_EDIT) {
         #if GNSS_DUTY_CYCLE_CAPABLE == true
           if (gnss_menu_cursor == GNSS_ITEM_UPDATE_INTERVAL) {
@@ -5824,11 +5897,18 @@
         char valbufs[MSNGR_TOP_ITEM_COUNT][24];
         const uint8_t *icons[MSNGR_TOP_ITEM_COUNT] = { nullptr };
         uint8_t icon_widths[MSNGR_TOP_ITEM_COUNT] = { 0 };
+        int8_t text_dx[MSNGR_TOP_ITEM_COUNT] = { 0 };
 
         labels[MSNGR_TOP_ITEM_INBOX] = "Inbox";
         sprintf(valbufs[MSNGR_TOP_ITEM_INBOX], "%u", (unsigned)(urns_message_store ? urns_message_store->get_unread_count() : 0));
         icons[MSNGR_TOP_ITEM_INBOX] = bm_menu_icon_inbox;
         icon_widths[MSNGR_TOP_ITEM_INBOX] = MENU_ICON_W_INBOX;
+        // bm_menu_icon_inbox (Graphics.h) reads visually wider than
+        // MENU_ICON_W_INBOX credits it for - widen just this row's gap
+        // rather than MENU_ROW_ICON_COL_W/MENU_ROW_TEXT_X_ICONS, which
+        // would shift every other row (and every other icon-bearing list
+        // sharing those constants) too.
+        text_dx[MSNGR_TOP_ITEM_INBOX] = 8;
 
         labels[MSNGR_TOP_ITEM_BOOKMARKS] = "Bookmarks";
         sprintf(valbufs[MSNGR_TOP_ITEM_BOOKMARKS], "%u", (unsigned)msngr_bookmark_count);
@@ -5855,7 +5935,7 @@
         icons[MSNGR_TOP_ITEM_BACK] = bm_menu_icon_back;
         icon_widths[MSNGR_TOP_ITEM_BACK] = MENU_ICON_W_BACK;
 
-        draw_menu_list_disp("MESSENGER", labels, valbufs, MSNGR_TOP_ITEM_COUNT, msngr_menu_cursor, icons, icon_widths);
+        draw_menu_list_disp("MESSENGER", labels, valbufs, MSNGR_TOP_ITEM_COUNT, msngr_menu_cursor, icons, icon_widths, nullptr, true, text_dx);
       } else if (menu_state == MENU_STATE_MSNGR_INBOX) {
         uint8_t row_count = msngr_inbox_row_count();
         const char *labels[MENU_MSNGR_LIST_MAX_ROWS + 1];

@@ -2839,6 +2839,7 @@ uint8_t disp_page = START_PAGE;
   bool system_time_valid();
   uint32_t system_time_utc();
   uint32_t apply_tz_offset(uint32_t utc_epoch);
+  int8_t get_tz_offset_qh();
 #endif
 
 #if HAS_WIFI || HAS_ETHERNET
@@ -2890,6 +2891,26 @@ void draw_disp_systime_line() {
   disp_area.fillRect(0, 20, disp_area.width(), 17, SSD1306_BLACK);
   disp_area.setCursor(3, 34-8); disp_area.print(date_str);
   disp_area.setCursor(3, 34);   disp_area.print(time_str);
+}
+#endif
+
+#if HAS_GPS == true
+// GNSS Info panel's own Time row (the Fix/Sats/Lat/Long/Alt box) - unlike
+// draw_disp_systime_line() above, this whole panel is live GNSS data (even
+// on MeshAdventurer-S3, which also has an RTC), so it deliberately stays on
+// raw GPS time-of-day rather than switching to system_time_utc()'s
+// RTC-preferred value - mixing sources within one panel would be
+// confusing. Only a time-of-day is available here (no date alongside it),
+// so the Timezone offset (get_tz_offset_qh(), Utilities.h) is applied
+// straight to seconds-of-day and wrapped, rather than going through
+// apply_tz_offset()'s full-epoch shift.
+void gnss_local_time(uint8_t &hh, uint8_t &mm, uint8_t &ss) {
+  int32_t secs = (int32_t)gnss_time_hour()*3600 + (int32_t)gnss_time_minute()*60 + (int32_t)gnss_time_second();
+  secs += (int32_t)get_tz_offset_qh() * 900;
+  secs = ((secs % 86400) + 86400) % 86400;
+  hh = (uint8_t)(secs / 3600);
+  mm = (uint8_t)((secs % 3600) / 60);
+  ss = (uint8_t)(secs % 60);
 }
 #endif
 
@@ -2951,7 +2972,22 @@ void draw_disp_area() {
         // there's no double-draw seam where the two meet.
         draw_disp_art(0, device_signatures_ok() ? bm_def_lc : bm_def, 8);
       #endif
-      if (radio_online && display_diagnostics) {
+      // Manual override (gnss_banner_forced, GNSS.h, set by the "Show GNSS
+      // Banner" GNSS-menu action) - lets this whole panel open with the
+      // radio off, until a hard reboot clears the flag. Only matters while
+      // the radio actually is off, though: once radio_online goes true
+      // again, the normal airtime/GNSS alternation below takes back over
+      // rather than staying pinned forever (see the show_gnss_page
+      // assignment further down). Kept as its own bool (rather than
+      // referencing gnss_banner_forced directly in the if() below) so it
+      // stays genuinely unused - not just always false - on non-GPS/T114
+      // boards.
+      bool gnss_banner_pinned = false;
+      (void)gnss_banner_pinned;
+      #if HAS_GPS == true && BOARD_MODEL != BOARD_HELTEC_T114
+        gnss_banner_pinned = gnss_banner_forced;
+      #endif
+      if ((radio_online || gnss_banner_pinned) && display_diagnostics) {
         // Alternates this whole airtime/channel-load panel with a GNSS
         // info page every RADIO_PARAMS_PAGE_MS while the receiver is
         // enabled - same static-local toggle/timer pattern as T114's own
@@ -2975,7 +3011,19 @@ void draw_disp_area() {
           #ifndef RADIO_PARAMS_PAGE_MS
             #define RADIO_PARAMS_PAGE_MS 10000
           #endif
-          {
+          if (gnss_banner_pinned && !radio_online) {
+            // "Show GNSS Banner" was fired while the radio was off (the
+            // only way to reach this branch with radio_online false at
+            // all, per gnss_banner_pinned's own definition above) - hold
+            // here unconditionally, since the airtime/channel-load panel
+            // below has no real data to show without a radio anyway. Once
+            // the radio comes back online, fall through to the normal
+            // alternation below instead of staying pinned forever -
+            // "Show GNSS Banner" was about keeping GNSS visible with no
+            // radio, not about suppressing airtime stats once there's a
+            // radio again.
+            show_gnss_page = true;
+          } else {
             static unsigned long airtime_gnss_last_switch_ms = millis();
             static bool airtime_gnss_toggle = false;
             if (!gnss_enabled) {
@@ -3027,8 +3075,19 @@ void draw_disp_area() {
           else                 disp_area.printf("Alt: N/A");
 
           disp_area.setCursor(2, 58);
-          if (gnss_time_valid()) disp_area.printf("Time:%02u:%02u:%02u", gnss_time_hour(), gnss_time_minute(), gnss_time_second());
-          else                    disp_area.printf("Time:N/A");
+          // A full space glyph (Org_01, SMALL_FONT) reads as too wide a gap
+          // here on this 64px-wide canvas - print the label, measure it,
+          // then resume the value just 1px to its right instead.
+          disp_area.print("Time:");
+          {
+            int16_t tx1, ty1; uint16_t tw, th;
+            disp_area.getTextBounds("Time:", 2, 58, &tx1, &ty1, &tw, &th);
+            disp_area.setCursor(2 + tw + 1, 58);
+          }
+          if (gnss_time_valid()) {
+            uint8_t hh, mm, ss; gnss_local_time(hh, mm, ss);
+            disp_area.printf("%02u:%02u:%02u", hh, mm, ss);
+          } else disp_area.print("N/A");
         } else
         #endif
         {
@@ -3229,7 +3288,20 @@ void draw_disp_area() {
           if (!display_diagnostics) {
             draw_disp_art(37, bm_online, 27);
           }
-        } else if (ESPNOW_UI_ACTIVE()) {
+        }
+        #if HAS_GPS == true && BOARD_MODEL != BOARD_HELTEC_T114
+          else if (gnss_banner_forced) {
+            // "Show GNSS Banner" is active - the panel drawn above (this
+            // same function, the radio_online||gnss_banner_pinned branch)
+            // already owns rows 8-63 of this canvas; skip this carousel
+            // entirely rather than let it paint over Alt/Time every
+            // page_interval tick, same "already drawn, don't stomp"
+            // reasoning as the !display_diagnostics guard just above. Takes
+            // priority over ESPNOW_UI_ACTIVE() below - an explicit user
+            // action should win over that idle-state display too.
+          }
+        #endif
+        else if (ESPNOW_UI_ACTIVE()) {
           // No pre-rendered art for this state (unlike bm_online above) -
           // a matching bitmap asset isn't practical to generate here, so
           // this overlays live text instead, same idiom as draw_eth_icon()'s
@@ -3481,8 +3553,10 @@ void draw_disp_area() {
             // need its own landscape/portrait branch the way some of this
             // box's other layout tweaks do. No space after either colon
             // (unlike the other lines here) to stay inside that margin.
-            if (gnss_time_valid()) disp_area.printf("Fix: %s Time: %02u:%02u:%02u", gnss_has_fix() ? "YES" : "NO", gnss_time_hour(), gnss_time_minute(), gnss_time_second());
-            else                    disp_area.printf("Fix: %s Time: N/A", gnss_has_fix() ? "YES" : "NO");
+            if (gnss_time_valid()) {
+              uint8_t hh, mm, ss; gnss_local_time(hh, mm, ss);
+              disp_area.printf("Fix: %s Time: %02u:%02u:%02u", gnss_has_fix() ? "YES" : "NO", hh, mm, ss);
+            } else disp_area.printf("Fix: %s Time: N/A", gnss_has_fix() ? "YES" : "NO");
 
             disp_area.setCursor(4, 83+rp_y_off);
             if (gnss_has_fix()) disp_area.printf("Sats: %u  Alt: %.0fm", (unsigned)gnss_satellite_count(), gnss_altitude_meters());
