@@ -441,7 +441,39 @@ char bt_da[BT_DEV_ADDR_LEN];
           // this doesn't disconnect synchronously here.
           bt_pending_pairing_disconnect = true;
           bt_pairing_disconnect_at = millis() + 2000;
-        } else { bt_state = BT_STATE_CONNECTED; }
+        } else {
+          bt_state = BT_STATE_CONNECTED;
+          // Actively negotiate PHY/data length now that security has
+          // settled, rather than leaving both at whatever the central
+          // defaults to - same intent as the nRF52/Bluefruit side's own
+          // requestPHY()/requestDataLengthUpdate() on connect (Bluetooth.h,
+          // further down). No Espressif-library wrapper exists for either
+          // call (BLEServer/BLEDevice only expose MTU/connParams helpers),
+          // so these go straight to the raw NimBLE host API already visible
+          // via BLEDevice.h's own <host/ble_gap.h> include.
+          //
+          // Deliberately NOT done from bt_connect_callback() (right on
+          // connect) - confirmed live via CORE_DEBUG_LEVEL=5 capture that
+          // firing these HCI-level GAP commands while a resumed/bonded
+          // connection's own encryption procedure is still in flight
+          // collides on the controller's single HCI command queue
+          // ("NimBLE: HCI wait for ack returned 19", BLE_HS_ETIMEOUT_HCI) -
+          // reliably corrupting that encryption procedure and reporting
+          // authenticated=false, which this file's own failure branch below
+          // then treated as a real auth failure, endlessly rotating the
+          // passkey and re-disconnecting on every reconnect attempt. A
+          // fresh pairing has enough slack (interactive passkey exchange)
+          // to not visibly collide, which is why this only ever showed up
+          // on the *second* (resumed) connection - only visible with a
+          // debug UART capturing the underlying HCI trace, not from
+          // anything at the KISS/application layer. This is a real
+          // regression a prior session (this one) introduced by adding
+          // this negotiation directly in bt_connect_callback() - moving it
+          // here (after the security procedure that raced it has already
+          // finished) avoids the collision while keeping the negotiation.
+          ble_gap_set_prefered_le_phy(desc->conn_handle, BLE_GAP_LE_PHY_2M_MASK, BLE_GAP_LE_PHY_2M_MASK, BLE_GAP_LE_PHY_CODED_ANY);
+          ble_gap_set_data_len(desc->conn_handle, 251, 2120); // BLE spec max payload/tx-time
+        }
       } else {
         ble_authenticated = false;
         bt_state = BT_STATE_ON;
@@ -460,20 +492,6 @@ char bt_da[BT_DEV_ADDR_LEN];
       ble_authenticated = false;
       if (bt_state != BT_STATE_PAIRING) { bt_state = BT_STATE_CONNECTED; }
       set_rns_link_state(RNS_LINK_STATE_DISCONNECTED);
-      #if defined(CONFIG_NIMBLE_ENABLED)
-        // Actively negotiate PHY/data length on every connect, rather than
-        // leaving both at whatever the central defaults to - same intent as
-        // the nRF52/Bluefruit side's own requestPHY()/requestDataLengthUpdate()
-        // on connect (Bluetooth.h, further down). No Espressif-library
-        // wrapper exists for either call (BLEServer/BLEDevice only expose
-        // MTU/connParams helpers), so these go straight to the raw NimBLE
-        // host API already visible via BLEDevice.h's own <host/ble_gap.h>
-        // include. Requests only - a central that doesn't support 2M PHY or
-        // caps data length lower just keeps negotiating down to what it
-        // does support, same as the MTU preference above.
-        ble_gap_set_prefered_le_phy(conn_id, BLE_GAP_LE_PHY_2M_MASK, BLE_GAP_LE_PHY_2M_MASK, BLE_GAP_LE_PHY_CODED_ANY);
-        ble_gap_set_data_len(conn_id, 251, 2120); // BLE spec max payload/tx-time
-      #endif
     }
 
     void bt_disconnect_callback(BLEServer *server) {
