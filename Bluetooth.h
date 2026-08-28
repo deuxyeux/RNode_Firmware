@@ -237,6 +237,21 @@ char bt_da[BT_DEV_ADDR_LEN];
     bool ble_authenticated = false;
     uint32_t pairing_pin = 0;
 
+    // Deferred post-pairing disconnect (bt_authentication_complete_callback()
+    // below) - GAP callbacks run on the single dedicated NimBLE host task
+    // (BLEDevice::host_task -> nimble_port_run()), so a blocking delay()
+    // there freezes the entire BLE stack's event processing for its
+    // duration, precisely during the window right after pairing completes
+    // when the phone's own stack is doing its post-pairing setup (MTU
+    // exchange, service discovery, connection parameter negotiation) - the
+    // same class of bug fixed for the nRF52/Bluefruit side in a169a1c
+    // (SoftDevice's own event-dispatch task has the same single-task
+    // constraint). The 2s wait itself is kept as-is (undocumented original
+    // intent - no commit/comment anywhere explains why pairing-mode
+    // connections are deliberately dropped), just moved off the callback.
+    bool bt_pending_pairing_disconnect = false;
+    uint32_t bt_pairing_disconnect_at = 0;
+
     void bt_flush() { if (bt_state == BT_STATE_CONNECTED) { SerialBT.flush(); } }
 
     // Minimum uptime before it's safe to actually bring up the NimBLE
@@ -402,7 +417,10 @@ char bt_da[BT_DEV_ADDR_LEN];
         ble_authenticated = true;
         if (bt_state == BT_STATE_PAIRING) {
           // Serial.println("Pairing complete, disconnecting");
-          delay(2000); SerialBT.disconnect();
+          // See bt_pending_pairing_disconnect's own comment (above) for why
+          // this doesn't disconnect synchronously here.
+          bt_pending_pairing_disconnect = true;
+          bt_pairing_disconnect_at = millis() + 2000;
         } else { bt_state = BT_STATE_CONNECTED; }
       } else {
         // Serial.println("Authentication fail");
@@ -419,7 +437,10 @@ char bt_da[BT_DEV_ADDR_LEN];
       if (desc->sec_state.authenticated) {
         ble_authenticated = true;
         if (bt_state == BT_STATE_PAIRING) {
-          delay(2000); SerialBT.disconnect();
+          // See bt_pending_pairing_disconnect's own comment (above) for why
+          // this doesn't disconnect synchronously here.
+          bt_pending_pairing_disconnect = true;
+          bt_pairing_disconnect_at = millis() + 2000;
         } else { bt_state = BT_STATE_CONNECTED; }
       } else {
         ble_authenticated = false;
@@ -488,6 +509,10 @@ char bt_da[BT_DEV_ADDR_LEN];
     }
 
     void update_bt() {
+      if (bt_pending_pairing_disconnect && (int32_t)(millis()-bt_pairing_disconnect_at) >= 0) {
+        bt_pending_pairing_disconnect = false;
+        SerialBT.disconnect();
+      }
       if (bt_allow_pairing && millis()-bt_pairing_started >= BT_PAIRING_TIMEOUT) {
         bt_disable_pairing();
       }
