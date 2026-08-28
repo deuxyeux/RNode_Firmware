@@ -460,6 +460,20 @@ char bt_da[BT_DEV_ADDR_LEN];
       ble_authenticated = false;
       if (bt_state != BT_STATE_PAIRING) { bt_state = BT_STATE_CONNECTED; }
       set_rns_link_state(RNS_LINK_STATE_DISCONNECTED);
+      #if defined(CONFIG_NIMBLE_ENABLED)
+        // Actively negotiate PHY/data length on every connect, rather than
+        // leaving both at whatever the central defaults to - same intent as
+        // the nRF52/Bluefruit side's own requestPHY()/requestDataLengthUpdate()
+        // on connect (Bluetooth.h, further down). No Espressif-library
+        // wrapper exists for either call (BLEServer/BLEDevice only expose
+        // MTU/connParams helpers), so these go straight to the raw NimBLE
+        // host API already visible via BLEDevice.h's own <host/ble_gap.h>
+        // include. Requests only - a central that doesn't support 2M PHY or
+        // caps data length lower just keeps negotiating down to what it
+        // does support, same as the MTU preference above.
+        ble_gap_set_prefered_le_phy(conn_id, BLE_GAP_LE_PHY_2M_MASK, BLE_GAP_LE_PHY_2M_MASK, BLE_GAP_LE_PHY_CODED_ANY);
+        ble_gap_set_data_len(conn_id, 251, 2120); // BLE spec max payload/tx-time
+      #endif
     }
 
     void bt_disconnect_callback(BLEServer *server) {

@@ -131,6 +131,17 @@ bool BLESerial::begin(const char *name) {
     return false;
   }
 
+  // Preferred ATT MTU for this device - just an offer, not a guarantee: the
+  // actual negotiated value settles to whichever is lower once the central
+  // requests its own exchange, so asking for the BLE spec's own ceiling
+  // (517, ESP_GATT_MAX_MTU_SIZE) can only help, never force anything on a
+  // phone that offers less. Left at the library default of 23 otherwise,
+  // capping every read/write/notify to individual 20-byte payloads - the
+  // nRF52/Bluefruit side already asks for the same ceiling on every connect
+  // (requestMtuExchange(512+3), Bluetooth.h) instead of a global one-time
+  // preference, since Bluefruit's API is per-connection, not global.
+  BLEDevice::setMTU(517);
+
   esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_DEFAULT, ESP_PWR_LVL_P9);
   esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV, ESP_PWR_LVL_P9);
   esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_SCAN, ESP_PWR_LVL_P9);
