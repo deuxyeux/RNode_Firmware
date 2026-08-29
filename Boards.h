@@ -126,6 +126,19 @@
   #define MODEL_11            0x11 // RAK4631, 433 Mhz
   #define MODEL_12            0x12 // RAK4631, 868 Mhz
 
+  // RAK WisMesh 1W Booster (RAK3401 WisBlock Core + RAK13302 SX1262 +
+  // SKY66122-11 1W FEM module). No physical unit available to validate
+  // against - pin mapping and FEM control scheme cross-checked between
+  // Meshtastic's own variant def (~/Development/meshtastic_firmware/
+  // variants/nrf52840/rak3401_1watt) and MeshCore's (~/Development/MeshCore/
+  // variants/rak3401), which agree on every pin and on the FEM topology -
+  // same no-hardware-yet precedent as BOARD_TBEAM_1W/BOARD_HELTEC_T1 above.
+  // Single MODEL byte only - the SKY66122-11 FEM is a 863-928 MHz-only part
+  // (no 433 MHz RAK13302 SKU exists), unlike RAK4631's bare-SX1262 pair.
+  #define PRODUCT_RAK3401     0x18
+  #define BOARD_RAK3401       0x48
+  #define MODEL_13            0x13 // RAK3401 1W Booster (RAK13302), 863-928 MHz
+
   #define PRODUCT_HMBRW       0xF0
   #define BOARD_HMBRW         0x32
   #define BOARD_HUZZAH32      0x34
@@ -191,7 +204,7 @@
   #endif
 
   #ifndef MODEM
-    #if BOARD_MODEL == BOARD_RAK4631
+    #if BOARD_MODEL == BOARD_RAK4631 || BOARD_MODEL == BOARD_RAK3401
       #define MODEM SX1262
     #elif BOARD_MODEL == BOARD_GENERIC_NRF52
       #define MODEM SX1262
@@ -1671,6 +1684,86 @@
       const int pin_led_rx = LED_BLUE;
       const int pin_led_tx = LED_GREEN;
       const int pin_tcxo_enable = -1;
+
+    #elif BOARD_MODEL == BOARD_RAK3401
+      // Reuses RAK4630/RAK5005-O WisBlock mechanicals (same OLED/GPS
+      // IO-slot pins as BOARD_RAK4631 above), but the radio itself is NOT
+      // pin-compatible with RAK4631 - the SX1262 sits on a second SPI bus
+      // (pins 3/29/30, normally this module's QSPI flash pins - the RAK3401
+      // Core has no onboard flash populated, so both reference firmwares
+      // repurpose them as plain GPIO for the radio instead).
+      #define HAS_EEPROM false
+      #define HAS_DISPLAY true
+      #define HAS_BLUETOOTH false
+      #define HAS_BLE true
+      #define HAS_CONSOLE false
+      #define HAS_PMU false
+      #define HAS_NP false
+      #define HAS_SD false
+      #define HAS_TCXO true
+      #define HAS_BUSY true
+      // No digital user button on this Core module - the RAK5005-O
+      // baseboard's only button is an analog resistor-divider
+      // (PIN_USER_BTN_ANA, P0.31 in both reference firmwares), which this
+      // firmware's pin_btn_usr1 concept (Input.h, OTA.h) assumes is a plain
+      // digitalRead()/INPUT_PULLUP switch - wiring it up as one would misread
+      // the divider's intermediate voltage as a bogus press. Left
+      // unsupported until this firmware gains analog-button handling; same
+      // pin_btn_usr1 = -1 tradeoff as other buttonless boards below.
+      #define HAS_INPUT false
+      #define DIO2_AS_RF_SWITCH true
+      #define HAS_RF_SWITCH_RX_TX false
+      #define CONFIG_UART_BUFFER_SIZE 6144
+      #define CONFIG_QUEUE_SIZE 6144
+      #define CONFIG_QUEUE_MAX_LENGTH 200
+      #define EEPROM_SIZE 296
+      #define EEPROM_OFFSET EEPROM_SIZE-EEPROM_RESERVED
+      #define BLE_MANUFACTURER "RAK Wireless"
+      #define BLE_MODEL "RAK3401"
+
+      // SKY66122-11 FEM on the RAK13302 module: CSD+CPS are tied together on
+      // the module PCB and routed to a single enable pin (WisBlock IO3,
+      // P0.21) - driven HIGH once at boot (RNode_Firmware.ino's setup()) and
+      // left alone, unlike this codebase's GC1109/KCT8103L autodetect path
+      // (sx126x.cpp) which actively toggles a CTX pin every TX/RX
+      // transition. Here CTX is wired directly to SX1262's own DIO2 instead,
+      // handled entirely in hardware via DIO2_AS_RF_SWITCH above. No
+      // verified SKY66122 gain curve to build a PA_GAIN_VALUES table from,
+      // so - same call as BOARD_TBEAM_1W's unverified XY16P35 - HAS_LORA_PA
+      // is left at its default false; the RNode Settings power slider
+      // reports the bare SX1262's own chip output, not the FEM-boosted
+      // antenna power.
+      #undef HAS_LORA_LNA
+      #define HAS_LORA_LNA true
+      #define LORA_LNA_GAIN  17
+      #define LORA_LNA_GVT   12
+
+      const int pin_cs = 26;
+      const int pin_sclk = 3;
+      const int pin_mosi = 30;
+      const int pin_miso = 29;
+      const int pin_busy = 9;
+      const int pin_reset = 4;
+      const int pin_dio = 10; // SX1262 DIO1 - this firmware's generic "pin_dio"/IRQ line
+      const int pin_txen = -1;
+      const int pin_rxen = -1;
+      const int pin_tcxo_enable = -1;
+
+      // P0.21 (WisBlock IO3): SKY66122 CSD+CPS FEM enable - see comment
+      // above. P0.34 (WisBlock IO2/PIN_3V3_EN): switched 3V3_S peripheral
+      // rail AND the RAK13302's onboard 5V boost (U5) that actually powers
+      // the FEM - both must be HIGH before the FEM (and therefore any TX)
+      // works, per both reference firmwares' begin() (MeshCore's
+      // RAK3401Board.cpp is explicit about P0.34's dual role). Neither pin
+      // fits an existing pin_* concept in this firmware, so both are driven
+      // directly in setup() (RNode_Firmware.ino), same pattern as
+      // BOARD_TBEAM_1W's pin_radio_en.
+      const int pin_radio_en = 21;
+      const int pin_3v3_en = 34;
+
+      const int pin_btn_usr1 = -1;
+      const int pin_led_rx = LED_BLUE;
+      const int pin_led_tx = LED_GREEN;
 
     #elif BOARD_MODEL == BOARD_TECHO
       #define _PINNUM(port, pin) ((port) * 32 + (pin))

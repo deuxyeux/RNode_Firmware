@@ -69,9 +69,9 @@ version.txt                         <- literal "<PROTO_VERSION>.<BUILD_NUMBER>" 
 ```
 Zip these 7 files flat (no directory structure) into `Release/rnode_firmware_<board>.zip`.
 
-**nRF52 boards** (`heltec_t096`, `heltec_t114`, `heltec_t1`, `promicro`, `rak4631`, `techo`) — PlatformIO's nordicnrf52 platform *already* produces a DFU-ready `.zip` as part of the normal build (`.pio_build/<env>/firmware.zip`, via the platform's bundled `adafruit-nrfutil`) — no manual `genpkg` step needed, unlike the old arduino-cli flow. Just copy it to `Release/rnode_firmware_<board>.zip`.
+**nRF52 boards** (`heltec_t096`, `heltec_t114`, `heltec_t1`, `promicro`, `rak4631`, `rak3401`, `techo`) — PlatformIO's nordicnrf52 platform *already* produces a DFU-ready `.zip` as part of the normal build (`.pio_build/<env>/firmware.zip`, via the platform's bundled `adafruit-nrfutil`) — no manual `genpkg` step needed, unlike the old arduino-cli flow. Just copy it to `Release/rnode_firmware_<board>.zip`. (`rak3401` reuses `rak4631`'s own vendored framework/variant - see `[env:rak3401]`'s own comment in platformio.ini - so it behaves identically here.)
 
-It does **not** produce a `.uf2` though. Generate that manually from the `.hex` using the generic uf2conv.py bundled with PlatformIO's nRF52 Arduino framework package (this one tool works for all six boards — no need to hunt down each board's own vendored/stripped-down `.pio_vendor/<board>_nrf52_framework` copy, which has its `tools/` directory stripped out):
+It does **not** produce a `.uf2` though. Generate that manually from the `.hex` using the generic uf2conv.py bundled with PlatformIO's nRF52 Arduino framework package (this one tool works for all seven boards — no need to hunt down each board's own vendored/stripped-down `.pio_vendor/<board>_nrf52_framework` copy, which has its `tools/` directory stripped out):
 ```
 python3 ~/.platformio/packages/framework-arduinoadafruitnrf52/tools/uf2conv/uf2conv.py \
   -f 0xADA52840 -c -o Release/rnode_firmware_<board>.uf2 \

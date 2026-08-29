@@ -446,7 +446,7 @@ void setup() {
     boot_seq();
   #endif
 
-  #if BOARD_MODEL != BOARD_RAK4631 && BOARD_MODEL != BOARD_HELTEC_T114 && BOARD_MODEL != BOARD_HELTEC_T096 && BOARD_MODEL != BOARD_HELTEC_WTRACKER_V2 && BOARD_MODEL != BOARD_HELTEC_T1 && BOARD_MODEL != BOARD_MESHPOE_S3 && BOARD_MODEL != BOARD_MESHADVENTURER_S3 && BOARD_MODEL != BOARD_PROMICRO && BOARD_MODEL != BOARD_AETHERNODE_S3 && BOARD_MODEL != BOARD_TECHO && BOARD_MODEL != BOARD_T3S3 && BOARD_MODEL != BOARD_TBEAM_S_V1 && BOARD_MODEL != BOARD_TBEAM_S_V3 && BOARD_MODEL != BOARD_HELTEC32_V4 && BOARD_MODEL != BOARD_TBEAM_1W
+  #if BOARD_MODEL != BOARD_RAK4631 && BOARD_MODEL != BOARD_RAK3401 && BOARD_MODEL != BOARD_HELTEC_T114 && BOARD_MODEL != BOARD_HELTEC_T096 && BOARD_MODEL != BOARD_HELTEC_WTRACKER_V2 && BOARD_MODEL != BOARD_HELTEC_T1 && BOARD_MODEL != BOARD_MESHPOE_S3 && BOARD_MODEL != BOARD_MESHADVENTURER_S3 && BOARD_MODEL != BOARD_PROMICRO && BOARD_MODEL != BOARD_AETHERNODE_S3 && BOARD_MODEL != BOARD_TECHO && BOARD_MODEL != BOARD_T3S3 && BOARD_MODEL != BOARD_TBEAM_S_V1 && BOARD_MODEL != BOARD_TBEAM_S_V3 && BOARD_MODEL != BOARD_HELTEC32_V4 && BOARD_MODEL != BOARD_TBEAM_1W
     // Some boards need to wait until the hardware UART is set up before booting
     // the full firmware. In the case of the RAK4631 and Heltec T114, the line below will wait
     // until a serial connection is actually established with a master. Thus, it
@@ -523,6 +523,19 @@ void setup() {
     delay(10);
     pinMode(pin_fan_en, OUTPUT);
     digitalWrite(pin_fan_en, HIGH);
+  #elif BOARD_MODEL == BOARD_RAK3401
+    // pin_3v3_en (P0.34) must go HIGH first - it's both the switched 3V3_S
+    // peripheral rail and the RAK13302's 5V boost (U5) that actually powers
+    // the SKY66122 FEM. pin_radio_en (P0.21) then enables the FEM itself
+    // (SKY66122 CSD+CPS) - both must be up before any SPI/radio access
+    // further down in this function. Order and the short settling delay
+    // match MeshCore's own RAK3401Board::begin() (tON ~3us typ per the
+    // SKY66122 datasheet; delay(1) there, rounded up here).
+    pinMode(pin_3v3_en, OUTPUT);
+    digitalWrite(pin_3v3_en, HIGH);
+    pinMode(pin_radio_en, OUTPUT);
+    digitalWrite(pin_radio_en, HIGH);
+    delay(1);
   #endif
 
   // Initialise buffers

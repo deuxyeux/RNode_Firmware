@@ -1092,7 +1092,7 @@ void set_rns_link_state(uint8_t new_state) {
       void led_tx_off() { npset(0, 0, 0); }
 			void led_id_on()  { npset(0x90, 0, 0x70); }
 			void led_id_off() { npset(0, 0, 0); }
-    #elif BOARD_MODEL == BOARD_RAK4631
+    #elif BOARD_MODEL == BOARD_RAK4631 || BOARD_MODEL == BOARD_RAK3401
 		void led_rx_on()  { digitalWrite(pin_led_rx, HIGH); }
 		void led_rx_off() {	digitalWrite(pin_led_rx, LOW); }
 		void led_tx_on()  { digitalWrite(pin_led_tx, HIGH); }
@@ -2383,6 +2383,7 @@ void setTXPower() {
 
 		if (model == MODEL_11) LoRa->setTxPower(mapped_lora_txp, PA_OUTPUT_RFO_PIN);
 		if (model == MODEL_12) LoRa->setTxPower(mapped_lora_txp, PA_OUTPUT_RFO_PIN);
+		if (model == MODEL_13) LoRa->setTxPower(mapped_lora_txp, PA_OUTPUT_RFO_PIN);
 
 		if (model == MODEL_C6) LoRa->setTxPower(mapped_lora_txp, PA_OUTPUT_RFO_PIN);
 		if (model == MODEL_C7) LoRa->setTxPower(mapped_lora_txp, PA_OUTPUT_RFO_PIN);
@@ -2720,6 +2721,8 @@ bool eeprom_model_valid() {
   if (model == MODEL_DF || model == MODEL_E2) {
   #elif BOARD_MODEL == BOARD_RAK4631
   if (model == MODEL_11 || model == MODEL_12) {
+  #elif BOARD_MODEL == BOARD_RAK3401
+  if (model == MODEL_13) {
 	#elif BOARD_MODEL == BOARD_HUZZAH32
 	if (model == MODEL_FF) {
 	#elif BOARD_MODEL == BOARD_GENERIC_ESP32

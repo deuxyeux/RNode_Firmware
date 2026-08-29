@@ -119,8 +119,11 @@
   #define DISP_ADDR 0x3C
   #define SCL_OLED 7
   #define SDA_OLED 8
-#elif BOARD_MODEL == BOARD_RAK4631
-  // RAK1921/SSD1306
+#elif BOARD_MODEL == BOARD_RAK4631 || BOARD_MODEL == BOARD_RAK3401
+  // RAK1921/SSD1306, plugged into the WisBlock baseboard's IO_SLOT/
+  // SENSOR_SLOT I2C bus - same pins on both Core modules (WB_I2C1_SDA/SCL
+  // in both reference variant.h's), since that bus lives on the RAK5005-O/
+  // RAK19007 baseboard, not the Core module itself.
   #define DISP_RST -1
   #define DISP_ADDR 0x3C
   #define SCL_OLED 14
@@ -886,7 +889,7 @@ bool display_init() {
         #elif BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1
           disp_mode = DISP_MODE_LANDSCAPE;
           display.setRotation(1);
-        #elif BOARD_MODEL == BOARD_RAK4631
+        #elif BOARD_MODEL == BOARD_RAK4631 || BOARD_MODEL == BOARD_RAK3401
           disp_mode = DISP_MODE_LANDSCAPE;
           display.setRotation(0);
         #elif BOARD_MODEL == BOARD_TDECK

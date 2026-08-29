@@ -1062,6 +1062,11 @@ void sx126x::enableTCXO() {
       // primary/more actively-reviewed source; if TCXO fails to start on
       // real hardware (XOSC_START_ERROR), try MODE_TCXO_3_0V_6X here.
       uint8_t buf[4] = {MODE_TCXO_1_8V_6X, 0x00, 0x00, 0xFF};
+    #elif BOARD_MODEL == BOARD_RAK3401
+      // Meshtastic's and MeshCore's rak3401 variant.h both specify 1.8V
+      // (SX126X_DIO3_TCXO_VOLTAGE 1.8), no discrepancy between the two
+      // sources here unlike BOARD_TBEAM_1W above.
+      uint8_t buf[4] = {MODE_TCXO_1_8V_6X, 0x00, 0x00, 0xFF};
     #endif
     executeOpcode(OP_DIO3_TCXO_CTRL_6X, buf, 4);
   #endif
