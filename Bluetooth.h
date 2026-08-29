@@ -261,6 +261,11 @@ char bt_da[BT_DEV_ADDR_LEN];
     bool ble_authenticated = false;
     uint32_t pairing_pin = 0;
 
+    // Opt-in compatibility flag - see ADDR_CONF_BT_LEGACY_PAIRING (ROM.h)
+    // and bt_security_setup() below. Default OFF, current SC-forced
+    // behavior unchanged out of the box.
+    bool bt_legacy_pairing_enabled = false;
+
     // Deferred post-pairing disconnect (bt_authentication_complete_callback()
     // below) - GAP callbacks run on the single dedicated NimBLE host task
     // (BLEDevice::host_task -> nimble_port_run()), so a blocking delay()
@@ -537,6 +542,11 @@ char bt_da[BT_DEV_ADDR_LEN];
         } else {
           bt_enabled = false;
         }
+        if (EEPROM.read(ADDR_CONF_BT_LEGACY_PAIRING) == BT_LEGACY_PAIRING_ENABLE_BYTE) {
+          bt_legacy_pairing_enabled = true;
+        } else {
+          bt_legacy_pairing_enabled = false;
+        }
         uint8_t mac[BT_DEV_ADDR_LEN];
         esp_read_mac(mac, ESP_MAC_BT);
         char *data = (char*)malloc(BT_DEV_ADDR_LEN+1);
@@ -558,7 +568,7 @@ char bt_da[BT_DEV_ADDR_LEN];
       // Serial.println("Executing BT security setup");
       if (pairing_pin == 0) { bt_update_passkey(); }
       // Serial.printf("Passkey is %d\n", pairing_pin);
-      BLESecurity::setAuthenticationMode(ESP_LE_AUTH_REQ_SC_MITM_BOND);
+      BLESecurity::setAuthenticationMode(bt_legacy_pairing_enabled ? ESP_LE_AUTH_REQ_BOND_MITM : ESP_LE_AUTH_REQ_SC_MITM_BOND);
       BLESecurity::setCapability(ESP_IO_CAP_OUT);
       BLESecurity::setInitEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
       BLESecurity::setRespEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);

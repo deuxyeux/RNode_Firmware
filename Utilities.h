@@ -235,6 +235,9 @@ void drot_conf_save(uint8_t val);
   void espnow_mode_conf_save(uint8_t val);
   void espnow_lr_conf_save(uint8_t val);
 #endif
+#if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
+  void bt_legacy_pairing_conf_save(bool is_enabled);
+#endif
 #if HAS_RTC == true
   void kiss_indicate_time();
 #endif
@@ -2816,6 +2819,14 @@ void bt_conf_save(bool is_enabled) {
     #endif
 	}
 }
+
+#if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
+void bt_legacy_pairing_conf_save(bool is_enabled) {
+  bt_legacy_pairing_enabled = is_enabled;
+  eeprom_update(ADDR_CONF_BT_LEGACY_PAIRING, is_enabled ? BT_LEGACY_PAIRING_ENABLE_BYTE : BT_LEGACY_PAIRING_DISABLE_BYTE);
+  if (bt_ready) bt_security_setup();
+}
+#endif
 
 void snd_conf_save(bool is_enabled) {
 	sound_enabled = is_enabled;

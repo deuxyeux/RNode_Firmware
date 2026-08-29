@@ -190,6 +190,18 @@
   #define URNS_PROBE_DEST_ENABLE_BYTE  0x01
   #define URNS_PROBE_DEST_DISABLE_BYTE 0x00
 
+  // Opt-in escape hatch that makes the ESP32 NimBLE/BLE GATT link
+  // (Bluetooth.h, bt_security_setup()) negotiate LE Legacy Pairing instead
+  // of forcing LE Secure Connections, so pre-BT-4.2 host controllers
+  // (which never support SC) can still pair. Same unclaimed 256-823 gap as
+  // ADDR_CONF_URNS/_TRANSPORT/etc above, raw physical byte, no
+  // eeprom_addr() wrapper, deliberately unconditional despite being
+  // ESP32/HAS_BLE-only (same reasoning as ADDR_CONF_URNS). Default OFF -
+  // current SC-forced behavior is unchanged out of the box.
+  #define ADDR_CONF_BT_LEGACY_PAIRING 264
+  #define BT_LEGACY_PAIRING_ENABLE_BYTE  0x01
+  #define BT_LEGACY_PAIRING_DISABLE_BYTE 0x00
+
   #define CONFIG_SIZE     256
   #define ADDR_CONF_SSID 0x00
   #define ADDR_CONF_PSK  0x21

@@ -721,6 +721,20 @@ const unsigned char bm_hg_high [] PROGMEM = {
 #define MENU_ICON_W_INBOX      19
 #define MENU_ICON_W_ETHERNET   11
 #define MENU_ICON_W_LED_BRIGHTNESS 9
+#define MENU_ICON_W_BT_LEGACY_PAIRING 9
+
+const unsigned char bm_menu_icon_bt_legacy_pairing [] PROGMEM = {
+  0x00, 0x00,
+  0x0c, 0x00,
+  0x4a, 0x00,
+  0x29, 0x00,
+  0x1a, 0x00,
+  0x0c, 0x00,
+  0x1a, 0x00,
+  0x29, 0x00,
+  0x4e, 0x00,
+  0x00, 0x00,
+};
 
 const unsigned char bm_menu_icon_led_brightness [] PROGMEM = {
   0x00, 0x00,

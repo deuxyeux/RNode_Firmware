@@ -224,6 +224,8 @@
     #define MENU_STATE_GNSS_DIAG      49 // verbose GNSS diagnostics summary - opened from MENU_STATE_GNSS_LIST's Diagnostics row
     #define MENU_STATE_GNSS_DIAG_SATS 50 // satellites-in-view list (PRN/El/Az/SNR, from GPGSV) - opened from MENU_STATE_GNSS_DIAG's Sats In View row
   #endif
+  #define MENU_STATE_BT_LIST 51 // Bluetooth submenu list (HAS_BLUETOOTH/HAS_BLE boards) - Legacy Pairing (MCU_ESP32 && HAS_BLE only)/MAC/Back
+  #define MENU_STATE_BT_EDIT 52 // editing the Legacy Pairing field (MCU_ESP32 && HAS_BLE only - the only editable row)
 
   // The Hardware page used to only exist when there was board-level info
   // worth showing (battery/voltage sensing via HAS_PMU, or an ESP32-S3's
@@ -338,12 +340,23 @@
     #define MENU_NEXT_IDX_A MENU_NEXT_IDX_0
   #endif
 
-  #if HAS_ETHERNET == true
-    // MeshPoE-S3 only - see Boards.h. Sits right after WiFi.
-    #define MENU_ITEM_ETHERNET MENU_NEXT_IDX_A
-    #define MENU_NEXT_IDX_A2   (MENU_NEXT_IDX_A + 1)
+  #if HAS_BLUETOOTH == true || HAS_BLE == true
+    // Opens the Bluetooth submenu (Legacy Pairing [MCU_ESP32 && HAS_BLE
+    // only] + MAC, BT_ITEM_*, MENU_STATE_BT_LIST/EDIT) - sits right under
+    // WiFi per user request. Same gate as the Hardware page's own BT MAC
+    // row (HW_ITEM_BT_MAC below).
+    #define MENU_ITEM_BLUETOOTH MENU_NEXT_IDX_A
+    #define MENU_NEXT_IDX_A1    (MENU_NEXT_IDX_A + 1)
   #else
-    #define MENU_NEXT_IDX_A2 MENU_NEXT_IDX_A
+    #define MENU_NEXT_IDX_A1 MENU_NEXT_IDX_A
+  #endif
+
+  #if HAS_ETHERNET == true
+    // MeshPoE-S3 only - see Boards.h. Sits right after WiFi/Bluetooth.
+    #define MENU_ITEM_ETHERNET MENU_NEXT_IDX_A1
+    #define MENU_NEXT_IDX_A2   (MENU_NEXT_IDX_A1 + 1)
+  #else
+    #define MENU_NEXT_IDX_A2 MENU_NEXT_IDX_A1
   #endif
 
   #if HAS_RTC == true
@@ -613,6 +626,26 @@
     #define ESPNOW_ITEM_CHANNEL 3
     #define ESPNOW_ITEM_BACK    4
     #define ESPNOW_ITEM_COUNT   5
+  #endif
+
+  #if HAS_BLUETOOTH == true || HAS_BLE == true
+    #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
+      // Editable - see bt_security_setup() (Bluetooth.h) and
+      // bt_legacy_pairing_conf_save() (Utilities.h). Default OFF (LE
+      // Secure Connections forced, unchanged behavior); ON lets pre-BT-4.2
+      // host controllers pair via LE Legacy Pairing instead. Not present
+      // on nRF52 (Bluefruit already forces Legacy Pairing unconditionally,
+      // no toggle needed there).
+      #define BT_ITEM_LEGACY_PAIRING 0
+      #define BT_ITEM_MAC 1
+    #else
+      #define BT_ITEM_MAC 0
+    #endif
+    // Read-only - same MAC already shown on the Hardware page (HW_ITEM_BT_MAC
+    // above), reads the live value directly, not staged/committed through
+    // this submenu at all - same convention as ESP-NOW's own Channel row.
+    #define BT_ITEM_BACK (BT_ITEM_MAC + 1)
+    #define BT_ITEM_COUNT (BT_ITEM_BACK + 1)
   #endif
 
   #if HAS_URNS == true
@@ -1029,6 +1062,15 @@
     // around a narrower new box. Box height (11) and baseline offset (+7)
     // reuse draw_menu_list_disp()'s own row_h/baseline convention - the
     // same font at the same tightness, already proven to fit cleanly.
+    // Scaled 2x on T114 only - its panel's much higher pixel density
+    // (135x240 vs T096/WTRACKER_V2/T1's 80x160/160x80-class panels) made
+    // the plain 1x box look tiny relative to the rest of the UI. Every
+    // other board keeps the original 1x sizing.
+    #if BOARD_MODEL == BOARD_HELTEC_T114
+      #define MENU_STATUS_RECT_SCALE 2
+    #else
+      #define MENU_STATUS_RECT_SCALE 1
+    #endif
     void draw_menu_status_rect(const char *text) {
       #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1 || BOARD_MODEL == BOARD_HELTEC_T114
         // Only ever reached today via draw_button_hold_overlay() (menu
@@ -1040,17 +1082,21 @@
         // list-screen case only, not this overlay.
         menu_popup_canvas.setFont(SMALL_FONT);
         menu_popup_canvas.setTextWrap(false);
-        menu_popup_canvas.setTextSize(1);
+        // getTextBounds()/print() below both read the current text size,
+        // so this single setTextSize() call is what scales tw/th, the
+        // glyphs themselves, and (via pad_l/box_h below) the whole box -
+        // no separate "doubled" font asset needed.
+        menu_popup_canvas.setTextSize(MENU_STATUS_RECT_SCALE);
         menu_popup_canvas.setTextColor(SSD1306_WHITE);
 
         int16_t x1, y1; uint16_t tw, th;
         menu_popup_canvas.getTextBounds(text, 0, 0, &x1, &y1, &tw, &th);
 
-        const uint16_t pad_l = 3;
-        const uint16_t pad_r = 3;
+        const uint16_t pad_l = 3 * MENU_STATUS_RECT_SCALE;
+        const uint16_t pad_r = 3 * MENU_STATUS_RECT_SCALE;
         uint16_t box_w = tw + pad_l + pad_r;
         if (box_w > MENU_POPUP_CANVAS_W) box_w = MENU_POPUP_CANVAS_W;
-        const uint16_t box_h = 11;
+        const uint16_t box_h = 11 * MENU_STATUS_RECT_SCALE;
         // Centered over the full panel (not this narrower canvas) at
         // whatever orientation is currently active - unlike the menu
         // itself (always landscape, menu_canvas), this overlay only
@@ -1083,7 +1129,7 @@
 
         menu_popup_canvas.fillScreen(SSD1306_BLACK);
         menu_popup_canvas.drawRect(0, 0, box_w, box_h, SSD1306_WHITE);
-        menu_popup_canvas.setCursor(pad_l - x1, 7);
+        menu_popup_canvas.setCursor(pad_l - x1, 7 * MENU_STATUS_RECT_SCALE);
         menu_popup_canvas.print(text);
         push_menu_popup_canvas(panel_x, panel_y, box_w, box_h);
 
@@ -1610,6 +1656,12 @@
   #endif
   #if HAS_ENCODER == true
     bool staged_encoder_enabled = false;
+  #endif
+  #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
+    bool staged_bt_legacy_pairing_enabled = false;
+  #endif
+  #if HAS_BLUETOOTH == true || HAS_BLE == true
+    uint8_t bt_menu_cursor = 0;
   #endif
   #if HAS_WIFI == true
     uint8_t wifi_menu_cursor = 0;
@@ -2398,6 +2450,9 @@
     #if HAS_ENCODER == true
       staged_encoder_enabled = encoder_enabled;
     #endif
+    #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
+      staged_bt_legacy_pairing_enabled = bt_legacy_pairing_enabled;
+    #endif
     // display_rotation itself is only a local variable inside display_init(),
     // applied once at boot - not a persisted global - so read the actual
     // EEPROM value fresh here, same as WiFi SSID/PSK above.
@@ -2618,6 +2673,11 @@
     #if HAS_ENCODER == true
       if (staged_encoder_enabled != encoder_enabled) {
         enc_conf_save(staged_encoder_enabled);
+      }
+    #endif
+    #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
+      if (staged_bt_legacy_pairing_enabled != bt_legacy_pairing_enabled) {
+        bt_legacy_pairing_conf_save(staged_bt_legacy_pairing_enabled);
       }
     #endif
     #if HAS_WIFI == true
@@ -2903,6 +2963,21 @@
         buzzer_encoder_tick_melody();
         step_addr_octet(wifi_staged_addr_field(wifi_menu_cursor), wifi_addr_octet_idx, dir, wrap);
       }
+    #endif
+    #if HAS_BLUETOOTH == true || HAS_BLE == true
+      else if (menu_state == MENU_STATE_BT_LIST) {
+        buzzer_encoder_tick_melody();
+        bt_menu_cursor = menu_clamp_cursor(bt_menu_cursor, dir, BT_ITEM_COUNT, wrap);
+      }
+      #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
+        else if (menu_state == MENU_STATE_BT_EDIT) {
+          buzzer_encoder_tick_melody();
+          // Legacy Pairing is the only editable row in this submenu - MAC
+          // is read-only (see BT_ITEM_MAC's own comment), so this state is
+          // never entered with bt_menu_cursor pointing anywhere else.
+          staged_bt_legacy_pairing_enabled = !staged_bt_legacy_pairing_enabled;
+        }
+      #endif
     #endif
     #if HAS_ETHERNET == true
       else if (menu_state == MENU_STATE_ETH_LIST) {
@@ -3275,6 +3350,12 @@
           wifi_menu_cursor = 0;
         }
       #endif
+      #if HAS_BLUETOOTH == true || HAS_BLE == true
+        else if (menu_cursor == MENU_ITEM_BLUETOOTH) {
+          menu_state = MENU_STATE_BT_LIST;
+          bt_menu_cursor = 0;
+        }
+      #endif
       #if HAS_ETHERNET == true
         else if (menu_cursor == MENU_ITEM_ETHERNET) {
           menu_state = MENU_STATE_ETH_LIST;
@@ -3465,6 +3546,25 @@
         // DISCARD: leave staged_wifi_ssid/psk untouched.
         menu_state = MENU_STATE_WIFI_LIST;
       }
+    #endif
+    #if HAS_BLUETOOTH == true || HAS_BLE == true
+      else if (menu_state == MENU_STATE_BT_LIST) {
+        if (bt_menu_cursor == BT_ITEM_BACK) {
+          menu_state = MENU_STATE_LIST;
+        }
+        #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
+          else if (bt_menu_cursor == BT_ITEM_LEGACY_PAIRING) {
+            menu_state = MENU_STATE_BT_EDIT;
+          }
+        #endif
+        // MAC is read-only - same shape as ESP-NOW's Channel row, no edit
+        // state, selecting it does nothing.
+      }
+      #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
+        else if (menu_state == MENU_STATE_BT_EDIT) {
+          menu_state = MENU_STATE_BT_LIST; // confirms staged value, no write yet
+        }
+      #endif
     #endif
     #if HAS_ETHERNET == true
       else if (menu_state == MENU_STATE_ETH_LIST) {
@@ -5171,6 +5271,13 @@
         icon_widths[MENU_ITEM_WIFI] = MENU_ICON_W_WIFI;
       #endif
 
+      #if HAS_BLUETOOTH == true || HAS_BLE == true
+        labels[MENU_ITEM_BLUETOOTH] = "Bluetooth";
+        sprintf(valbufs[MENU_ITEM_BLUETOOTH], ">"); // opens a submenu, not an inline value
+        icons[MENU_ITEM_BLUETOOTH] = bm_menu_icon_bt_legacy_pairing;
+        icon_widths[MENU_ITEM_BLUETOOTH] = MENU_ICON_W_BT_LEGACY_PAIRING;
+      #endif
+
       #if HAS_ETHERNET == true
         labels[MENU_ITEM_ETHERNET] = "Ethernet";
         sprintf(valbufs[MENU_ITEM_ETHERNET], ">"); // opens a submenu, not an inline value
@@ -5329,6 +5436,48 @@
         const char *title = (text_edit_field == WIFI_ITEM_SSID) ? "SAVE SSID?" : "SAVE PSK?";
         draw_menu_list_disp(title, labels, valbufs, 2, text_confirm_cursor);
       }
+    #endif
+    #if HAS_BLUETOOTH == true || HAS_BLE == true
+      else if (menu_state == MENU_STATE_BT_LIST) {
+        const char *labels[BT_ITEM_COUNT];
+        char valbufs[BT_ITEM_COUNT][24];
+
+        #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
+          labels[BT_ITEM_LEGACY_PAIRING] = "Legacy Pairing";
+          sprintf(valbufs[BT_ITEM_LEGACY_PAIRING], staged_bt_legacy_pairing_enabled ? "ON" : "OFF");
+        #endif
+
+        labels[BT_ITEM_MAC] = "MAC";
+        #if MCU_VARIANT == MCU_ESP32
+          {
+            uint8_t mac[6];
+            esp_read_mac(mac, ESP_MAC_BT);
+            sprintf(valbufs[BT_ITEM_MAC], "%02X:%02X:%02X:%02X:%02X:%02X",
+              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+          }
+        #elif MCU_VARIANT == MCU_NRF52
+          // Same bt_ready gate as the Hardware page's own BT MAC row
+          // (HW_ITEM_BT_MAC) - see that row's own comment.
+          if (bt_ready) {
+            ble_gap_addr_t gap_addr = Bluefruit.getAddr();
+            sprintf(valbufs[BT_ITEM_MAC], "%02X:%02X:%02X:%02X:%02X:%02X",
+              gap_addr.addr[5], gap_addr.addr[4], gap_addr.addr[3],
+              gap_addr.addr[2], gap_addr.addr[1], gap_addr.addr[0]);
+          } else {
+            sprintf(valbufs[BT_ITEM_MAC], "N/A");
+          }
+        #endif
+
+        labels[BT_ITEM_BACK] = "BACK";
+        valbufs[BT_ITEM_BACK][0] = 0;
+
+        draw_menu_list_disp("BLUETOOTH", labels, valbufs, BT_ITEM_COUNT, bt_menu_cursor);
+      }
+      #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
+        else if (menu_state == MENU_STATE_BT_EDIT) {
+          draw_menu_edit_disp("LEGACY PAIRING", staged_bt_legacy_pairing_enabled ? "ON" : "OFF");
+        }
+      #endif
     #endif
     #if HAS_ETHERNET == true
       else if (menu_state == MENU_STATE_ETH_LIST) {

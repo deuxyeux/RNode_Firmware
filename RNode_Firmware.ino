@@ -2065,10 +2065,8 @@ void serial_callback(uint8_t sbyte) {
         last_snr_raw  = 0x80;
       }
     } else if (command == CMD_RADIO_STATE) {
-      if (bt_state != BT_STATE_CONNECTED) {
-        set_rns_link_state(RNS_LINK_STATE_CONNECTED);
-        display_unblank();
-      }
+      set_rns_link_state(RNS_LINK_STATE_CONNECTED);
+      display_unblank();
       #if HAS_ESPNOW == true
       if (selected_vport == 1) {
         if (sbyte != 0xFF) espnow_vport_cfg.radio_state = sbyte;
@@ -2161,7 +2159,7 @@ void serial_callback(uint8_t sbyte) {
       kiss_indicate_random(getRandom());
     } else if (command == CMD_DETECT) {
       if (sbyte == DETECT_REQ) {
-        if (bt_state != BT_STATE_CONNECTED) set_rns_link_state(RNS_LINK_STATE_CONNECTED);
+        set_rns_link_state(RNS_LINK_STATE_CONNECTED);
         kiss_indicate_detect();
       }
     #if HAS_ESPNOW == true
@@ -2527,6 +2525,13 @@ void serial_callback(uint8_t sbyte) {
             bt_enable_pairing();
           }
         }
+        #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
+          else if (sbyte == 0x03) {
+            bt_legacy_pairing_conf_save(false);
+          } else if (sbyte == 0x04) {
+            bt_legacy_pairing_conf_save(true);
+          }
+        #endif
       #endif
     } else if (command == CMD_BT_UNPAIR) {
       #if HAS_BLE
