@@ -999,6 +999,8 @@ void fillRect(int16_t x, int16_t y, int16_t width, int16_t height, uint16_t colo
     #define COLOR_BANNER_ALERT COLOR565(0xFF, 0xA0, 0x20)  // amber for warning banners
     #define COLOR_BT_ON COLOR565(0x28, 0x60, 0xC0)         // darker blue bluetooth box fill
     #define COLOR_INTERFERENCE COLOR565(0xE8, 0x50, 0xE8)  // magenta waterfall rows (WF_M_NTFR)
+    #define COLOR_GPS_NOFIX COLOR565(0xE8, 0xC0, 0x10)     // yellow GPS box fill - enabled, no fix yet
+    #define COLOR_GPS_FIX COLOR565(0x30, 0xC8, 0x40)       // green GPS box fill - has a valid fix
   #endif
   // Background tint of the currently displayed status banner, 0 = none
   uint16_t disp_banner_fg = 0;
@@ -1014,6 +1016,9 @@ void fillRect(int16_t x, int16_t y, int16_t width, int16_t height, uint16_t colo
   bool battery_volt_low_lit = false;
   bool bt_enabled_lit = false;
   uint8_t bt_icon_i = 0; // icon variant shown in the bluetooth box
+  // 0 = GPS box unlit (GNSS off), 1 = lit yellow (on, no fix), 2 = lit
+  // green (has a fix) - set in draw_gps_icon(), read by the colourizer
+  uint8_t gps_status_lit = 0;
   uint32_t lamp_rx_until = 0;
   uint32_t lamp_tx_until = 0;
   struct RegionCache {
@@ -1118,6 +1123,8 @@ void fillRect(int16_t x, int16_t y, int16_t width, int16_t height, uint16_t colo
     #define COLOR_BANNER_ALERT COLOR565(0xFF, 0xA0, 0x20)  // amber for warning banners
     #define COLOR_BT_ON COLOR565(0x28, 0x60, 0xC0)         // darker blue bluetooth box fill
     #define COLOR_INTERFERENCE COLOR565(0xE8, 0x50, 0xE8)  // magenta waterfall rows (WF_M_NTFR)
+    #define COLOR_GPS_NOFIX COLOR565(0xE8, 0xC0, 0x10)     // yellow GPS box fill - enabled, no fix yet
+    #define COLOR_GPS_FIX COLOR565(0x30, 0xC8, 0x40)       // green GPS box fill - has a valid fix
   #endif
   // RSSI/SNR gauges - a red-to-green filled bar with a 1px border and the
   // value centered inside in white, matching the style used by LoRaMon/
@@ -1194,6 +1201,9 @@ void fillRect(int16_t x, int16_t y, int16_t width, int16_t height, uint16_t colo
   bool battery_volt_low_lit = false;
   bool bt_enabled_lit = false;
   uint8_t bt_icon_i = 0; // icon variant shown in the bluetooth box
+  // 0 = GPS box unlit (GNSS off), 1 = lit yellow (on, no fix), 2 = lit
+  // green (has a fix) - set in draw_gps_icon(), read by the colourizer
+  uint8_t gps_status_lit = 0;
   uint32_t lamp_rx_until = 0;
   uint32_t lamp_tx_until = 0;
   struct RegionCache {
@@ -1259,8 +1269,15 @@ void fillRect(int16_t x, int16_t y, int16_t width, int16_t height, uint16_t colo
   // Small popup box canvas for draw_menu_status_rect()/
   // draw_button_hold_overlay(), kept within the region cache's cutoff so
   // it's deduped there like any other push - no separate shadow buffer.
-  #define MENU_POPUP_CANVAS_W 80
-  #define MENU_POPUP_CANVAS_H 16
+  // Sized for draw_menu_status_rect()'s 2x MENU_STATUS_RECT_SCALE (Menu.h,
+  // T114-exclusive) - the longest caption, "BT PAIRING" (10 chars, Org_01's
+  // fixed 6px advance), measures 59px at 1x/118px at 2x, +12px of 2x
+  // padding = 130px; 134/24 leaves a couple of spare pixels on each
+  // dimension. Still comfortably under T114_CACHE_MAX_W (135) above, so
+  // this box stays in drawBitmap()'s cacheable/deduped push path like any
+  // other T114 canvas.
+  #define MENU_POPUP_CANVAS_W 134
+  #define MENU_POPUP_CANVAS_H 24
   GFXcanvas1 menu_popup_canvas(MENU_POPUP_CANVAS_W, MENU_POPUP_CANVAS_H);
 #endif
 
@@ -1513,6 +1530,19 @@ void drawBitmap(int16_t startX, int16_t startY, const uint8_t* bitmap, int16_t b
                 else if (lamp_tx_lit && sx >= 21 && sx <= 36 && sy >= st_box_y2 && sy <= st_box_y2+15)  { fg = COLOR_LAMP_TX; }
                 else if (battery_low_lit && sx >= 2 && sx <= 19 && sy >= 123 && sy <= 129)       { fg = COLOR_BAT_LOW; }
                 else if (battery_volt_low_lit && sx >= 22 && sx <= 40 && sy >= 122 && sy <= 129)  { fg = COLOR_BAT_LOW; }
+                // GPS box: fill tints yellow/green, "GPS"/status text drawn in
+                // SSD1306_BLACK straight into stat_area (draw_gps_icon()) always
+                // renders as literal black (the push's backgroundColour) since
+                // only bit=1 (fill) pixels ever reach this branch - no bitmap
+                // introspection needed here, unlike bt_enabled_lit below.
+                // +16 (not +15, unlike the 16px-tall lamp/bt icons above) -
+                // draw_gps_icon()'s fill is 17 rows tall (bm_frame's border
+                // spacing quirk, see its own comment), so capping at +15
+                // left that 17th row uncoloured, a 1px white sliver right
+                // above the box's bottom border.
+                else if (gps_status_lit && sx >= 41 && sx <= 56 && sy >= st_box_y0 && sy <= st_box_y0+16) {
+                  fg = (gps_status_lit == 2) ? COLOR_GPS_FIX : COLOR_GPS_NOFIX;
+                }
                 else if (bt_enabled_lit && sx >= 1 && sx <= 16 && sy >= st_box_y1 && sy <= st_box_y1+15) {
                   uint8_t bt_c = sx-1; uint8_t bt_r = sy-st_box_y1;
                   if (!(bm_bt[bt_icon_i*32 + bt_r*2 + bt_c/8] & (0x80 >> (bt_c%8)))) { fg = COLOR_BT_ON; }
@@ -1791,15 +1821,27 @@ void draw_mw_icon(int px, int py, Adafruit_GFX &gfx = stat_area) {
 }
 
 #if HAS_GPS == true
-// Plain on/off indicator for gnss_enabled (GNSS.h) - not a fix/data
-// readout (T114's own alternating GNSS info page, draw_disp_area()'s
-// BOARD_HELTEC_T114 branch, already covers that in detail) - just whether
-// the receiver is currently switched on, same semantic level as
-// draw_lora_icon()/draw_mw_icon() above (radio_online/mw_radio_online -
-// "is this subsystem active", not link/fix detail). Text label instead of
-// new bitmap art, same shortcut draw_espnow_icon() below already takes.
+// Two-line status indicator for GNSS: "GPS" always on top, "OFF"/"ACQ"/
+// "RDY" underneath depending on gnss_enabled/gnss_has_fix() (GNSS.h) - not
+// the detailed fix/data readout (T114's own alternating GNSS info page,
+// draw_disp_area()'s BOARD_HELTEC_T114 branch, already covers that), just
+// enough at-a-glance state to tell "off" from "on but no lock yet" from
+// "locked". Text label instead of new bitmap art, same shortcut
+// draw_espnow_icon() below already takes for its own two-line box - same
+// py+7/py+14 baselines, same 7px font line-advance (Fonts/PicoPixel.h).
 void draw_gps_icon(int px, int py, Adafruit_GFX &gfx = stat_area) {
   bool active = gnss_enabled;
+  bool fix = active && gnss_has_fix();
+
+  // gps_status_lit only exists on boards that declare it (T096-family/
+  // T114 globals block above) - every other HAS_GPS board (MeshAdventurer-
+  // S3/MeshAdventurer/TBEAM_1W/Heltec32_v4) still compiles this function
+  // (HAS_GPS-gated, not board-gated) but never calls it, so this must stay
+  // guarded rather than referencing an undeclared global there.
+  #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1 || BOARD_MODEL == BOARD_HELTEC_T114
+    gps_status_lit = !active ? 0 : (fix ? 2 : 1);
+  #endif
+
   // 17px-tall fill (not 16), same as draw_espnow_icon()/draw_eth_icon()
   // below - bm_frame's border lines sit one row further apart than the
   // 16px icon grid, so a 16px fill leaves the bottom interior row
@@ -1810,11 +1852,21 @@ void draw_gps_icon(int px, int py, Adafruit_GFX &gfx = stat_area) {
   gfx.setTextWrap(false);
   gfx.setTextColor(active ? SSD1306_BLACK : SSD1306_WHITE);
 
-  const char *buf = "GPS";
+  const char *top_buf = "GPS";
   int16_t tx1, ty1; uint16_t tw, th;
-  gfx.getTextBounds(buf, 0, 0, &tx1, &ty1, &tw, &th);
-  gfx.setCursor(px + (16 - (int16_t)tw) / 2, py + 11);
-  gfx.print(buf);
+  gfx.getTextBounds(top_buf, 0, 0, &tx1, &ty1, &tw, &th);
+  gfx.setCursor(px + (16 - (int16_t)tw) / 2, py + 7);
+  gfx.print(top_buf);
+
+  // "NO FIX"/"NOFIX" both ran wider than the 16px box and looked cramped
+  // against the box edges on real hardware (20px/18px at PicoPixel's
+  // advance widths). "ACQ" ("acquiring") and "RDY" ("ready"/fix locked)
+  // both measure 11px, fitting with real margin to spare.
+  const char *bot_buf = !active ? "OFF" : (fix ? "RDY" : "ACQ");
+  int16_t bx1, by1; uint16_t bw, bh;
+  gfx.getTextBounds(bot_buf, 0, 0, &bx1, &by1, &bw, &bh);
+  gfx.setCursor(px + (16 - (int16_t)bw) / 2, py + 14);
+  gfx.print(bot_buf);
 }
 #endif
 
