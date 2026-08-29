@@ -53,6 +53,22 @@ uint8_t dev_bt_mac[BT_DEV_ADDR_LEN];
 char bt_da[BT_DEV_ADDR_LEN];
 
 #if MCU_VARIANT == MCU_ESP32
+  // bt_connection_callback()/bt_connect_callback() (below, classic SPP and
+  // NimBLE respectively) used to call set_rns_link_state() directly, from
+  // their own stack's callback context - Bluedroid's BTC task for SPP,
+  // NimBLE's single host task (BLEDevice::host_task -> nimble_port_run(),
+  // see bt_pending_pairing_disconnect's own comment below) for BLE -
+  // neither of which is loopTask. nRF52's Bluefruit side hit a real,
+  // confirmed crash from this identical pattern (see
+  // bt_pending_rns_link_state's own comment, MCU_NRF52 branch below -
+  // "intermittently wedged the whole node... a full lockup") and was fixed
+  // by deferring through a flag instead of calling straight from the
+  // callback. ESP32 was never observed to crash from this, but the hazard
+  // shape is the same - deferred here too rather than waiting for a first
+  // report. Sentinel -1 means "nothing pending" (a real RNS_LINK_STATE_*
+  // value is always >= 0).
+  volatile int8_t bt_pending_rns_link_state = -1;
+
   #if HAS_BLUETOOTH == true
 
     // How long the passkey has to stay on screen before it's auto-accepted
@@ -136,7 +152,9 @@ char bt_da[BT_DEV_ADDR_LEN];
       display_unblank();
       if(event == ESP_SPP_SRV_OPEN_EVT) {
         bt_state = BT_STATE_CONNECTED;
-        set_rns_link_state(RNS_LINK_STATE_DISCONNECTED);
+        // See bt_pending_rns_link_state's own comment (above) for why this
+        // is deferred instead of a direct call.
+        bt_pending_rns_link_state = RNS_LINK_STATE_DISCONNECTED;
       }
        
       if(event == ESP_SPP_CLOSE_EVT ){
@@ -182,6 +200,12 @@ char bt_da[BT_DEV_ADDR_LEN];
     }
 
     void update_bt() {
+      // See bt_pending_rns_link_state's own comment (above) for why this is
+      // applied here instead of directly from bt_connection_callback().
+      if (bt_pending_rns_link_state != -1) {
+        set_rns_link_state((uint8_t)bt_pending_rns_link_state);
+        bt_pending_rns_link_state = -1;
+      }
       if (bt_confirm_pending && millis()-bt_confirm_pending_since >= BT_CONFIRM_DISPLAY_MS) {
         bt_confirm_pending = false;
         // bt_allow_pairing may have gone false since the request came in
@@ -491,7 +515,10 @@ char bt_da[BT_DEV_ADDR_LEN];
       display_unblank();
       ble_authenticated = false;
       if (bt_state != BT_STATE_PAIRING) { bt_state = BT_STATE_CONNECTED; }
-      set_rns_link_state(RNS_LINK_STATE_DISCONNECTED);
+      // See bt_pending_rns_link_state's own comment (above) for why this is
+      // deferred instead of a direct call - this callback runs on NimBLE's
+      // own host task, not loopTask.
+      bt_pending_rns_link_state = RNS_LINK_STATE_DISCONNECTED;
     }
 
     void bt_disconnect_callback(BLEServer *server) {
@@ -541,6 +568,12 @@ char bt_da[BT_DEV_ADDR_LEN];
     }
 
     void update_bt() {
+      // See bt_pending_rns_link_state's own comment (above) for why this is
+      // applied here instead of directly from bt_connect_callback().
+      if (bt_pending_rns_link_state != -1) {
+        set_rns_link_state((uint8_t)bt_pending_rns_link_state);
+        bt_pending_rns_link_state = -1;
+      }
       if (bt_pending_pairing_disconnect && (int32_t)(millis()-bt_pairing_disconnect_at) >= 0) {
         bt_pending_pairing_disconnect = false;
         SerialBT.disconnect();
@@ -577,17 +610,31 @@ char bt_da[BT_DEV_ADDR_LEN];
   // Security/Periph callbacks - the Adafruit nRF52 core dispatches these
   // from its own SoftDevice event-handling task, not from loop()'s task.
   // They used to call set_rns_link_state() directly, which (since the RNS
-  // link-state chirps were added) does non-reentrant work - tone()/
-  // noTone() on the shared PWM peripheral plus several buzzer_async_*
-  // globals (Utilities.h) - that loop()'s own buzzer_update() polls and
-  // mutates every iteration with no locking, since it was always written
-  // assuming a single caller task. Racing loop() for that hardware/state
-  // from a second task intermittently wedged the whole node (observed as
-  // a full lockup, not just BLE misbehaving, once a BLE central actually
+  // link-state chirps were added) did non-reentrant work - tone()/noTone()
+  // on the shared PWM peripheral plus several buzzer_async_* globals
+  // (Utilities.h) that loop()'s own buzzer_update() polled and mutated
+  // every iteration with no locking, since it was always written assuming
+  // a single caller task. Racing loop() for that hardware/state from a
+  // second task intermittently wedged the whole node (observed as a full
+  // lockup, not just BLE misbehaving, once a BLE central actually
   // connected/paired and this path started firing) - deferred through
   // this flag instead, so the actual set_rns_link_state() call happens
   // from update_bt(), polled from loop() like everything else that
   // touches shared firmware state.
+  //
+  // The buzzer itself no longer has this hazard - it's now its own
+  // FreeRTOS task with a queue any caller can post to safely (Utilities.h,
+  // buzzer_request_melody()), and set_rns_link_state() (Utilities.h) does
+  // nothing else besides that chirp and a plain rns_link_state assignment
+  // - so calling it straight from this callback would be safe again now.
+  // Left deferred through this flag anyway rather than removed: fully
+  // removing it (going back to a direct call) is a separate, untested
+  // simplification, not this one's job. The ESP32 side has the identical
+  // pattern, in both its Bluetooth stack variants (classic SPP's
+  // bt_connection_callback(), NimBLE's bt_connect_callback()) - see its
+  // own bt_pending_rns_link_state (MCU_ESP32 branch, above) for the
+  // matching fix, added once this nRF52 history made the hazard shape
+  // obvious there too, even though it had never been observed to crash.
   volatile int8_t bt_pending_rns_link_state = -1;
 
   uint8_t eeprom_read(uint32_t mapped_addr);
@@ -829,8 +876,7 @@ char bt_da[BT_DEV_ADDR_LEN];
 
   void update_bt() {
     // Apply any RNS link-state transition a BLE callback deferred (see
-    // bt_pending_rns_link_state's own comment above) - safe here, loop()'s
-    // own task, same one buzzer_update() runs on.
+    // bt_pending_rns_link_state's own comment above).
     if (bt_pending_rns_link_state != -1) {
       set_rns_link_state((uint8_t)bt_pending_rns_link_state);
       bt_pending_rns_link_state = -1;

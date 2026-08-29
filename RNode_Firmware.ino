@@ -66,7 +66,6 @@
     CP_LED_STANDBY,
     CP_SERIAL_BUFFER_POLL,
     CP_DISPLAY_UPDATE,
-    CP_BUZZER_UPDATE,
     CP_PMU_UPDATE,
     CP_VSENSE_UPDATE,
     CP_BT_UPDATE,
@@ -125,7 +124,6 @@
       case CP_LED_STANDBY:           return "led_indicate_standby()/npset()";
       case CP_SERIAL_BUFFER_POLL:    return "buffer_serial()/serial_poll()";
       case CP_DISPLAY_UPDATE:        return "update_display()";
-      case CP_BUZZER_UPDATE:         return "buzzer_update()";
       case CP_PMU_UPDATE:            return "update_pmu()";
       case CP_VSENSE_UPDATE:         return "update_vsense()";
       case CP_BT_UPDATE:             return "update_bt()";
@@ -3209,11 +3207,6 @@ void loop() {
 
   #if HAS_DISPLAY
     if (disp_ready && !display_updating) { CP(CP_DISPLAY_UPDATE); update_display(); }
-  #endif
-
-  #if HAS_BUZZER == true
-    CP(CP_BUZZER_UPDATE);
-    buzzer_update();
   #endif
 
   #if HAS_PMU || IS_ESP32S3

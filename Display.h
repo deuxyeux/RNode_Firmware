@@ -1763,6 +1763,15 @@ void draw_lora_icon(int px, int py, Adafruit_GFX &gfx = stat_area) {
       return;
     }
   #endif
+  // bm_rf is only 16 rows tall, one short of the box's full 17-row
+  // interior height that bm_envelope (above) fills - see draw_gps_icon()'s
+  // own comment for why the interior is 17, not 16. Without this, the
+  // 17th row never gets touched by this branch at all, so once the
+  // envelope stops blinking (message read) whatever it last painted
+  // there - both of its frames end in a solid line, by design, see
+  // bm_envelope's own comment (Graphics.h) - stays stuck permanently,
+  // showing as a stray line at the bottom of the box.
+  gfx.fillRect(px, py, 16, 17, SSD1306_BLACK);
   if (radio_online) {
     gfx.drawBitmap(px, py, bm_rf+1*32, 16, 16, SSD1306_WHITE, SSD1306_BLACK);
   } else {

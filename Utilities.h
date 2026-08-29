@@ -574,6 +574,168 @@ uint8_t boot_vector = 0x00;
 #endif
 
 #if HAS_BUZZER == true
+  // Avoid tone()'s duration overload: its internal auto-stop timer can
+  // race with the noTone() call at the end of each note in a tight loop
+  // and crash the LEDC driver, so time each note manually instead.
+  void buzzer_play_notes(const uint16_t *notes, uint8_t count, uint16_t note_ms) {
+    if (!sound_enabled) return;
+    for (uint8_t i = 0; i < count; i++) {
+      tone(buzzer_pin, notes[i]);
+      delay(note_ms);
+      noTone(buzzer_pin);
+      // noTone() only queues a TONE_END message for Tone.cpp's own async
+      // tone_task (ESP32 Arduino core, a separate higher-priority
+      // FreeRTOS task) to process - the actual ledcDetach() doesn't run
+      // synchronously here. Touching the pin ourselves before that
+      // finishes used to race it: pinMode() calling its own
+      // perimanClearPinBus() while the tone_task's detach was still in
+      // flight could both end up calling LEDC's detach callback on the
+      // same heap-allocated channel handle, double-freeing it (confirmed
+      // real crash: heap poisoning "head != NULL", multi_heap_free ->
+      // ledcDetachBus -> free()). A couple of ms here is enough for that
+      // higher-priority task to actually finish first, which is what
+      // makes the pinMode() below safe again.
+      delay(2);
+      // pinMode() (not just digitalWrite()) is required, not optional -
+      // once LEDC releases the pin, the peripheral manager no longer
+      // considers it a GPIO at all, and __digitalWrite() (esp32-hal-
+      // gpio.c) silently no-ops instead of driving the pin when that's
+      // true. Dropping this call for the log-spam workaround it looked
+      // like it was fixing didn't just mask a warning - it meant the LOW
+      // below was silently never actually landing.
+      pinMode(buzzer_pin, OUTPUT);
+      digitalWrite(buzzer_pin, LOW); // see buzzer_init()
+      delay(8);
+    }
+  }
+
+  // Simple ascending startup jingle, played once while the boot banner is
+  // shown. Called right after buzzer_init() during setup() (RNode_Firmware.
+  // ino), before loop() starts - the melody task buzzer_init() just created
+  // is already running by this point, but stays idle-blocked on
+  // xQueueReceive(portMAX_DELAY) with nothing queued, so it doesn't touch
+  // the pin while this blocking player runs. Blocking here is fine either
+  // way - nothing else is competing for CPU time yet.
+  void buzzer_boot_melody() {
+    const uint16_t notes[] = { 1319, 1568, 1976, 2637 };
+    buzzer_play_notes(notes, sizeof(notes)/sizeof(notes[0]), 80);
+  }
+
+  // Melody player for cues triggered from hot paths (button handling,
+  // serial_callback(), the LXMF delivery callback). Used to be a
+  // loop()-polled state machine (buzzer_update(), called once per
+  // loop() iteration) - but loop() itself blocks synchronously for real
+  // stretches of time in more than one place (the radio TX-done poll in
+  // sx126x::endPacket(), and flash/LittleFS persistence in
+  // urns_lxmf_loop()), and whichever note was mid-flight when that
+  // happened just kept sounding in hardware for the whole block, since
+  // noTone() only ever got called from the starved buzzer_update(). Now
+  // runs as its own dedicated FreeRTOS task with its own timing
+  // (xQueueReceive's own timeout), independent of whether loop() ever
+  // gets a turn - the actual fix, not a race against where in loop() a
+  // blocking call happens to land.
+  //
+  // Every buzzer_*_melody() wrapper below just posts a request onto a
+  // length-1 "mailbox" queue (xQueueOverwrite - never blocks, never
+  // fails, and a new request replacing an unstarted one matches this
+  // subsystem's original behavior exactly, which always let a new melody
+  // clobber whatever was playing). The task is the *only* code that ever
+  // touches melody-playback state - no globals shared/polled across
+  // tasks, unlike the old buzzer_async_* fields.
+  enum class BuzzerMelodyId : uint8_t {
+    BT_ON, BT_OFF, RNS_CONNECT, RNS_DISCONNECT,
+    ENCODER_TICK, ENCODER_CLICK, LXMF_RX
+  };
+
+  struct BuzzerMelodyDef {
+    const uint16_t *notes;
+    uint8_t count;
+    uint16_t note_ms;
+  };
+
+  const uint16_t BUZZER_ASYNC_GAP_MS = 10;
+  // Same underlying LEDC async-detach race buzzer_play_notes() works
+  // around with delay(2) - see that function's own comment. The task can
+  // genuinely block here (unlike the old loop()-polled version, which had
+  // to split this into a buzzer_async_pin_settling flag it checked next
+  // tick instead), so this is now just a plain sequential vTaskDelay().
+  const uint16_t BUZZER_ASYNC_SETTLE_MS = 2;
+
+  QueueHandle_t g_buzzer_melody_queue = NULL;
+  // Written only by buzzer_task(), read only by buzzer_wait_for_melody()
+  // (called from loopTask, Messenger.h) - single-writer/single-reader,
+  // same pattern already used safely for bt_pending_rns_link_state
+  // (Bluetooth.h).
+  volatile bool g_buzzer_task_playing = false;
+
+  void buzzer_task(void *pvParameters) {
+    static const uint16_t notes_bt_on[]         = { 1568, 1175 };
+    static const uint16_t notes_bt_off[]        = { 1568, 2093 };
+    static const uint16_t notes_rns_connect[]   = { 1976, 2637 };
+    static const uint16_t notes_rns_disconnect[] = { 1319, 988 };
+    static const uint16_t notes_encoder_tick[]  = { 500 };
+    static const uint16_t notes_encoder_click[] = { 1200 };
+    // Three-note alert for an inbound Messenger LXMF message (Messenger.h)
+    // - deliberately distinct from every other cue here so it reads as
+    // "look at the screen now", matching the app's emergency-messenger
+    // purpose.
+    static const uint16_t notes_lxmf_rx[]       = { 1568, 1976, 2093 };
+
+    const BuzzerMelodyDef melodies[] = {
+      /* BT_ON          */ { notes_bt_on,          2, 60 },
+      /* BT_OFF         */ { notes_bt_off,         2, 60 },
+      /* RNS_CONNECT    */ { notes_rns_connect,    2, 45 },
+      /* RNS_DISCONNECT */ { notes_rns_disconnect, 2, 45 },
+      /* ENCODER_TICK   */ { notes_encoder_tick,   1, 12 },
+      /* ENCODER_CLICK  */ { notes_encoder_click,  1, 12 },
+      /* LXMF_RX         */ { notes_lxmf_rx,        3, 55 },
+    };
+
+    const BuzzerMelodyDef *active = NULL;
+    uint8_t index = 0;
+    bool in_gap = false;
+
+    for (;;) {
+      BuzzerMelodyId id;
+      TickType_t wait = active ? pdMS_TO_TICKS(in_gap ? BUZZER_ASYNC_GAP_MS : active->note_ms) : portMAX_DELAY;
+      if (xQueueReceive(g_buzzer_melody_queue, &id, wait) == pdTRUE) {
+        // New (or overriding) request - start its first note immediately,
+        // clobbering whatever was mid-flight, matching the old
+        // buzzer_start_async_melody()'s unconditional-overwrite behavior.
+        active = &melodies[(uint8_t)id];
+        index = 0;
+        in_gap = false;
+        tone(buzzer_pin, active->notes[0]);
+        g_buzzer_task_playing = true;
+      } else if (active) {
+        // Timed out - the current note or gap boundary was reached.
+        if (!in_gap) {
+          noTone(buzzer_pin);
+          #if MCU_VARIANT == MCU_ESP32
+            vTaskDelay(pdMS_TO_TICKS(BUZZER_ASYNC_SETTLE_MS));
+          #endif
+          pinMode(buzzer_pin, OUTPUT);
+          digitalWrite(buzzer_pin, LOW);
+          in_gap = true;
+        } else {
+          index++;
+          if (index >= active->count) {
+            active = NULL;
+            g_buzzer_task_playing = false;
+          } else {
+            tone(buzzer_pin, active->notes[index]);
+            in_gap = false;
+          }
+        }
+      }
+    }
+  }
+
+  void buzzer_request_melody(BuzzerMelodyId id) {
+    if (!sound_enabled || !g_buzzer_melody_queue) return;
+    xQueueOverwrite(g_buzzer_melody_queue, &id);
+  }
+
   // buzzer_pin itself is declared earlier in this file - see the comment
   // there.
   void buzzer_init() {
@@ -623,194 +785,61 @@ uint8_t boot_vector = 0x00;
       digitalWrite(PIN_T1_BUZZER_MULT1, HIGH);
       digitalWrite(PIN_T1_BUZZER_MULT2, HIGH);
     #endif
-  }
 
-  // Avoid tone()'s duration overload: its internal auto-stop timer can
-  // race with the noTone() call at the end of each note in a tight loop
-  // and crash the LEDC driver, so time each note manually instead.
-  void buzzer_play_notes(const uint16_t *notes, uint8_t count, uint16_t note_ms) {
-    if (!sound_enabled) return;
-    for (uint8_t i = 0; i < count; i++) {
-      tone(buzzer_pin, notes[i]);
-      delay(note_ms);
-      noTone(buzzer_pin);
-      // noTone() only queues a TONE_END message for Tone.cpp's own async
-      // tone_task (ESP32 Arduino core, a separate higher-priority
-      // FreeRTOS task) to process - the actual ledcDetach() doesn't run
-      // synchronously here. Touching the pin ourselves before that
-      // finishes used to race it: pinMode() calling its own
-      // perimanClearPinBus() while the tone_task's detach was still in
-      // flight could both end up calling LEDC's detach callback on the
-      // same heap-allocated channel handle, double-freeing it (confirmed
-      // real crash: heap poisoning "head != NULL", multi_heap_free ->
-      // ledcDetachBus -> free()). A couple of ms here is enough for that
-      // higher-priority task to actually finish first, which is what
-      // makes the pinMode() below safe again.
-      delay(2);
-      // pinMode() (not just digitalWrite()) is required, not optional -
-      // once LEDC releases the pin, the peripheral manager no longer
-      // considers it a GPIO at all, and __digitalWrite() (esp32-hal-
-      // gpio.c) silently no-ops instead of driving the pin when that's
-      // true. Dropping this call for the log-spam workaround it looked
-      // like it was fixing didn't just mask a warning - it meant the LOW
-      // below was silently never actually landing.
-      pinMode(buzzer_pin, OUTPUT);
-      digitalWrite(buzzer_pin, LOW); // see buzzer_init()
-      delay(8);
-    }
-  }
-
-  // Simple ascending startup jingle, played once while the boot banner is
-  // shown. Runs during setup(), before loop() starts, so blocking is fine
-  // here - nothing else is competing for CPU time yet.
-  void buzzer_boot_melody() {
-    const uint16_t notes[] = { 1319, 1568, 1976, 2637 };
-    buzzer_play_notes(notes, sizeof(notes)/sizeof(notes[0]), 80);
-  }
-
-  // Non-blocking melody player for cues triggered from hot paths (button
-  // handling, serial_callback()). Blocking here would stall packet queue
-  // processing and display updates for the duration of the melody, which
-  // was observed to disrupt the waterfall right as an RNS host attaches.
-  // buzzer_update() must be called every loop() iteration to advance it.
-  const uint16_t *buzzer_async_notes = NULL;
-  uint8_t buzzer_async_count = 0;
-  uint8_t buzzer_async_index = 0;
-  uint16_t buzzer_async_note_ms = 0;
-  bool buzzer_async_in_gap = false;
-  bool buzzer_async_playing = false;
-  unsigned long buzzer_async_phase_started = 0;
-  const uint16_t BUZZER_ASYNC_GAP_MS = 10;
-
-  // Set when noTone() has been called but the pin hasn't been reclaimed as
-  // GPIO yet - see buzzer_update()'s own use, and buzzer_play_notes()'s
-  // comment (same underlying race, blocking delay() there instead since
-  // that path isn't in a hot loop).
-  bool buzzer_async_pin_settling = false;
-  unsigned long buzzer_async_notone_at = 0;
-  const uint16_t BUZZER_ASYNC_SETTLE_MS = 2;
-
-  void buzzer_start_async_melody(const uint16_t *notes, uint8_t count, uint16_t note_ms) {
-    if (!sound_enabled) return;
-    buzzer_async_notes = notes;
-    buzzer_async_count = count;
-    buzzer_async_note_ms = note_ms;
-    buzzer_async_index = 0;
-    buzzer_async_in_gap = false;
-    buzzer_async_playing = true;
-    buzzer_async_pin_settling = false;
-    tone(buzzer_pin, notes[0]);
-    buzzer_async_phase_started = millis();
-  }
-
-  void buzzer_update() {
-    unsigned long now = millis();
-    // Non-blocking equivalent of buzzer_play_notes()'s delay(2) - the
-    // async tone_task (ESP32 Arduino core) needs a couple of ms after
-    // noTone() to actually finish detaching the pin from LEDC before
-    // pinMode()/digitalWrite() are safe to call (see that function's own
-    // comment for what races if this isn't respected). Checked before the
-    // early-return below so it still gets a chance to fire on the tick a
-    // melody's last note ends and buzzer_async_playing has already gone
-    // false.
-    if (buzzer_async_pin_settling && now - buzzer_async_notone_at >= BUZZER_ASYNC_SETTLE_MS) {
-      pinMode(buzzer_pin, OUTPUT);
-      digitalWrite(buzzer_pin, LOW);
-      buzzer_async_pin_settling = false;
-    }
-    if (!buzzer_async_playing) return;
-    if (!buzzer_async_in_gap) {
-      if (now - buzzer_async_phase_started >= buzzer_async_note_ms) {
-        noTone(buzzer_pin);
-        buzzer_async_pin_settling = true;
-        buzzer_async_notone_at = now;
-        buzzer_async_in_gap = true;
-        buzzer_async_phase_started = now;
-      }
-    } else if (now - buzzer_async_phase_started >= BUZZER_ASYNC_GAP_MS) {
-      buzzer_async_index++;
-      if (buzzer_async_index >= buzzer_async_count) {
-        buzzer_async_playing = false;
-      } else {
-        tone(buzzer_pin, buzzer_async_notes[buzzer_async_index]);
-        buzzer_async_in_gap = false;
-        buzzer_async_phase_started = now;
-      }
-    }
+    // Queue+task created last, after every pin/hardware quirk above is
+    // settled - the task immediately blocks on xQueueReceive(portMAX_DELAY)
+    // and touches nothing until the first real request arrives, so this
+    // can't race buzzer_boot_melody() (called right after this returns,
+    // still fully blocking/synchronous - see its own comment).
+    g_buzzer_melody_queue = xQueueCreate(1, sizeof(BuzzerMelodyId));
+    // Stack: buzzer_task()'s own call depth is trivial (tone()/noTone()/
+    // vTaskDelay()/xQueueReceive() - shallow leaf calls, nothing like the
+    // multi-frame dive into WebSockets/lwIP that undersized kiss_tx_task's
+    // old 2048B stack) - 3072 is a comfortable margin, not a tight fit.
+    // Priority: loopTask's own priority + 1 (1 on both ESP32 and nRF52),
+    // so this can preempt a loopTask stuck in a blocking call - still well
+    // under ESP32's own tone()/noTone() async worker (priority 10) and
+    // nRF52's Bluefruit task (priority 3).
+    #if MCU_VARIANT == MCU_ESP32
+      // Pinned to core 0, matching the codebase's one other live
+      // xTaskCreatePinnedToCore precedent (LXStamper.cpp's stamp_worker_
+      // task) - leaves core 1 (loopTask, radio/SPI work) undisturbed.
+      xTaskCreatePinnedToCore(buzzer_task, "buzzer", 3072, NULL, 2, NULL, 0);
+    #elif MCU_VARIANT == MCU_NRF52
+      xTaskCreate(buzzer_task, "buzzer", 3072, NULL, TASK_PRIO_NORMAL, NULL);
+    #endif
   }
 
   // Short two-note cues for Bluetooth toggling via the user button.
-  void buzzer_bt_on_melody() {
-    static const uint16_t notes[] = { 1568, 1175 };
-    buzzer_start_async_melody(notes, sizeof(notes)/sizeof(notes[0]), 60);
-  }
-
-  void buzzer_bt_off_melody() {
-    static const uint16_t notes[] = { 1568, 2093 };
-    buzzer_start_async_melody(notes, sizeof(notes)/sizeof(notes[0]), 60);
-  }
+  void buzzer_bt_on_melody()  { buzzer_request_melody(BuzzerMelodyId::BT_ON); }
+  void buzzer_bt_off_melody() { buzzer_request_melody(BuzzerMelodyId::BT_OFF); }
 
   // Short chirps for the RNS host (rns_link_state) attaching to / leaving the KISS interface.
-  void buzzer_rns_connect_melody() {
-    static const uint16_t notes[] = { 1976, 2637 };
-    buzzer_start_async_melody(notes, sizeof(notes)/sizeof(notes[0]), 45);
-  }
-
-  void buzzer_rns_disconnect_melody() {
-    static const uint16_t notes[] = { 1319, 988 };
-    buzzer_start_async_melody(notes, sizeof(notes)/sizeof(notes[0]), 45);
-  }
+  void buzzer_rns_connect_melody()    { buzzer_request_melody(BuzzerMelodyId::RNS_CONNECT); }
+  void buzzer_rns_disconnect_melody() { buzzer_request_melody(BuzzerMelodyId::RNS_DISCONNECT); }
 
   // Single-note, very short ticks for encoder feedback - deliberately
   // shorter than the other cues so rapid rotation doesn't get annoying.
-  void buzzer_encoder_tick_melody() {
-    static const uint16_t notes[] = { 500 };
-    buzzer_start_async_melody(notes, 1, 12);
-  }
+  void buzzer_encoder_tick_melody()  { buzzer_request_melody(BuzzerMelodyId::ENCODER_TICK); }
+  void buzzer_encoder_click_melody() { buzzer_request_melody(BuzzerMelodyId::ENCODER_CLICK); }
 
-  void buzzer_encoder_click_melody() {
-    static const uint16_t notes[] = { 1200 };
-    buzzer_start_async_melody(notes, 1, 12);
-  }
-
-  // Three-note alert for an inbound Messenger LXMF message (Messenger.h) -
-  // deliberately distinct from every other cue here so it reads as "look
-  // at the screen now", matching the app's emergency-messenger purpose.
-  // Was 4 notes at 90ms (2 distinct tones, repeated once); shortened to 3
-  // *different* tones at ~55ms each (~185ms total, same ballpark as the
-  // old melody's first half) because the delivery proof this firmware
-  // auto-sends back on receipt starts transmitting - and blocks the main
-  // loop, freezing whatever note is mid-flight - shortly after this
-  // starts playing. With the old repeated-pair shape, a mid-melody split
-  // was audible as "the same two-note phrase, twice" rather than one
-  // interrupted chirp; three non-repeating notes can't produce that
-  // illusion even if a split still happens, and finishing sooner makes a
-  // split less likely to begin with.
-  void buzzer_lxmf_rx_melody() {
-    static const uint16_t notes[] = { 1568, 1976, 2093 };
-    buzzer_start_async_melody(notes, sizeof(notes)/sizeof(notes[0]), 55);
-  }
+  void buzzer_lxmf_rx_melody() { buzzer_request_melody(BuzzerMelodyId::LXMF_RX); }
 
   // Lets whichever melody the encoder/button confirm-click already
   // started (menu_encoder_button()/menu_button_press(), Menu.h - fires
   // unconditionally on every confirm, before the specific action itself
   // runs) finish naturally before a caller goes on to do something
-  // blocking of its own (a LoRa TX, a flash read) - without this, the
-  // click gets audibly frozen mid-note for however long that blocking
-  // call takes, same "loop() not spinning means buzzer_update() never
-  // gets polled" mechanism as the TX-vs-buzzer issue this firmware has
-  // already run into elsewhere. Bounded and short - the confirm click is
-  // only a couple of ~12ms ticks (buzzer_encoder_click_melody()) - not
-  // the kind of open-ended hot-path delay() this codebase otherwise
-  // avoids (see feedback_no_blocking_delay_in_hot_paths memory); this
-  // only ever runs once, right as a deliberate user action is confirmed,
-  // not from a continuously-polled path.
+  // blocking of its own (a LoRa TX, a flash read). Bounded with a max
+  // wait since this now depends on the buzzer task's own health rather
+  // than driving the state to completion itself - the confirm click is
+  // only a couple of ~12ms ticks (buzzer_encoder_click_melody()), so
+  // 500ms is generous headroom, not a real-world limit.
   void buzzer_wait_for_melody() {
-    while (buzzer_async_playing) { buzzer_update(); delay(1); }
+    unsigned long start = millis();
+    while (g_buzzer_task_playing && millis() - start < 500) { delay(1); }
   }
 #else
   void buzzer_init() { }
-  void buzzer_update() { }
   void buzzer_bt_on_melody() { }
   void buzzer_bt_off_melody() { }
   void buzzer_boot_melody() { }
