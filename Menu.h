@@ -224,8 +224,9 @@
     #define MENU_STATE_GNSS_DIAG      49 // verbose GNSS diagnostics summary - opened from MENU_STATE_GNSS_LIST's Diagnostics row
     #define MENU_STATE_GNSS_DIAG_SATS 50 // satellites-in-view list (PRN/El/Az/SNR, from GPGSV) - opened from MENU_STATE_GNSS_DIAG's Sats In View row
   #endif
-  #define MENU_STATE_BT_LIST 51 // Bluetooth submenu list (HAS_BLUETOOTH/HAS_BLE boards) - Legacy Pairing (MCU_ESP32 && HAS_BLE only)/MAC/Back
+  #define MENU_STATE_BT_LIST 51 // Bluetooth submenu list (HAS_BLUETOOTH/HAS_BLE boards) - Legacy Pairing (MCU_ESP32 && HAS_BLE only)/MAC/Bonds (MCU_ESP32 only)/Forget Bonds (MCU_ESP32 only)/Back
   #define MENU_STATE_BT_EDIT 52 // editing the Legacy Pairing field (MCU_ESP32 && HAS_BLE only - the only editable row)
+  #define MENU_STATE_BT_UNPAIR_CONFIRM 53 // FORGET/CANCEL list before bt_debond_all() actually runs (MCU_ESP32 only) - same pattern as MENU_STATE_FWUPD_CONFIRM
 
   // The Hardware page used to only exist when there was board-level info
   // worth showing (battery/voltage sensing via HAS_PMU, or an ESP32-S3's
@@ -644,7 +645,17 @@
     // Read-only - same MAC already shown on the Hardware page (HW_ITEM_BT_MAC
     // above), reads the live value directly, not staged/committed through
     // this submenu at all - same convention as ESP-NOW's own Channel row.
-    #define BT_ITEM_BACK (BT_ITEM_MAC + 1)
+    #if MCU_VARIANT == MCU_ESP32
+      // Bonds is read-only (bt_bond_count(), Bluetooth.h). Forget Bonds opens
+      // MENU_STATE_BT_UNPAIR_CONFIRM and calls bt_debond_all() - nRF52
+      // (Bluefruit) isn't wired up yet, only ESP32 (Bluedroid/NimBLE both
+      // expose a bond count/clear via Bluetooth.h).
+      #define BT_ITEM_BONDS (BT_ITEM_MAC + 1)
+      #define BT_ITEM_UNPAIR (BT_ITEM_BONDS + 1)
+      #define BT_ITEM_BACK (BT_ITEM_UNPAIR + 1)
+    #else
+      #define BT_ITEM_BACK (BT_ITEM_MAC + 1)
+    #endif
     #define BT_ITEM_COUNT (BT_ITEM_BACK + 1)
   #endif
 
@@ -1662,6 +1673,12 @@
   #endif
   #if HAS_BLUETOOTH == true || HAS_BLE == true
     uint8_t bt_menu_cursor = 0;
+    #if MCU_VARIANT == MCU_ESP32
+      // 0 = FORGET, 1 = CANCEL - same pattern as fwupd_confirm_cursor,
+      // defaulting to CANCEL since this wipes every stored bond, not just
+      // the least-recently-used one.
+      uint8_t bt_unpair_confirm_cursor = 1;
+    #endif
   #endif
   #if HAS_WIFI == true
     uint8_t wifi_menu_cursor = 0;
@@ -2978,6 +2995,12 @@
           staged_bt_legacy_pairing_enabled = !staged_bt_legacy_pairing_enabled;
         }
       #endif
+      #if MCU_VARIANT == MCU_ESP32
+        else if (menu_state == MENU_STATE_BT_UNPAIR_CONFIRM) {
+          buzzer_encoder_tick_melody();
+          bt_unpair_confirm_cursor = menu_clamp_cursor(bt_unpair_confirm_cursor, dir, 2, wrap);
+        }
+      #endif
     #endif
     #if HAS_ETHERNET == true
       else if (menu_state == MENU_STATE_ETH_LIST) {
@@ -3557,12 +3580,27 @@
             menu_state = MENU_STATE_BT_EDIT;
           }
         #endif
-        // MAC is read-only - same shape as ESP-NOW's Channel row, no edit
-        // state, selecting it does nothing.
+        #if MCU_VARIANT == MCU_ESP32
+          else if (bt_menu_cursor == BT_ITEM_UNPAIR) {
+            bt_unpair_confirm_cursor = 1; // default CANCEL - see its own declaration
+            menu_state = MENU_STATE_BT_UNPAIR_CONFIRM;
+          }
+        #endif
+        // MAC/Bonds are read-only - same shape as ESP-NOW's Channel row, no
+        // edit state, selecting them does nothing.
       }
       #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
         else if (menu_state == MENU_STATE_BT_EDIT) {
           menu_state = MENU_STATE_BT_LIST; // confirms staged value, no write yet
+        }
+      #endif
+      #if MCU_VARIANT == MCU_ESP32
+        else if (menu_state == MENU_STATE_BT_UNPAIR_CONFIRM) {
+          if (bt_unpair_confirm_cursor == 0) { // FORGET
+            bt_debond_all();
+          }
+          // CANCEL: leave existing bonds untouched.
+          menu_state = MENU_STATE_BT_LIST;
         }
       #endif
     #endif
@@ -5468,6 +5506,14 @@
           }
         #endif
 
+        #if MCU_VARIANT == MCU_ESP32
+          labels[BT_ITEM_BONDS] = "Bonds";
+          sprintf(valbufs[BT_ITEM_BONDS], "%d", bt_bond_count());
+
+          labels[BT_ITEM_UNPAIR] = "Forget Bonds";
+          sprintf(valbufs[BT_ITEM_UNPAIR], ">"); // opens a confirm dialog, not an inline value
+        #endif
+
         labels[BT_ITEM_BACK] = "BACK";
         valbufs[BT_ITEM_BACK][0] = 0;
 
@@ -5476,6 +5522,17 @@
       #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
         else if (menu_state == MENU_STATE_BT_EDIT) {
           draw_menu_edit_disp("LEGACY PAIRING", staged_bt_legacy_pairing_enabled ? "ON" : "OFF");
+        }
+      #endif
+      #if MCU_VARIANT == MCU_ESP32
+        else if (menu_state == MENU_STATE_BT_UNPAIR_CONFIRM) {
+          // Plain 2-item list, same pattern as F/W Update's UPDATE/CANCEL
+          // (MENU_STATE_FWUPD_CONFIRM).
+          const char *labels[2] = { "FORGET", "CANCEL" };
+          char valbufs[2][24];
+          valbufs[0][0] = 0;
+          valbufs[1][0] = 0;
+          draw_menu_list_disp("FORGET BONDS?", labels, valbufs, 2, bt_unpair_confirm_cursor);
         }
       #endif
     #endif

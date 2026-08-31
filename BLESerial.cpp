@@ -222,6 +222,24 @@ void BLESerial::SetupSerialService() {
   // literal no-op 0 under Bluedroid (BLECharacteristic.h's own comment:
   // "Not supported by Bluedroid. Use setAccessPermissions() instead"), so
   // passing both here covers whichever backend is actually compiled in.
+  //
+  // Deliberately MITM-authenticated, not just plain encryption - a Just
+  // Works bond (all RNode can ever get against a central whose own IO
+  // capability caps out at DisplayYesNo, e.g. KDE's bluedevil/bluez-qt -
+  // confirmed via extracting the string literals out of libKF6BluezQt.so:
+  // DisplayOnly/DisplayYesNo/KeyboardOnly/NoInputNoOutput are present,
+  // KeyboardDisplay is not) has no protection against an active attacker
+  // during the pairing handshake itself. Relaxing this to plain _ENCRYPTED
+  // does make Just-Works-only bonds (e.g. KDE's native Bluetooth settings)
+  // stop dying on every real GATT write - but that's the wrong tradeoff to
+  // make firmware-wide merely to route around one desktop environment's
+  // Bluetooth agent being under-capable: any central that can actually
+  // negotiate real Passkey Entry (Windows, Android, or Linux's own
+  // `bluetoothctl` with an explicitly registered KeyboardDisplay agent -
+  // confirmed working end-to-end against this exact firmware) already
+  // clears this bar. Kept strict; the fix for Linux desktop clients that
+  // can't is to use a KeyboardDisplay-capable pairing tool, not to lower
+  // RNode's own security floor.
   RxCharacteristic = SerialService->createCharacteristic(BLE_RX_UUID,
     BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_ENC | BLECharacteristic::PROPERTY_WRITE_AUTHEN);
   RxCharacteristic->setAccessPermissions(ESP_GATT_PERM_WRITE_ENC_MITM);

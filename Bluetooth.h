@@ -387,14 +387,29 @@ char bt_da[BT_DEV_ADDR_LEN];
       #endif
     }
 
+    int bt_bond_count() {
+      #if defined(CONFIG_BLUEDROID_ENABLED)
+        return esp_ble_get_bond_device_num();
+      #elif defined(CONFIG_NIMBLE_ENABLED)
+        int count = 0;
+        ble_store_util_count(BLE_STORE_OBJ_TYPE_PEER_SEC, &count);
+        return count;
+      #else
+        return 0;
+      #endif
+    }
+
     void bt_enable_pairing() {
       // Serial.println("BT enable pairing");
       display_unblank();
       if (bt_state == BT_STATE_OFF) bt_start();
 
+      // Set before bt_security_setup() below so it forces a fresh
+      // authentication challenge for this pairing window - see that
+      // function's own comment on setForceAuthentication().
+      bt_allow_pairing = true;
       bt_security_setup();
 
-      bt_allow_pairing = true;
       bt_pairing_started = millis();
       bt_state = BT_STATE_PAIRING;
       bt_ssp_pin = pairing_pin;
@@ -434,6 +449,14 @@ char bt_da[BT_DEV_ADDR_LEN];
     uint32_t bt_passkey_callback() {
       // Serial.println("API passkey request");
       if (pairing_pin == 0) { bt_update_passkey(); }
+      // Surface the passkey we're about to display over KISS too (CMD_BT_PIN,
+      // Utilities.h) - this is the "we generate and display our own passkey"
+      // path (Passkey Entry, responder displays - the RNode's fixed
+      // DisplayOnly IO capability), distinct from bt_passkey_notify_callback()
+      // above (the "host displays, we confirm" case), which already did this.
+      // Without it there was no way to read the passkey except physically
+      // looking at the OLED.
+      kiss_indicate_btpin();
       return pairing_pin;
     }
 
@@ -456,6 +479,25 @@ char bt_da[BT_DEV_ADDR_LEN];
       if (auth_result.success == true) {
         // Serial.println("Authentication success");
         ble_authenticated = true;
+        // A successful authentication - whether this was an explicit
+        // pairing-mode attempt or an ordinary reconnect - ends the window
+        // that needs a forced fresh challenge. bt_allow_pairing (below)
+        // resets the app-level flag, but BLESecurity::m_forceSecurity is a
+        // separate static the library never re-syncs on its own - leaving
+        // it stuck true (from bt_enable_pairing()) makes the RNode keep
+        // proactively sending a Security Request on every future ordinary
+        // reconnect, racing that reconnect's own passive bond-resume
+        // (LE Start Encryption using the stored LTK) and corrupting the
+        // bond - confirmed via btmon: a real reconnect's "LE Start
+        // Encryption" (old LTK) raced a stray "SMP: Security Request" from
+        // this device, which forced BlueZ into a fresh "SMP: Pairing
+        // Request" that then failed ("Authentication requirements"), and
+        // the vendored library's BLE_GAP_EVENT_REPEAT_PAIRING handler
+        // (BLEServer.cpp) unconditionally deletes the existing bond the
+        // moment a peer re-attempts pairing on an already-bonded link -
+        // leaving zero bonds and every subsequent GATT write rejected with
+        // Insufficient Authentication.
+        BLESecurity::setForceAuthentication(false);
         if (bt_state == BT_STATE_PAIRING) {
           // Serial.println("Pairing complete, disconnecting");
           // See bt_pending_pairing_disconnect's own comment (above) for why
@@ -475,9 +517,29 @@ char bt_da[BT_DEV_ADDR_LEN];
     }
     #elif defined(CONFIG_NIMBLE_ENABLED)
     void bt_authentication_complete_callback(ble_gap_conn_desc *desc) {
+      // desc->sec_state has 3 separate bits: encrypted, authenticated (MITM
+      // specifically), and bonded. Deliberately gating on .authenticated,
+      // not just .encrypted - RX/TX's own GATT permissions (BLESerial.cpp,
+      // SetupSerialService()) require real MITM too, and that's a
+      // deliberate policy choice (see that function's own comment) - a
+      // Just Works pairing (all that's achievable against a central whose
+      // IO capability caps out at DisplayYesNo, e.g. KDE's bluedevil) will
+      // correctly take the "failure" branch below despite the link being
+      // encrypted, since it doesn't meet the security level this device
+      // actually requires. Keeping this check and the GATT permission at
+      // the same bar avoids the RNode's own app state (ble_authenticated)
+      // disagreeing with what the stack will actually allow - reporting
+      // "connected" and then failing every real write is worse than
+      // failing here, consistently, the same way bt_security_setup()'s
+      // retry-with-forced-auth (bt_allow_pairing still true mid-pairing)
+      // already expects.
       if (desc->sec_state.authenticated) {
         ble_authenticated = true;
         ble_conn_handle = desc->conn_handle;
+        // Re-sync BLESecurity's own forced-auth flag now that this
+        // authentication has succeeded - see this function's own comment
+        // above for the full btmon-confirmed failure mode this fixes.
+        BLESecurity::setForceAuthentication(false);
         if (bt_state == BT_STATE_PAIRING) {
           // See bt_pending_pairing_disconnect's own comment (above) for why
           // this doesn't disconnect synchronously here.
@@ -588,7 +650,17 @@ char bt_da[BT_DEV_ADDR_LEN];
       BLESecurity::setRespEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
       BLESecurity::setKeySize(16);
       BLESecurity::setPassKey(true, pairing_pin);
-      BLESecurity::setForceAuthentication(false);
+      // true only during the explicit on-device pairing window
+      // (bt_allow_pairing, set by bt_enable_pairing() before calling this) -
+      // that's what makes the RNode proactively send a Security Request on
+      // connect, which is what makes a generic OS pairing dialog (KDE/GNOME
+      // Bluetooth settings, "click device -> asks for PIN") actually prompt.
+      // Forcing it unconditionally broke that flow (regression) - it must
+      // stay false for an ordinary reconnect to an already-bonded host
+      // (Windows/bleak reconnecting via a cached OS-level bond), which is
+      // the bug this flag was introduced to fix in the first place - see
+      // "Fix BLE reconnect and notification delivery on Windows".
+      BLESecurity::setForceAuthentication(bt_allow_pairing);
     }
 
     void update_bt() {
