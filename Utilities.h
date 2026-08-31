@@ -1615,6 +1615,24 @@ void serial_write(uint8_t byte) {
 	      // serial_in_frame is used to ensure that the flush only happens at the end of the frame
 	      if (serial_in_frame && byte == FEND) { SerialBT.flushTXD(); serial_in_frame = false; }
 	      else if (!serial_in_frame && byte == FEND) { serial_in_frame = true; }
+      #elif MCU_VARIANT == MCU_ESP32 && HAS_BLE
+	      // Same reasoning as the NRF52/Bluefruit case above, and just as
+	      // necessary here: without this, multiple KISS replies produced in
+	      // quick succession (faster than BLE_FLUSH_TIMEOUT's periodic
+	      // update_bt() flush) get buffered together into a single BLE
+	      // notification. Windows never negotiates the BLE MTU above its
+	      // 23-byte default over this stack (confirmed live - bleak's WinRT
+	      // backend has no client-side way to request a larger one either),
+	      // leaving only 20 usable payload bytes per notification. A host
+	      // sending several small commands back-to-back (e.g. Reticulum's
+	      // RNodeInterface combined CMD_DETECT+CMD_FW_VERSION+CMD_PLATFORM+
+	      // CMD_MCU probe) can easily produce a combined reply at or over
+	      // that limit, silently failing the whole notify() - including the
+	      // CMD_DETECT reply that would have fit fine on its own. Flushing
+	      // per-frame instead keeps every single BLE notification within one
+	      // KISS frame's own (much smaller) size.
+	      if (serial_in_frame && byte == FEND) { SerialBT.flush(); serial_in_frame = false; }
+	      else if (!serial_in_frame && byte == FEND) { serial_in_frame = true; }
       #endif
 		}
 	#else

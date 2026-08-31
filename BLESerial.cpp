@@ -44,7 +44,7 @@ void BLESerial::onAuthenticationComplete(ble_gap_conn_desc *desc) { bt_authentic
 void BLESerial::onConnect(BLEServer *server) { bt_connect_callback(server); }
 void BLESerial::onDisconnect(BLEServer *server) { bt_disconnect_callback(server); ble_server->startAdvertising(); }
 bool BLESerial::onConfirmPIN(uint32_t pin) { return bt_confirm_pin_callback(pin); };
-bool BLESerial::connected() { return ble_server->getConnectedCount() > 0; }
+bool BLESerial::connected() { return bt_client_authenticated(); }
 
 int BLESerial::read() {
   int result = this->rx_buffer.pop();
@@ -66,7 +66,7 @@ int BLESerial::peek() {
 int BLESerial::available() { return this->rx_buffer.getLength(); }
 
 size_t BLESerial::print(const char *str) {
-  if (ble_server->getConnectedCount() <= 0) return 0;
+  if (!bt_client_authenticated()) return 0;
   size_t written = 0; for (size_t i = 0; str[i] != '\0'; i++)  { written += this->write(str[i]); }
   flush();
 
@@ -74,7 +74,7 @@ size_t BLESerial::print(const char *str) {
 }
 
 size_t BLESerial::write(const uint8_t *buffer, size_t bufferSize) {
-  if (ble_server->getConnectedCount() <= 0) { return 0; } else {
+  if (!bt_client_authenticated()) { return 0; } else {
     size_t written = 0; for (int i = 0; i < bufferSize; i++) { written += this->write(buffer[i]); }
     flush();
 
@@ -84,12 +84,10 @@ size_t BLESerial::write(const uint8_t *buffer, size_t bufferSize) {
 
 size_t BLESerial::write(uint8_t byte) {
   if (bt_client_authenticated()) {
-    if (ble_server->getConnectedCount() <= 0) { return 0; } else {
-      this->transmitBuffer[this->transmitBufferLength] = byte;
-      this->transmitBufferLength++;
-      if (this->transmitBufferLength == maxTransferSize) { flush(); }
-      return 1;
-    }
+    this->transmitBuffer[this->transmitBufferLength] = byte;
+    this->transmitBufferLength++;
+    if (this->transmitBufferLength == maxTransferSize) { flush(); }
+    return 1;
   } else {
     return 0;
   }
@@ -98,15 +96,48 @@ size_t BLESerial::write(uint8_t byte) {
 void BLESerial::flush() {
   if (this->transmitBufferLength > 0) {
     TxCharacteristic->setValue(this->transmitBuffer, this->transmitBufferLength);
+    #if defined(CONFIG_NIMBLE_ENABLED)
+      // BLECharacteristic::notify() (ESP32 Arduino BLE library,
+      // BLECharacteristic.cpp) internally checks
+      // getService()->getServer()->getConnectedCount() == 0 and silently
+      // no-ops if so - and that counter never increments for these
+      // connections, because BLEServer's own BLE_GAP_EVENT_CONNECT handler
+      // only increments it (and sets m_connId) on a status==0 event, which
+      // never fires here (see bt_security_request_callback's own comment,
+      // Bluetooth.h). setValue() above isn't gated by that counter, which is
+      // why a direct read_gatt_char() from a test client always showed the
+      // correct reply while a real subscribed notify callback never fired
+      // once - confirmed live, 0 deliveries, every time, against a genuine
+      // Windows/bleak client (and by extension RNS's RNodeInterface, which
+      // only ever listens via notify, never polls). Bypass notify() and
+      // getConnId() entirely and call the underlying NimBLE host API
+      // directly with ble_conn_handle (Bluetooth.h) - populated from the
+      // encryption-change event instead, which isn't affected by the same
+      // bug.
+      extern uint16_t ble_conn_handle;
+      if (ble_conn_handle != 0xFFFF) {
+        os_mbuf *om = ble_hs_mbuf_from_flat(this->transmitBuffer, this->transmitBufferLength);
+        if (om != nullptr) { ble_gatts_notify_custom(ble_conn_handle, TxCharacteristic->getHandle(), om); }
+      }
+    #else
+      TxCharacteristic->notify(true);
+    #endif
     this->transmitBufferLength = 0;
     this->lastFlushTime = millis();
-    TxCharacteristic->notify(true);
   }
 }
 
 void BLESerial::disconnect() {
-  if (ble_server->getConnectedCount() > 0) {
-    uint16_t conn_id = ble_server->getConnId();
+  if (bt_client_authenticated()) {
+    #if defined(CONFIG_NIMBLE_ENABLED)
+      // See BLESerial::flush()'s own comment above - getConnId()/m_connId
+      // is populated by the same broken BLE_GAP_EVENT_CONNECT bookkeeping,
+      // so it's not reliable here either.
+      extern uint16_t ble_conn_handle;
+      uint16_t conn_id = ble_conn_handle;
+    #else
+      uint16_t conn_id = ble_server->getConnId();
+    #endif
     // Serial.printf("Have connected: %d\n", conn_id);
     ble_server->disconnect(conn_id);
     // Serial.println("Disconnected");

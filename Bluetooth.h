@@ -261,6 +261,18 @@ char bt_da[BT_DEV_ADDR_LEN];
     bool ble_authenticated = false;
     uint32_t pairing_pin = 0;
 
+    // The live connection handle for BLESerial::flush() (BLESerial.cpp) to
+    // call ble_gatts_notify_custom() directly with, bypassing
+    // BLECharacteristic::notify()'s own internal getConnectedCount()==0
+    // check - see BLESerial.cpp's own comment for why that check is
+    // unreliable here. server->getConnId()/m_connId (BLEServer, same
+    // library) is populated by that same broken bookkeeping and can't be
+    // used either; desc->conn_handle here comes from the encryption-change
+    // event instead, which fires correctly regardless.
+    #if defined(CONFIG_NIMBLE_ENABLED)
+    uint16_t ble_conn_handle = 0xFFFF; // BLE_HS_CONN_HANDLE_NONE
+    #endif
+
     // Opt-in compatibility flag - see ADDR_CONF_BT_LEGACY_PAIRING (ROM.h)
     // and bt_security_setup() below. Default OFF, current SC-forced
     // behavior unchanged out of the box.
@@ -465,6 +477,7 @@ char bt_da[BT_DEV_ADDR_LEN];
     void bt_authentication_complete_callback(ble_gap_conn_desc *desc) {
       if (desc->sec_state.authenticated) {
         ble_authenticated = true;
+        ble_conn_handle = desc->conn_handle;
         if (bt_state == BT_STATE_PAIRING) {
           // See bt_pending_pairing_disconnect's own comment (above) for why
           // this doesn't disconnect synchronously here.
@@ -531,6 +544,7 @@ char bt_da[BT_DEV_ADDR_LEN];
       // Serial.printf("Disconnected: %d\n", conn_id);
       display_unblank();
       ble_authenticated = false;
+      ble_conn_handle = 0xFFFF; // BLE_HS_CONN_HANDLE_NONE
       bt_state = BT_STATE_ON;
     }
 
@@ -574,7 +588,7 @@ char bt_da[BT_DEV_ADDR_LEN];
       BLESecurity::setRespEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
       BLESecurity::setKeySize(16);
       BLESecurity::setPassKey(true, pairing_pin);
-      BLESecurity::setForceAuthentication(true);
+      BLESecurity::setForceAuthentication(false);
     }
 
     void update_bt() {
