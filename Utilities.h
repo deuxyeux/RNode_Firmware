@@ -235,8 +235,22 @@ void drot_conf_save(uint8_t val);
   void espnow_mode_conf_save(uint8_t val);
   void espnow_lr_conf_save(uint8_t val);
 #endif
+#if HAS_BLUETOOTH == true || HAS_BLE == true
+  void bt_conf_save(bool is_enabled);
+  // Forward-declared so bt_start()/bt_stop() (Bluetooth.h, included below
+  // before these are actually defined) can call them directly, gated on
+  // whether bt_state actually transitioned - rather than the caller
+  // guessing melody-vs-no-melody from whether it merely *attempted* a
+  // toggle, which used to fire the "on" chirp even when bt_start() silently
+  // no-op'd (e.g. still within BT_START_MIN_UPTIME_MS right after boot).
+  // Real melody or no-op stub either way (Utilities.h, HAS_BUZZER-gated
+  // definitions further down) - safe to call unconditionally.
+  void buzzer_bt_on_melody();
+  void buzzer_bt_off_melody();
+#endif
 #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
   void bt_legacy_pairing_conf_save(bool is_enabled);
+  void bt_just_works_conf_save(bool is_enabled);
 #endif
 #if HAS_RTC == true
   void kiss_indicate_time();
@@ -1327,15 +1341,55 @@ unsigned long led_standby_ticks = 0;
 
 	#if HAS_NP == true
 		int led_standby_lng = 200;
+		// Fade width in raw units - since led_standby_step is already at
+		// its floor of 1 (Utilities.h, led_indicate_standby()), this is
+		// also exactly the number of distinct brightness levels crossed
+		// during the fade (and, since it feeds the NeoPixel channels
+		// directly via intensity/3 below with no separate normalization,
+		// also the peak brightness) - back at 100, not widened, so peak
+		// brightness stays as it originally was. Slowdowns from here go
+		// through led_standby_wait instead, which only affects timing.
 		int led_standby_cut = 100;
-		int led_standby_min = 0;
-		int led_standby_max = 375+led_standby_lng;
+		// Hold time at each extreme (fully off below led_standby_lng, fully
+		// bright above led_standby_lng+led_standby_cut) is however far
+		// min/max sit outside that 100-unit fade window - was 200 units off
+		// + 275 units on, versus only 100 units for the actual fade, i.e.
+		// the LED spent most of each cycle sitting at the extremes rather
+		// than visibly transitioning. Narrowed to a short 30-unit hold on
+		// each side instead, fade width/speed (led_standby_cut, the step
+		// size below) unchanged.
+		#define LED_STANDBY_HOLD 30
+		int led_standby_min = led_standby_lng - LED_STANDBY_HOLD;
+		int led_standby_max = led_standby_lng + led_standby_cut + LED_STANDBY_HOLD;
 		int led_notready_min = 0;
 		int led_notready_max = led_standby_max;
 		int led_notready_value = led_notready_min;
 		int8_t  led_notready_direction = 0;
 		unsigned long led_notready_ticks = 0;
-		unsigned long led_standby_wait = 350;
+		// Ramp advances led_standby_step units every led_standby_wait loop()
+		// calls - only a 100-unit window in the middle of the full
+		// 0..led_standby_max range actually changes visible intensity (the
+		// led_standby_lng/led_standby_cut clamp below), the rest is a
+		// deliberate hold at fully-off/fully-on, so both the tick rate and
+		// the step size need to be large enough that crossing the full
+		// range (hold + fade + hold) doesn't take minutes at whatever rate
+		// loop() actually iterates at (observed ~30Hz on real hardware -
+		// confirmed via wait=60 alone measuring out to ~2s/step, far slower
+		// than intended) - but too large a step (confirmed live: step=8
+		// gave only ~12 distinct brightness levels across the 100-unit fade
+		// window, visibly choppy/near-binary) trades away the smoothness of
+		// the fade itself. wait=1 (tick every loop() call, the fastest this
+		// can go without changing loop()'s own rate) + a small step keeps
+		// the fade at a fine 100 distinct levels (wait is already at its
+		// floor of 1 - one tick per loop() call - so step is the only knob
+		// left to slow this down further without reducing granularity).
+		// step is now also at its floor (1 - can't go lower without
+		// skipping levels), so further slowdowns go back to wait instead -
+		// doesn't cost any granularity either, just holds each of the same
+		// 100 distinct levels for longer (no brightness-ceiling side effect
+		// either, unlike widening led_standby_cut). 7 is ~20% slower than 6.
+		unsigned long led_standby_wait = 7;
+		int led_standby_step = 1;
 		unsigned long led_console_wait = 1;
 		unsigned long led_notready_wait = 200;
 	
@@ -1362,6 +1416,11 @@ unsigned long led_standby_ticks = 0;
 		int8_t  led_notready_direction = 0;
 		unsigned long led_notready_ticks = 0;
 		unsigned long led_standby_wait = 1768;
+		// Referenced by the shared led_indicate_standby() body below
+		// (MCU_ESP32 || MCU_NRF52) - step=1 matches this board's original,
+		// untuned-tonight behavior (single-unit increments, same as before
+		// led_standby_step existed at all).
+		int led_standby_step = 1;
 		unsigned long led_notready_wait = 150;
 #endif
 
@@ -1391,7 +1450,7 @@ int8_t  led_standby_direction = 0;
 
 			if (led_standby_ticks > led_standby_wait) {
 				led_standby_ticks = 0;
-				
+
 				if (led_standby_value <= led_standby_min) {
 					led_standby_direction = 1;
 				} else if (led_standby_value >= led_standby_max) {
@@ -1399,7 +1458,7 @@ int8_t  led_standby_direction = 0;
 				}
 
 				uint8_t led_standby_intensity;
-				led_standby_value += led_standby_direction;
+				led_standby_value += led_standby_direction * led_standby_step;
 				int led_standby_ti = led_standby_value - led_standby_lng;
 
 				if (led_standby_ti < 0) {
@@ -2843,6 +2902,22 @@ void bt_legacy_pairing_conf_save(bool is_enabled) {
   bt_legacy_pairing_enabled = is_enabled;
   eeprom_update(ADDR_CONF_BT_LEGACY_PAIRING, is_enabled ? BT_LEGACY_PAIRING_ENABLE_BYTE : BT_LEGACY_PAIRING_DISABLE_BYTE);
   if (bt_ready) bt_security_setup();
+}
+
+void bt_just_works_conf_save(bool is_enabled) {
+  bt_just_works_enabled = is_enabled;
+  eeprom_update(ADDR_CONF_BT_JUST_WORKS, is_enabled ? BT_JUST_WORKS_ENABLE_BYTE : BT_JUST_WORKS_DISABLE_BYTE);
+  // Unlike bt_legacy_pairing_conf_save() above, a plain bt_security_setup()
+  // isn't enough - this setting changes the RX/TX GATT characteristics'
+  // own permission bits (BLESerial.cpp, SetupSerialService()), which
+  // NimBLE bakes in at creation time, not something re-checked per
+  // connection. Cycling the whole BLE stack rebuilds the GATT service
+  // under the new permission level - same as the user toggling Bluetooth
+  // off and back on themselves (CMD_BT_CTRL 0x00/0x01).
+  if (bt_ready && bt_state != BT_STATE_OFF) {
+    bt_stop();
+    bt_start();
+  }
 }
 #endif
 

@@ -202,6 +202,29 @@
   #define BT_LEGACY_PAIRING_ENABLE_BYTE  0x01
   #define BT_LEGACY_PAIRING_DISABLE_BYTE 0x00
 
+  // Opt-in security tradeoff for the ESP32 NimBLE/BLE GATT link
+  // (Bluetooth.h, bt_authentication_complete_callback()/BLESerial.cpp,
+  // SetupSerialService()): accept a Just Works (encrypted but not
+  // MITM-authenticated) bond as sufficient for the RX/TX characteristics,
+  // instead of requiring real MITM. Exists because RNode's fixed
+  // DisplayOnly IO capability can never actually achieve MITM against a
+  // central whose own capability caps out at DisplayYesNo (confirmed via
+  // btmon against real hardware - e.g. KDE's bluedevil/bluez-qt) - with
+  // MITM required, those bonds get created successfully but then every real
+  // GATT read/write is rejected "Insufficient Authentication", which makes
+  // the host correctly try to re-pair to upgrade security, an upgrade
+  // that's structurally impossible given the same IO capabilities, and the
+  // failed re-pair lets the vendored BLE library's own
+  // BLE_GAP_EVENT_REPEAT_PAIRING handler delete the bond it just created -
+  // i.e. BLE is entirely unusable from such a host with this off. Same
+  // unclaimed 256-823 gap as ADDR_CONF_BT_LEGACY_PAIRING above. Default
+  // OFF - current strict-MITM behavior is unchanged out of the box; this
+  // is a deliberate, explicit security-vs-compatibility choice left to the
+  // user, not a bug fix.
+  #define ADDR_CONF_BT_JUST_WORKS 265
+  #define BT_JUST_WORKS_ENABLE_BYTE  0x01
+  #define BT_JUST_WORKS_DISABLE_BYTE 0x00
+
   #define CONFIG_SIZE     256
   #define ADDR_CONF_SSID 0x00
   #define ADDR_CONF_PSK  0x21

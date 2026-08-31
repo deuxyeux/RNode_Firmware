@@ -32,6 +32,7 @@ bool bt_confirm_pin_callback(uint32_t pin);
 void bt_connect_callback(BLEServer *server);
 void bt_disconnect_callback(BLEServer *server);
 bool bt_client_authenticated();
+extern bool bt_just_works_enabled;
 
 uint32_t BLESerial::onPassKeyRequest() { return bt_passkey_callback(); }
 void BLESerial::onPassKeyNotify(uint32_t passkey) { bt_passkey_notify_callback(passkey); }
@@ -223,35 +224,47 @@ void BLESerial::SetupSerialService() {
   // "Not supported by Bluedroid. Use setAccessPermissions() instead"), so
   // passing both here covers whichever backend is actually compiled in.
   //
-  // Deliberately MITM-authenticated, not just plain encryption - a Just
-  // Works bond (all RNode can ever get against a central whose own IO
-  // capability caps out at DisplayYesNo, e.g. KDE's bluedevil/bluez-qt -
+  // Deliberately MITM-authenticated by default, not just plain encryption -
+  // a Just Works bond (all RNode can ever get against a central whose own
+  // IO capability caps out at DisplayYesNo, e.g. KDE's bluedevil/bluez-qt -
   // confirmed via extracting the string literals out of libKF6BluezQt.so:
   // DisplayOnly/DisplayYesNo/KeyboardOnly/NoInputNoOutput are present,
   // KeyboardDisplay is not) has no protection against an active attacker
-  // during the pairing handshake itself. Relaxing this to plain _ENCRYPTED
-  // does make Just-Works-only bonds (e.g. KDE's native Bluetooth settings)
-  // stop dying on every real GATT write - but that's the wrong tradeoff to
-  // make firmware-wide merely to route around one desktop environment's
-  // Bluetooth agent being under-capable: any central that can actually
-  // negotiate real Passkey Entry (Windows, Android, or Linux's own
-  // `bluetoothctl` with an explicitly registered KeyboardDisplay agent -
-  // confirmed working end-to-end against this exact firmware) already
-  // clears this bar. Kept strict; the fix for Linux desktop clients that
-  // can't is to use a KeyboardDisplay-capable pairing tool, not to lower
-  // RNode's own security floor.
-  RxCharacteristic = SerialService->createCharacteristic(BLE_RX_UUID,
-    BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_ENC | BLECharacteristic::PROPERTY_WRITE_AUTHEN);
-  RxCharacteristic->setAccessPermissions(ESP_GATT_PERM_WRITE_ENC_MITM);
+  // during the pairing handshake itself. bt_just_works_enabled
+  // (ADDR_CONF_BT_JUST_WORKS, ROM.h) is the explicit, off-by-default opt-in
+  // to relax this to plain _ENCRYPTED instead, which is what actually lets
+  // Just-Works-only bonds (e.g. KDE's native Bluetooth settings) stop dying
+  // on every real GATT write - any central that can negotiate real Passkey
+  // Entry (Windows, Android, or Linux's own `bluetoothctl` with an
+  // explicitly registered KeyboardDisplay agent) already clears the
+  // stricter bar regardless of this setting, so it's a pure widening, never
+  // a downgrade, for hosts that already do better. Read once here rather
+  // than checked per-connection because NimBLE bakes characteristic
+  // permissions in at creation time - changing this setting requires a
+  // bt_stop()/bt_start() cycle to rebuild the GATT service under the new
+  // permission level (bt_just_works_conf_save(), Utilities.h), same as
+  // toggling Bluetooth off and back on.
+  uint32_t rx_props = BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_ENC;
+  uint32_t tx_props = BLECharacteristic::PROPERTY_NOTIFY | BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_READ_ENC;
+  esp_gatt_perm_t rx_perm = ESP_GATT_PERM_WRITE_ENCRYPTED;
+  esp_gatt_perm_t tx_perm = ESP_GATT_PERM_READ_ENCRYPTED;
+  if (!bt_just_works_enabled) {
+    rx_props = rx_props | BLECharacteristic::PROPERTY_WRITE_AUTHEN;
+    tx_props = tx_props | BLECharacteristic::PROPERTY_READ_AUTHEN;
+    rx_perm = ESP_GATT_PERM_WRITE_ENC_MITM;
+    tx_perm = ESP_GATT_PERM_READ_ENC_MITM;
+  }
+
+  RxCharacteristic = SerialService->createCharacteristic(BLE_RX_UUID, rx_props);
+  RxCharacteristic->setAccessPermissions(rx_perm);
   RxCharacteristic->setWriteProperty(true);
   RxCharacteristic->setCallbacks(this);
 
   // NimBLE auto-adds the 2902 (CCCD) descriptor whenever a characteristic
   // has notify/indicate enabled - manually adding one is deprecated
   // (BLE2902 will be removed) and was already redundant here.
-  TxCharacteristic = SerialService->createCharacteristic(BLE_TX_UUID,
-    BLECharacteristic::PROPERTY_NOTIFY | BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_READ_ENC | BLECharacteristic::PROPERTY_READ_AUTHEN);
-  TxCharacteristic->setAccessPermissions(ESP_GATT_PERM_READ_ENC_MITM);
+  TxCharacteristic = SerialService->createCharacteristic(BLE_TX_UUID, tx_props);
+  TxCharacteristic->setAccessPermissions(tx_perm);
   TxCharacteristic->setNotifyProperty(true);
   TxCharacteristic->setReadProperty(true);
 

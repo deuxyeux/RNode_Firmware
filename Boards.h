@@ -2626,8 +2626,21 @@
     #define OCP_TUNED 0x38
   #endif
 
+  // NeoPixel intensity scalar's *default* (Utilities.h: np_intensity/npi,
+  // Menu.h: the user-facing NeoPixel Brightness setting, EEPROM-persisted
+  // via np_int_conf_save()) - not a hard brightness ceiling, just the
+  // out-of-box starting point before a user ever touches that setting.
+  // Was 0.15 (15%) with no comment explaining why - other than one board
+  // (BOARD_HELTEC_T114) explicitly overriding to 1 (full), every NeoPixel
+  // board fell through to this same conservative fallback, which starved
+  // any effect that further divides its own intensity range (e.g.
+  // led_indicate_standby()'s RGB split) down to only a handful of
+  // distinct achievable output levels - confirmed live: 100 possible
+  // intensity levels collapsed to ~5 real ones after /3 (RGB split) *
+  // 0.15. Matching the T114 override instead, since users who want it
+  // dimmer already have a real, working way to set that themselves.
   #ifndef NP_M
-    #define NP_M 0.15
+    #define NP_M 1
   #endif
 
   // OTA firmware updates (OTA.h) fundamentally depend on a real, comparable

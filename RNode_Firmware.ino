@@ -2530,6 +2530,10 @@ void serial_callback(uint8_t sbyte) {
             bt_legacy_pairing_conf_save(false);
           } else if (sbyte == 0x04) {
             bt_legacy_pairing_conf_save(true);
+          } else if (sbyte == 0x05) {
+            bt_just_works_conf_save(false);
+          } else if (sbyte == 0x06) {
+            bt_just_works_conf_save(true);
           }
         #endif
       #endif
@@ -3546,17 +3550,17 @@ void button_event(uint8_t event, unsigned long duration) {
             LoRa->maskDio0();
           #endif
           if (bt_state == BT_STATE_OFF) {
+            // bt_start() itself plays the "on" chirp now, gated on bt_state
+            // actually reaching BT_STATE_ON (Bluetooth.h) - it used to play
+            // unconditionally right here regardless of whether bt_start()
+            // actually did anything, which was audibly wrong during the
+            // ~10s post-boot window where bt_start() silently no-ops
+            // (BT_START_MIN_UPTIME_MS, Bluetooth.h).
             bt_start();
             bt_conf_save(true);
-            #if HAS_BUZZER == true
-              buzzer_bt_on_melody();
-            #endif
           } else {
             bt_stop();
             bt_conf_save(false);
-            #if HAS_BUZZER == true
-              buzzer_bt_off_melody();
-            #endif
           }
           #if MODEM == SX1262
             LoRa->unmaskDio0();

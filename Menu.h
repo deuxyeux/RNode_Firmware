@@ -638,7 +638,11 @@
       // on nRF52 (Bluefruit already forces Legacy Pairing unconditionally,
       // no toggle needed there).
       #define BT_ITEM_LEGACY_PAIRING 0
-      #define BT_ITEM_MAC 1
+      // Opt-in security tradeoff - see ADDR_CONF_BT_JUST_WORKS (ROM.h) and
+      // BLESerial.cpp's SetupSerialService() for the full reasoning.
+      // Default OFF, current strict-MITM behavior unchanged out of the box.
+      #define BT_ITEM_JUST_WORKS (BT_ITEM_LEGACY_PAIRING + 1)
+      #define BT_ITEM_MAC (BT_ITEM_JUST_WORKS + 1)
     #else
       #define BT_ITEM_MAC 0
     #endif
@@ -1670,6 +1674,7 @@
   #endif
   #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
     bool staged_bt_legacy_pairing_enabled = false;
+    bool staged_bt_just_works_enabled = false;
   #endif
   #if HAS_BLUETOOTH == true || HAS_BLE == true
     uint8_t bt_menu_cursor = 0;
@@ -2469,6 +2474,7 @@
     #endif
     #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
       staged_bt_legacy_pairing_enabled = bt_legacy_pairing_enabled;
+      staged_bt_just_works_enabled = bt_just_works_enabled;
     #endif
     // display_rotation itself is only a local variable inside display_init(),
     // applied once at boot - not a persisted global - so read the actual
@@ -2695,6 +2701,9 @@
     #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
       if (staged_bt_legacy_pairing_enabled != bt_legacy_pairing_enabled) {
         bt_legacy_pairing_conf_save(staged_bt_legacy_pairing_enabled);
+      }
+      if (staged_bt_just_works_enabled != bt_just_works_enabled) {
+        bt_just_works_conf_save(staged_bt_just_works_enabled);
       }
     #endif
     #if HAS_WIFI == true
@@ -2989,10 +2998,17 @@
       #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
         else if (menu_state == MENU_STATE_BT_EDIT) {
           buzzer_encoder_tick_melody();
-          // Legacy Pairing is the only editable row in this submenu - MAC
-          // is read-only (see BT_ITEM_MAC's own comment), so this state is
-          // never entered with bt_menu_cursor pointing anywhere else.
-          staged_bt_legacy_pairing_enabled = !staged_bt_legacy_pairing_enabled;
+          // Legacy Pairing and Just Works are the only editable rows in
+          // this submenu - MAC/Bonds/Forget Bonds are read-only or open
+          // their own separate state, so bt_menu_cursor (preserved across
+          // the MENU_STATE_BT_LIST -> MENU_STATE_BT_EDIT transition, same
+          // convention as WiFi's text_edit_field) is always one of these
+          // two here.
+          if (bt_menu_cursor == BT_ITEM_JUST_WORKS) {
+            staged_bt_just_works_enabled = !staged_bt_just_works_enabled;
+          } else {
+            staged_bt_legacy_pairing_enabled = !staged_bt_legacy_pairing_enabled;
+          }
         }
       #endif
       #if MCU_VARIANT == MCU_ESP32
@@ -3375,6 +3391,19 @@
       #endif
       #if HAS_BLUETOOTH == true || HAS_BLE == true
         else if (menu_cursor == MENU_ITEM_BLUETOOTH) {
+          // The submenu's own draw code reads live BLE stack state (MAC,
+          // bt_bond_count() -> NimBLE's ble_store_util_count()/Bluedroid's
+          // esp_ble_get_bond_device_num()) unconditionally - calling those
+          // with the stack never started (BT_STATE_OFF, e.g. NimBLE's host
+          // task/port never initialized) crashes rather than erroring out
+          // gracefully. Same enable-first pattern CMD_BT_CTRL's 0x02
+          // (enable pairing) sub-command already uses, just applied here
+          // too so simply opening the submenu can't crash regardless of
+          // current state.
+          if (bt_state == BT_STATE_OFF) {
+            bt_start();
+            bt_conf_save(true);
+          }
           menu_state = MENU_STATE_BT_LIST;
           bt_menu_cursor = 0;
         }
@@ -3576,7 +3605,7 @@
           menu_state = MENU_STATE_LIST;
         }
         #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
-          else if (bt_menu_cursor == BT_ITEM_LEGACY_PAIRING) {
+          else if (bt_menu_cursor == BT_ITEM_LEGACY_PAIRING || bt_menu_cursor == BT_ITEM_JUST_WORKS) {
             menu_state = MENU_STATE_BT_EDIT;
           }
         #endif
@@ -5483,6 +5512,9 @@
         #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
           labels[BT_ITEM_LEGACY_PAIRING] = "Legacy Pairing";
           sprintf(valbufs[BT_ITEM_LEGACY_PAIRING], staged_bt_legacy_pairing_enabled ? "ON" : "OFF");
+
+          labels[BT_ITEM_JUST_WORKS] = "Just Works";
+          sprintf(valbufs[BT_ITEM_JUST_WORKS], staged_bt_just_works_enabled ? "ON" : "OFF");
         #endif
 
         labels[BT_ITEM_MAC] = "MAC";
@@ -5521,7 +5553,11 @@
       }
       #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
         else if (menu_state == MENU_STATE_BT_EDIT) {
-          draw_menu_edit_disp("LEGACY PAIRING", staged_bt_legacy_pairing_enabled ? "ON" : "OFF");
+          if (bt_menu_cursor == BT_ITEM_JUST_WORKS) {
+            draw_menu_edit_disp("JUST WORKS", staged_bt_just_works_enabled ? "ON" : "OFF");
+          } else {
+            draw_menu_edit_disp("LEGACY PAIRING", staged_bt_legacy_pairing_enabled ? "ON" : "OFF");
+          }
         }
       #endif
       #if MCU_VARIANT == MCU_ESP32

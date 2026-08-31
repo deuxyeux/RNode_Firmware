@@ -112,6 +112,9 @@ char bt_da[BT_DEV_ADDR_LEN];
         // of disp_ext_fb, since it doesn't check bt_state at all.
         bt_ssp_pin = 0;
         bt_state = BT_STATE_OFF;
+        // Only on an actual OFF transition, not on every call - see
+        // bt_start()'s own comment below for the caller-side bug this fixes.
+        buzzer_bt_off_melody();
       }
     }
 
@@ -120,6 +123,14 @@ char bt_da[BT_DEV_ADDR_LEN];
       if (bt_state == BT_STATE_OFF) {
         SerialBT.begin(bt_devname);
         bt_state = BT_STATE_ON;
+        // Played here, gated on bt_state actually reaching ON, rather than
+        // by the caller (e.g. the button handler, RNode_Firmware.ino)
+        // right after merely calling bt_start() - callers can't tell a
+        // real state change from a silent no-op (this variant always
+        // succeeds once bt_state was OFF, but the NimBLE bt_start() below
+        // can silently no-op for several real reasons, and previously
+        // still played the "on" chirp regardless).
+        buzzer_bt_on_melody();
        }
     }
 
@@ -278,6 +289,12 @@ char bt_da[BT_DEV_ADDR_LEN];
     // behavior unchanged out of the box.
     bool bt_legacy_pairing_enabled = false;
 
+    // Opt-in security tradeoff - see ADDR_CONF_BT_JUST_WORKS (ROM.h) for
+    // the full reasoning. Read by bt_authentication_complete_callback()
+    // below and BLESerial.cpp's SetupSerialService(). Default OFF, current
+    // strict-MITM behavior unchanged out of the box.
+    bool bt_just_works_enabled = false;
+
     // Deferred post-pairing disconnect (bt_authentication_complete_callback()
     // below) - GAP callbacks run on the single dedicated NimBLE host task
     // (BLEDevice::host_task -> nimble_port_run()), so a blocking delay()
@@ -331,6 +348,15 @@ char bt_da[BT_DEV_ADDR_LEN];
         if (ok) {
           bt_state = BT_STATE_ON;
           SerialBT.setTimeout(10);
+          // Gated on bt_state actually reaching ON, not on bt_start() merely
+          // being called - this is the variant that can genuinely no-op
+          // above (BT_START_MIN_UPTIME_MS/ble_networking_conflict()) or
+          // right here (SerialBT.begin() returning false), most visibly
+          // right after boot (the ~10s BT_START_MIN_UPTIME_MS window) - the
+          // button handler (RNode_Firmware.ino) used to play the "on" chirp
+          // regardless of whether this actually happened, misleadingly
+          // suggesting BT had turned on when it hadn't.
+          buzzer_bt_on_melody();
         }
       }
     }
@@ -344,6 +370,7 @@ char bt_da[BT_DEV_ADDR_LEN];
         bt_ssp_pin = 0;
         bt_state = BT_STATE_OFF;
         SerialBT.end();
+        buzzer_bt_off_melody();
       }
     }
 
@@ -518,22 +545,23 @@ char bt_da[BT_DEV_ADDR_LEN];
     #elif defined(CONFIG_NIMBLE_ENABLED)
     void bt_authentication_complete_callback(ble_gap_conn_desc *desc) {
       // desc->sec_state has 3 separate bits: encrypted, authenticated (MITM
-      // specifically), and bonded. Deliberately gating on .authenticated,
-      // not just .encrypted - RX/TX's own GATT permissions (BLESerial.cpp,
-      // SetupSerialService()) require real MITM too, and that's a
-      // deliberate policy choice (see that function's own comment) - a
-      // Just Works pairing (all that's achievable against a central whose
-      // IO capability caps out at DisplayYesNo, e.g. KDE's bluedevil) will
-      // correctly take the "failure" branch below despite the link being
-      // encrypted, since it doesn't meet the security level this device
-      // actually requires. Keeping this check and the GATT permission at
-      // the same bar avoids the RNode's own app state (ble_authenticated)
-      // disagreeing with what the stack will actually allow - reporting
-      // "connected" and then failing every real write is worse than
-      // failing here, consistently, the same way bt_security_setup()'s
-      // retry-with-forced-auth (bt_allow_pairing still true mid-pairing)
-      // already expects.
-      if (desc->sec_state.authenticated) {
+      // specifically), and bonded. Gated on .authenticated by default -
+      // RX/TX's own GATT permissions (BLESerial.cpp, SetupSerialService())
+      // require real MITM too by default, and that's a deliberate policy
+      // choice (see that function's own comment) - a Just Works pairing
+      // (all that's achievable against a central whose IO capability caps
+      // out at DisplayYesNo, e.g. KDE's bluedevil) will correctly take the
+      // "failure" branch below despite the link being encrypted, since it
+      // doesn't meet the security level this device requires by default.
+      // bt_just_works_enabled (ADDR_CONF_BT_JUST_WORKS, ROM.h) is the
+      // explicit opt-in to relax this to plain .encrypted instead - kept in
+      // sync with BLESerial.cpp's own permission level so the RNode's app
+      // state (ble_authenticated) never disagrees with what the stack will
+      // actually allow - reporting "connected" and then failing every real
+      // write would be worse than failing here, consistently, the same way
+      // bt_security_setup()'s retry-with-forced-auth (bt_allow_pairing
+      // still true mid-pairing) already expects.
+      if (desc->sec_state.authenticated || (bt_just_works_enabled && desc->sec_state.encrypted)) {
         ble_authenticated = true;
         ble_conn_handle = desc->conn_handle;
         // Re-sync BLESecurity's own forced-auth flag now that this
@@ -622,6 +650,11 @@ char bt_da[BT_DEV_ADDR_LEN];
           bt_legacy_pairing_enabled = true;
         } else {
           bt_legacy_pairing_enabled = false;
+        }
+        if (EEPROM.read(ADDR_CONF_BT_JUST_WORKS) == BT_JUST_WORKS_ENABLE_BYTE) {
+          bt_just_works_enabled = true;
+        } else {
+          bt_just_works_enabled = false;
         }
         uint8_t mac[BT_DEV_ADDR_LEN];
         esp_read_mac(mac, ESP_MAC_BT);
@@ -754,6 +787,7 @@ char bt_da[BT_DEV_ADDR_LEN];
       // rather than bt_disable_pairing(), which already reset this).
       pairing_pin = 0;
       bt_state = BT_STATE_OFF;
+      buzzer_bt_off_melody();
     }
   }
 
@@ -932,6 +966,7 @@ char bt_da[BT_DEV_ADDR_LEN];
       Bluefruit.Advertising.start(0);
 
       bt_state = BT_STATE_ON;
+      buzzer_bt_on_melody();
      }
   }
 
