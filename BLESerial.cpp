@@ -244,7 +244,15 @@ void BLESerial::SetupSerialService() {
   // bt_stop()/bt_start() cycle to rebuild the GATT service under the new
   // permission level (bt_just_works_conf_save(), Utilities.h), same as
   // toggling Bluetooth off and back on.
-  uint32_t rx_props = BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_ENC;
+  // WRITE_NR (Write Without Response) is additive alongside WRITE (Write
+  // Request) - GATT characteristic properties are independent of ATT
+  // attribute permissions, so ENC/AUTHEN below still gate every write to
+  // this attribute regardless of which opcode triggers it. Without this,
+  // any client issuing an unacknowledged write (e.g. bleak's WinRT backend
+  // with response=False) has that write silently dropped - no ATT error is
+  // possible for Write Command by spec, so it looks like a successful
+  // connection that mysteriously never responds to anything.
+  uint32_t rx_props = BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR | BLECharacteristic::PROPERTY_WRITE_ENC;
   uint32_t tx_props = BLECharacteristic::PROPERTY_NOTIFY | BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_READ_ENC;
   esp_gatt_perm_t rx_perm = ESP_GATT_PERM_WRITE_ENCRYPTED;
   esp_gatt_perm_t tx_perm = ESP_GATT_PERM_READ_ENCRYPTED;
@@ -258,6 +266,7 @@ void BLESerial::SetupSerialService() {
   RxCharacteristic = SerialService->createCharacteristic(BLE_RX_UUID, rx_props);
   RxCharacteristic->setAccessPermissions(rx_perm);
   RxCharacteristic->setWriteProperty(true);
+  RxCharacteristic->setWriteNoResponseProperty(true);
   RxCharacteristic->setCallbacks(this);
 
   // NimBLE auto-adds the 2902 (CCCD) descriptor whenever a characteristic
