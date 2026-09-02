@@ -649,11 +649,12 @@
     // Read-only - same MAC already shown on the Hardware page (HW_ITEM_BT_MAC
     // above), reads the live value directly, not staged/committed through
     // this submenu at all - same convention as ESP-NOW's own Channel row.
-    #if MCU_VARIANT == MCU_ESP32
+    #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
       // Bonds is read-only (bt_bond_count(), Bluetooth.h). Forget Bonds opens
       // MENU_STATE_BT_UNPAIR_CONFIRM and calls bt_debond_all() - nRF52
-      // (Bluefruit) isn't wired up yet, only ESP32 (Bluedroid/NimBLE both
-      // expose a bond count/clear via Bluetooth.h).
+      // (Bluefruit) isn't wired up yet, and classic HAS_BLUETOOTH (Bluedroid
+      // SPP, e.g. MeshAdventurer/DIY-V1) has no bond-list API either, only
+      // the HAS_BLE (NimBLE) path defines bt_bond_count()/bt_debond_all().
       #define BT_ITEM_BONDS (BT_ITEM_MAC + 1)
       #define BT_ITEM_UNPAIR (BT_ITEM_BONDS + 1)
       #define BT_ITEM_BACK (BT_ITEM_UNPAIR + 1)
@@ -3011,7 +3012,7 @@
           }
         }
       #endif
-      #if MCU_VARIANT == MCU_ESP32
+      #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
         else if (menu_state == MENU_STATE_BT_UNPAIR_CONFIRM) {
           buzzer_encoder_tick_melody();
           bt_unpair_confirm_cursor = menu_clamp_cursor(bt_unpair_confirm_cursor, dir, 2, wrap);
@@ -3609,7 +3610,7 @@
             menu_state = MENU_STATE_BT_EDIT;
           }
         #endif
-        #if MCU_VARIANT == MCU_ESP32
+        #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
           else if (bt_menu_cursor == BT_ITEM_UNPAIR) {
             bt_unpair_confirm_cursor = 1; // default CANCEL - see its own declaration
             menu_state = MENU_STATE_BT_UNPAIR_CONFIRM;
@@ -3623,7 +3624,7 @@
           menu_state = MENU_STATE_BT_LIST; // confirms staged value, no write yet
         }
       #endif
-      #if MCU_VARIANT == MCU_ESP32
+      #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
         else if (menu_state == MENU_STATE_BT_UNPAIR_CONFIRM) {
           if (bt_unpair_confirm_cursor == 0) { // FORGET
             bt_debond_all();
@@ -5538,7 +5539,7 @@
           }
         #endif
 
-        #if MCU_VARIANT == MCU_ESP32
+        #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
           labels[BT_ITEM_BONDS] = "Bonds";
           sprintf(valbufs[BT_ITEM_BONDS], "%d", bt_bond_count());
 
@@ -5560,7 +5561,7 @@
           }
         }
       #endif
-      #if MCU_VARIANT == MCU_ESP32
+      #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
         else if (menu_state == MENU_STATE_BT_UNPAIR_CONFIRM) {
           // Plain 2-item list, same pattern as F/W Update's UPDATE/CANCEL
           // (MENU_STATE_FWUPD_CONFIRM).
