@@ -513,7 +513,6 @@ char bt_da[BT_DEV_ADDR_LEN];
       // bt_just_works_enabled (which only affects GATT permission bits and
       // bt_authentication_complete_callback()'s acceptance criteria, not
       // this gate).
-      DEBUG_LOG("[BTDBG %lu] passkey_notify_callback passkey=%06lu bt_allow_pairing=%d\n", millis(), (unsigned long)passkey, bt_allow_pairing);
       if (!bt_allow_pairing) {
         bt_allow_pairing = true;
         bt_state = BT_STATE_PAIRING;
@@ -572,7 +571,7 @@ char bt_da[BT_DEV_ADDR_LEN];
     }
 
     bool bt_security_request_callback() {
-      DEBUG_LOG("[BTDBG %lu] security_request_callback\n", millis());
+      // Serial.println("Accepting security request");
       if (!bt_allow_pairing) {
         // Peer (central) initiated a pairing/security request on its own,
         // e.g. a phone/PC's BLE stack bonding automatically the moment it
@@ -638,10 +637,6 @@ char bt_da[BT_DEV_ADDR_LEN];
     }
     #elif defined(CONFIG_NIMBLE_ENABLED)
     void bt_authentication_complete_callback(ble_gap_conn_desc *desc) {
-      DEBUG_LOG("[BTDBG %lu] auth_complete conn_handle=%d encrypted=%d authenticated=%d bonded=%d key_size=%d peer_id_addr=%02x:%02x:%02x:%02x:%02x:%02x type=%d bond_count=%d\n",
-        millis(), desc->conn_handle, desc->sec_state.encrypted, desc->sec_state.authenticated, desc->sec_state.bonded, desc->sec_state.key_size,
-        desc->peer_id_addr.val[5], desc->peer_id_addr.val[4], desc->peer_id_addr.val[3], desc->peer_id_addr.val[2], desc->peer_id_addr.val[1], desc->peer_id_addr.val[0],
-        desc->peer_id_addr.type, bt_bond_count());
       // desc->sec_state has 3 separate bits: encrypted, authenticated (MITM
       // specifically), and bonded. Gated on .authenticated by default -
       // RX/TX's own GATT permissions (BLESerial.cpp, SetupSerialService())
@@ -717,7 +712,7 @@ char bt_da[BT_DEV_ADDR_LEN];
 
     void bt_connect_callback(BLEServer *server) {
       uint16_t conn_id = server->getConnId();
-      DEBUG_LOG("[BTDBG %lu] connect_callback conn_id=%d\n", millis(), conn_id);
+      // Serial.printf("Connected: %d\n", conn_id);
       display_unblank();
       ble_authenticated = false;
       if (bt_state != BT_STATE_PAIRING) { bt_state = BT_STATE_CONNECTED; }
@@ -745,7 +740,7 @@ char bt_da[BT_DEV_ADDR_LEN];
 
     void bt_disconnect_callback(BLEServer *server) {
       uint16_t conn_id = server->getConnId();
-      DEBUG_LOG("[BTDBG %lu] disconnect_callback conn_id=%d bt_state=%d\n", millis(), conn_id, bt_state);
+      // Serial.printf("Disconnected: %d\n", conn_id);
       display_unblank();
       ble_authenticated = false;
       ble_conn_handle = 0xFFFF; // BLE_HS_CONN_HANDLE_NONE
