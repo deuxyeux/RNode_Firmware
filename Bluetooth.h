@@ -28,6 +28,10 @@
     #include "BLESerial.h"
     #if defined(CONFIG_NIMBLE_ENABLED)
       #include <host/ble_store.h>
+      // For bt_debond_all()'s own direct NVS wipe below - see that
+      // function's comment for why ble_store_clear() alone isn't enough.
+      #include "nvs_flash.h"
+      #include "nvs.h"
     #endif
     BLESerial SerialBT;
   #else
@@ -81,22 +85,30 @@ char bt_da[BT_DEV_ADDR_LEN];
     void bt_confirm_pairing(uint32_t numVal) {
       bt_ssp_pin = numVal;
       kiss_indicate_btpin();
-      if (bt_allow_pairing) {
-        // Deferred to update_bt() rather than calling confirmReply(true)
-        // right here - esp_bt_gap_ssp_confirm_reply() (which this wraps)
-        // doesn't have to be called synchronously from within this GAP
-        // callback, and Bluedroid just leaves the negotiation paused until
-        // it is. Confirming immediately let auth complete (and
-        // bt_pairing_complete()/bt_disable_pairing() zero bt_ssp_pin again)
-        // before the display's own ~7fps update_display() cadence
-        // necessarily landed a redraw in between - the passkey only ever
-        // reliably made it on screen if that race happened to go its way,
-        // otherwise it flashed for well under a second or not at all.
-        bt_confirm_pending = true;
-        bt_confirm_pending_since = millis();
-      } else {
-        SerialBT.confirmReply(false);
+      if (!bt_allow_pairing) {
+        // Peer-initiated pairing (e.g. a phone/PC's own Bluetooth stack
+        // starting SSP on its own, before the on-device button-hold gesture
+        // - bt_enable_pairing() - was ever used) - accept it and enter the
+        // same pairing-display state that gesture would, so the passkey
+        // shows up automatically. Mirrors the ESP32 HAS_BLE
+        // bt_security_request_callback() and MCU_NRF52 bt_passkey_callback()
+        // below, which do the same for their own stacks.
+        bt_allow_pairing = true;
+        bt_pairing_started = millis();
+        bt_state = BT_STATE_PAIRING;
       }
+      // Deferred to update_bt() rather than calling confirmReply(true)
+      // right here - esp_bt_gap_ssp_confirm_reply() (which this wraps)
+      // doesn't have to be called synchronously from within this GAP
+      // callback, and Bluedroid just leaves the negotiation paused until
+      // it is. Confirming immediately let auth complete (and
+      // bt_pairing_complete()/bt_disable_pairing() zero bt_ssp_pin again)
+      // before the display's own ~7fps update_display() cadence
+      // necessarily landed a redraw in between - the passkey only ever
+      // reliably made it on screen if that race happened to go its way,
+      // otherwise it flashed for well under a second or not at all.
+      bt_confirm_pending = true;
+      bt_confirm_pending_since = millis();
     }
 
     void bt_stop() {
@@ -411,6 +423,38 @@ char bt_da[BT_DEV_ADDR_LEN];
         free(dev_list);
       #elif defined(CONFIG_NIMBLE_ENABLED)
         ble_store_clear();
+        // ble_store_clear() (NimBLE's own "delete every known object type")
+        // doesn't reliably clear RPA identity-resolution records too, at
+        // least in the exact esp-nimble/esp-idf version bundled with this
+        // project - confirmed live: even right after this same call,
+        // pairing a SECOND, different central still failed
+        // ("ble_store_config_write_rpa_rec rc=27", BLE_HS_ESTORE_CAP - that
+        // record store already full from earlier pairing attempts), and it
+        // corrupted the FIRST device's own bond in the process (its next
+        // reconnect came back fully unencrypted - encrypted=0). Every
+        // NimBLE bond/identity record - RPA records ("rpa_rec_N" keys)
+        // included - is persisted under one shared "nimble_bond" NVS
+        // namespace (ble_store_nvs.c), so erasing that whole namespace
+        // directly is a robust guarantee independent of ble_store_clear()'s
+        // own object-type coverage in this specific build.
+        nvs_handle_t nimble_nvs_handle;
+        if (nvs_open("nimble_bond", NVS_READWRITE, &nimble_nvs_handle) == ESP_OK) {
+          nvs_erase_all(nimble_nvs_handle);
+          nvs_commit(nimble_nvs_handle);
+          nvs_close(nimble_nvs_handle);
+        }
+        // The NimBLE host keeps its own in-RAM copy of every one of these
+        // tables (ble_store_config.c's ble_store_config_*_recs[] arrays)
+        // and only reloads them from NVS at its own init time
+        // (ble_store_config_init(), called from BLEDevice::init()) - so the
+        // NVS erase above is invisible to the CURRENTLY running host until
+        // it restarts. Cycle it here (only if it was actually running) so
+        // Forget Bonds takes full effect immediately, without requiring the
+        // user to separately power-cycle the device afterward.
+        if (bt_state != BT_STATE_OFF) {
+          bt_stop();
+          bt_start();
+        }
       #endif
     }
 
@@ -452,14 +496,31 @@ char bt_da[BT_DEV_ADDR_LEN];
 
     void bt_passkey_notify_callback(uint32_t passkey) {
       // Serial.printf("Got passkey notification: %d\n", passkey);
-      if (bt_allow_pairing) {
-        bt_ssp_pin = passkey;
-        bt_pairing_started = millis();
-        kiss_indicate_btpin();
-      } else {
-        // Serial.println("Pairing not allowed, re-init");
-        SerialBT.disconnect();
+      // This is the callback that actually fires for RNode's DisplayOnly IO
+      // capability under NimBLE (BLE_GAP_EVENT_PASSKEY_ACTION's
+      // BLE_SM_IOACT_DISP case calls onPassKeyNotify(), not onPassKeyRequest()
+      // - see BLEServer.cpp, framework-arduinoespressif32/libraries/BLE/src -
+      // onPassKeyRequest()/bt_passkey_callback() below is only reached for
+      // BLE_SM_IOACT_INPUT, i.e. a device with a keyboard capability, which
+      // RNode never has). bt_security_request_callback()'s own auto-accept
+      // (above) is Bluedroid-only (ESP_GAP_BLE_SEC_REQ_EVT, BLEDevice.cpp -
+      // gated #if CONFIG_BLUEDROID_ENABLED, dead code under this project's
+      // actual NimBLE backend) and never runs, so THIS is the real gate a
+      // peer-initiated pairing has to clear - unconditionally disconnecting
+      // here whenever bt_allow_pairing was still false (the pre-auto-pairing
+      // behavior) tore down the link before the passkey was ever shown or a
+      // bond could form, on every peer-initiated attempt, regardless of
+      // bt_just_works_enabled (which only affects GATT permission bits and
+      // bt_authentication_complete_callback()'s acceptance criteria, not
+      // this gate).
+      DEBUG_LOG("[BTDBG %lu] passkey_notify_callback passkey=%06lu bt_allow_pairing=%d\n", millis(), (unsigned long)passkey, bt_allow_pairing);
+      if (!bt_allow_pairing) {
+        bt_allow_pairing = true;
+        bt_state = BT_STATE_PAIRING;
       }
+      bt_ssp_pin = passkey;
+      bt_pairing_started = millis();
+      kiss_indicate_btpin();
     }
 
     bool bt_confirm_pin_callback(uint32_t pin) {
@@ -469,7 +530,26 @@ char bt_da[BT_DEV_ADDR_LEN];
 
     void bt_update_passkey() {
       // Serial.println("Updating passkey");
-      pairing_pin = random(899999)+100000;
+      // esp_random() directly, NOT the Arduino random() wrapper - confirmed
+      // live that the same passkey was recurring across repeated reboots
+      // even after regenerating on every connect (bt_connect_callback()
+      // above). Root cause: RNode_Firmware.ino's own setup() seeds the CSMA
+      // R-value selector with randomSeed((unsigned long)esp_random()) very
+      // early on - and WMath.cpp's randomSeed() unconditionally sets
+      // s_useRandomHW = false the moment it's ever called, for the rest of
+      // the firmware's life, switching every subsequent random() call
+      // anywhere in the firmware (this one included) from the hardware TRNG
+      // over to a plain seeded rand(). If that one early esp_random() seed
+      // itself lacks enough boot-to-boot variation (the same "too early for
+      // real entropy" hazard, just relocated to that one call site instead
+      // of this one), every random() call downstream of it - including this
+      // one, no matter when or how often it's called afterward - replays
+      // the same deterministic sequence every boot. esp_random() itself is
+      // ESP-IDF's own TRNG API, entirely unrelated to Arduino's random()/
+      // randomSeed() layer, so calling it directly here sidesteps the
+      // problem regardless of what randomSeed() elsewhere has done -
+      // without touching that CSMA seeding, which is a separate concern.
+      pairing_pin = 100000 + (esp_random() % 900000);
       bt_ssp_pin = pairing_pin;
     }
 
@@ -492,13 +572,27 @@ char bt_da[BT_DEV_ADDR_LEN];
     }
 
     bool bt_security_request_callback() {
-      if (bt_allow_pairing) {
-          // Serial.println("Accepting security request");
-          return true;
-        } else {
-          // Serial.println("Rejecting security request");
-          return false;
-        }
+      DEBUG_LOG("[BTDBG %lu] security_request_callback\n", millis());
+      if (!bt_allow_pairing) {
+        // Peer (central) initiated a pairing/security request on its own,
+        // e.g. a phone/PC's BLE stack bonding automatically the moment it
+        // tries to read/write the ENC_MITM-gated RX/TX characteristics
+        // (SetupSerialService(), BLESerial.cpp) - before the on-device
+        // button-hold gesture (bt_enable_pairing()) was ever used. Accept it
+        // and enter the same pairing-display state that gesture would, the
+        // same way Meshtastic nodes auto-display a passkey for a
+        // client-initiated pairing rather than requiring a physical step
+        // first. setForceAuthentication (bt_security_setup() below) is
+        // deliberately left alone here - this only changes whether an
+        // incoming request is granted, not whether the RNode proactively
+        // sends one on every connect (see that function's own comment for
+        // why forcing that unconditionally previously broke bonded
+        // reconnects).
+        bt_allow_pairing = true;
+        bt_pairing_started = millis();
+        bt_state = BT_STATE_PAIRING;
+      }
+      return true;
     }
 
     #if defined(CONFIG_BLUEDROID_ENABLED)
@@ -544,6 +638,10 @@ char bt_da[BT_DEV_ADDR_LEN];
     }
     #elif defined(CONFIG_NIMBLE_ENABLED)
     void bt_authentication_complete_callback(ble_gap_conn_desc *desc) {
+      DEBUG_LOG("[BTDBG %lu] auth_complete conn_handle=%d encrypted=%d authenticated=%d bonded=%d key_size=%d peer_id_addr=%02x:%02x:%02x:%02x:%02x:%02x type=%d bond_count=%d\n",
+        millis(), desc->conn_handle, desc->sec_state.encrypted, desc->sec_state.authenticated, desc->sec_state.bonded, desc->sec_state.key_size,
+        desc->peer_id_addr.val[5], desc->peer_id_addr.val[4], desc->peer_id_addr.val[3], desc->peer_id_addr.val[2], desc->peer_id_addr.val[1], desc->peer_id_addr.val[0],
+        desc->peer_id_addr.type, bt_bond_count());
       // desc->sec_state has 3 separate bits: encrypted, authenticated (MITM
       // specifically), and bonded. Gated on .authenticated by default -
       // RX/TX's own GATT permissions (BLESerial.cpp, SetupSerialService())
@@ -619,10 +717,26 @@ char bt_da[BT_DEV_ADDR_LEN];
 
     void bt_connect_callback(BLEServer *server) {
       uint16_t conn_id = server->getConnId();
-      // Serial.printf("Connected: %d\n", conn_id);
+      DEBUG_LOG("[BTDBG %lu] connect_callback conn_id=%d\n", millis(), conn_id);
       display_unblank();
       ble_authenticated = false;
       if (bt_state != BT_STATE_PAIRING) { bt_state = BT_STATE_CONNECTED; }
+      // Roll a fresh passkey before any pairing handshake on this connection
+      // can start - BLE_GAP_EVENT_PASSKEY_ACTION (BLEServer.cpp) reads
+      // BLESecurity::getPassKey() and locks in that value before our own
+      // bt_passkey_notify_callback() ever runs, so it can only be changed
+      // here, ahead of time, not reactively once displayed. This also fixes
+      // a real entropy bug: the very first pairing_pin (bt_setup_hw() ->
+      // bt_security_setup(), called before the BT radio ever starts - see
+      // bt_init()'s own comment on why bt_start() is deferred) was generated
+      // from esp_random(), which per Espressif's own docs only produces true
+      // entropy once the RF subsystem (WiFi or BT) has been active for a
+      // while - calling it that early produced the exact same "random" value
+      // on every boot, confirmed live (identical passkey across repeated
+      // reboots). By the time a peer has connected, BT radio has been
+      // running long enough for this call to get real entropy.
+      bt_update_passkey();
+      BLESecurity::setPassKey(true, pairing_pin);
       // See bt_pending_rns_link_state's own comment (above) for why this is
       // deferred instead of a direct call - this callback runs on NimBLE's
       // own host task, not loopTask.
@@ -631,7 +745,7 @@ char bt_da[BT_DEV_ADDR_LEN];
 
     void bt_disconnect_callback(BLEServer *server) {
       uint16_t conn_id = server->getConnId();
-      // Serial.printf("Disconnected: %d\n", conn_id);
+      DEBUG_LOG("[BTDBG %lu] disconnect_callback conn_id=%d bt_state=%d\n", millis(), conn_id, bt_state);
       display_unblank();
       ble_authenticated = false;
       ble_conn_handle = 0xFFFF; // BLE_HS_CONN_HANDLE_NONE
@@ -693,6 +807,16 @@ char bt_da[BT_DEV_ADDR_LEN];
       // (Windows/bleak reconnecting via a cached OS-level bond), which is
       // the bug this flag was introduced to fix in the first place - see
       // "Fix BLE reconnect and notification delivery on Windows".
+      //
+      // This function also runs at boot (bt_setup_hw(), before bt_start()
+      // has ever brought the NimBLE host up - see bt_init()'s own comment
+      // on why that's deferred) - the bond-count half of this decision
+      // (bt_connect_callback() below layers in bt_bond_count()==0 on top of
+      // this same flag, for connections specifically) MUST NOT live here:
+      // bt_bond_count() -> ble_store_util_count() -> ble_hs_lock() derefs
+      // NimBLE host state that doesn't exist yet at boot time - confirmed
+      // live, a hard LoadProhibited crash-loop (never reaches BT ready)
+      // when this was tried directly in this function.
       BLESecurity::setForceAuthentication(bt_allow_pairing);
     }
 
@@ -843,10 +967,31 @@ char bt_da[BT_DEV_ADDR_LEN];
 
   bool bt_passkey_callback(uint16_t conn_handle, uint8_t const passkey[6], bool match_request) {
     // Serial.println("Passkey callback");
-    if (bt_allow_pairing) {
-      return true;
+    // Display the passkey the SoftDevice actually generated for this
+    // pairing attempt (6 ASCII digit bytes, same format Bluefruit's setPIN()
+    // takes) rather than trusting our own separately-tracked pairing_pin -
+    // by the time this callback fires the SoftDevice has already committed
+    // to whichever value setPIN() last configured, and on a peer-initiated
+    // pairing (below) that may not have been refreshed since the last
+    // manual bt_enable_pairing() call. Same numVal-from-the-stack pattern
+    // the ESP32 classic-Bluetooth SPP path already uses (bt_confirm_pairing,
+    // above).
+    uint32_t numeric_passkey = 0;
+    for (int i = 0; i < 6; i++) { numeric_passkey = numeric_passkey * 10 + (passkey[i] - '0'); }
+    bt_ssp_pin = numeric_passkey;
+    kiss_indicate_btpin();
+    if (!bt_allow_pairing) {
+      // Peer-initiated pairing (e.g. a phone/PC's BLE stack bonding on its
+      // own) before the on-device button-hold gesture (bt_enable_pairing())
+      // was ever used - accept it and enter the same pairing-display state
+      // that gesture would. Mirrors the ESP32 HAS_BLE
+      // bt_security_request_callback() and HAS_BLUETOOTH bt_confirm_pairing()
+      // above, which do the same for their own stacks.
+      bt_allow_pairing = true;
+      bt_pairing_started = millis();
+      bt_state = BT_STATE_PAIRING;
     }
-    return false;
+    return true;
   }
 
   void bt_connect_callback(uint16_t conn_handle) {

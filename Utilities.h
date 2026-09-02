@@ -671,12 +671,6 @@ uint8_t boot_vector = 0x00;
   };
 
   const uint16_t BUZZER_ASYNC_GAP_MS = 10;
-  // Same underlying LEDC async-detach race buzzer_play_notes() works
-  // around with delay(2) - see that function's own comment. The task can
-  // genuinely block here (unlike the old loop()-polled version, which had
-  // to split this into a buzzer_async_pin_settling flag it checked next
-  // tick instead), so this is now just a plain sequential vTaskDelay().
-  const uint16_t BUZZER_ASYNC_SETTLE_MS = 2;
 
   QueueHandle_t g_buzzer_melody_queue = NULL;
   // Written only by buzzer_task(), read only by buzzer_wait_for_melody()
@@ -727,12 +721,44 @@ uint8_t boot_vector = 0x00;
       } else if (active) {
         // Timed out - the current note or gap boundary was reached.
         if (!in_gap) {
-          noTone(buzzer_pin);
           #if MCU_VARIANT == MCU_ESP32
-            vTaskDelay(pdMS_TO_TICKS(BUZZER_ASYNC_SETTLE_MS));
+            // Silence via 0Hz (ledcWriteTone(pin,0) -> ledcWrite(pin,0),
+            // esp32-hal-ledc.c) instead of noTone()+pinMode() - the latter
+            // pair used to run here on every single note-to-note
+            // transition, each one a fresh chance to lose the LEDC
+            // async-detach race documented on buzzer_play_notes() (this
+            // branch's own former vTaskDelay(BUZZER_ASYNC_SETTLE_MS) was a
+            // best-effort "hope Tone.cpp's own tone_task gets scheduled in
+            // time" heuristic, not a real guarantee) - confirmed live via
+            // a debug-UART capture during real BLE pairing traffic:
+            // "assert failed: multi_heap_free multi_heap_poisoning.c:279
+            // (head != NULL)" from ledcDetachBus() -> free(), immediately
+            // preceded by "noTone(): Tone is not running on given pin"
+            // (Tone.cpp) - buzzer_task()'s own pinMode() had already
+            // detached the LEDC channel out from under Tone.cpp's
+            // tone_task before it got to process its own already-queued
+            // detach of the same channel, double-freeing its
+            // heap-allocated handle. Heavy concurrent NimBLE host-task
+            // activity during a live pairing handshake made that
+            // scheduling window (previously narrow enough to go
+            // unnoticed) wide enough to actually lose. tone(pin,0) writes
+            // the same message queue Tone.cpp's own tone() would but
+            // never detaches the channel - duty 0 holds the pin actively
+            // low (not floating, so no self-oscillation risk either)
+            // without ever touching the peripheral manager from this
+            // task, so there's no longer a second party to race at all,
+            // not just a smaller window. ESP32-only: nRF52's tone()/
+            // noTone() (Adafruit core, PWM peripheral, not LEDC) don't
+            // share this specific hazard and were never observed to hit
+            // it, so that side keeps the original noTone()+pinMode()
+            // sequence rather than assuming an unverified freq=0 meaning
+            // there too.
+            tone(buzzer_pin, 0);
+          #else
+            noTone(buzzer_pin);
+            pinMode(buzzer_pin, OUTPUT);
+            digitalWrite(buzzer_pin, LOW);
           #endif
-          pinMode(buzzer_pin, OUTPUT);
-          digitalWrite(buzzer_pin, LOW);
           in_gap = true;
         } else {
           index++;

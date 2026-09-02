@@ -32,6 +32,7 @@ bool bt_confirm_pin_callback(uint32_t pin);
 void bt_connect_callback(BLEServer *server);
 void bt_disconnect_callback(BLEServer *server);
 bool bt_client_authenticated();
+void bt_security_setup();
 extern bool bt_just_works_enabled;
 
 uint32_t BLESerial::onPassKeyRequest() { return bt_passkey_callback(); }
@@ -162,6 +163,26 @@ bool BLESerial::begin(const char *name) {
   if (!BLEDevice::init(name)) {
     return false;
   }
+
+  // Re-apply our own security policy (IO capability, MITM/bonding/SC,
+  // passkey) here, immediately after BLEDevice::init() - NOT relying on
+  // whatever bt_setup_hw() (Bluetooth.h) already set at boot, long before
+  // this ever runs (bt_start()/this function is deliberately deferred
+  // until BT is actually turned on, see bt_init()'s own comment).
+  // BLEDevice::init() unconditionally resets NimBLE's own ble_hs_cfg
+  // (BLEDevice.cpp: sm_io_cap = BLE_HS_IO_NO_INPUT_OUTPUT, sm_bonding = 0,
+  // sm_mitm = 0) as part of its own setup - so any earlier
+  // bt_security_setup() call is silently wiped the moment this runs.
+  // Confirmed live: this is exactly why a device's first-ever pairing
+  // attempt negotiated plain Just Works regardless of policy (ble_hs_cfg
+  // genuinely was NoInputNoOutput/no-MITM at that point, not a peer-side
+  // quirk) while every later attempt (after some other path - e.g. an
+  // auth failure - happened to call bt_security_setup() again post-init)
+  // worked correctly. Mirrors Meshtastic's own NimbleBluetooth::setup()
+  // (src/nimble/NimbleBluetooth.cpp), which calls BLEDevice::init() then
+  // its full BLESecurity setup, then createServer() - in that order, on
+  // every bring-up, so this is never left relying on stale pre-init state.
+  bt_security_setup();
 
   // Preferred ATT MTU for this device - just an offer, not a guarantee: the
   // actual negotiated value settles to whichever is lower once the central
