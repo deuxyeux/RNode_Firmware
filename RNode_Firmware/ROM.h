@@ -287,6 +287,20 @@
   #define BT_AUTO_START_ENABLE_BYTE  0x01
   #define BT_AUTO_START_DISABLE_BYTE 0x00
 
+  // Whether a configured radio automatically comes online at boot (classic
+  // TNC-mode auto-start, RNode_Firmware.ino) - RNode Settings > Radio >
+  // Auto Start (Menu.h). Not gated on HAS_URNS - see MENU_STATE_URNS_
+  // RADIO_LIST's own comment (Menu.h) for why the Radio menu itself isn't
+  // either. Same unclaimed 256-823 gap as the toggles above, raw physical
+  // byte, no eeprom_addr() wrapper. Unlike ADDR_CONF_BT_AUTO_START above,
+  // erased/never-written (0xFF) means ENABLED (radio_auto_start_enabled's
+  // compiled default, Config.h) - this preserves every already-deployed
+  // board's existing behavior (a configured RNode has always come up hot),
+  // opposite of BT_AUTO_START's "new feature, must opt in" polarity.
+  #define ADDR_CONF_RADIO_AUTO_START 271
+  #define RADIO_AUTO_START_ENABLE_BYTE  0x01
+  #define RADIO_AUTO_START_DISABLE_BYTE 0x00
+
   #define CONFIG_SIZE     256
   #define ADDR_CONF_SSID 0x00
   #define ADDR_CONF_PSK  0x21

@@ -339,6 +339,11 @@
       // handling (lib/microLXMF/src/LXMF/LXMessage.cpp) - fixed there, not
       // something to work around by leaving this feature off.
       #define HAS_LXMF true
+      // See global-defaults block's own comment on URNS_ENABLED_DEFAULT -
+      // this board's onboard node ran unconditionally before the toggle
+      // existed, so already-deployed units need to keep booting with URNS
+      // on rather than losing it silently on their next update.
+      #define URNS_ENABLED_DEFAULT true
       #undef HAS_DISPLAY
       #define HAS_DISPLAY true
       #undef HAS_NP
@@ -471,6 +476,10 @@
       // explicitly rather than silently losing it now that the default
       // flipped.
       #define HAS_LXMF true
+      // See global-defaults block's own comment on URNS_ENABLED_DEFAULT -
+      // same reasoning as HAS_LXMF just above, for the same already-
+      // deployed-units reason.
+      #define URNS_ENABLED_DEFAULT true
       #undef HAS_DISPLAY
       #define HAS_DISPLAY true
       #undef HAS_NP
@@ -2535,6 +2544,22 @@
   // #include'd behind HAS_URNS in the first place (Utilities.h).
   #ifndef HAS_LXMF
     #define HAS_LXMF false
+  #endif
+
+  // Compiled default for urns_enabled (URNS.h) when its EEPROM byte
+  // (ADDR_CONF_URNS) has never been explicitly written - same "erased
+  // EEPROM means never touched, so fall back to this compiled default"
+  // convention that byte already uses. Defaults false: URNS should be an
+  // explicit opt-in on a newly flashed/provisioned board, not silently
+  // running out of the box. MeshAdventurer-S3/MeshPoE-S3 override this
+  // back to true in their own blocks below, same "explicit opt-back-in"
+  // pattern as HAS_LXMF above - those two boards' onboard node ran
+  // unconditionally before either toggle existed, so their own
+  // already-deployed units (which have never touched this EEPROM byte
+  // either) need to keep booting with URNS on, not silently lose it on
+  // their next firmware update. Meaningless when HAS_URNS is false.
+  #ifndef URNS_ENABLED_DEFAULT
+    #define URNS_ENABLED_DEFAULT false
   #endif
 
   // Whether this board has a free UART broken out to a header/pins that

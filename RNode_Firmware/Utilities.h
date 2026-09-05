@@ -253,6 +253,7 @@ void drot_conf_save(uint8_t val);
   void bt_just_works_conf_save(bool is_enabled);
   void bt_auto_start_conf_save(bool is_enabled);
 #endif
+void radio_auto_start_conf_save(bool is_enabled);
 #if HAS_RTC == true
   void kiss_indicate_time();
 #endif
@@ -2956,6 +2957,14 @@ void bt_auto_start_conf_save(bool is_enabled) {
   // it on doesn't start BLE right now if it isn't already running.
 }
 #endif
+
+void radio_auto_start_conf_save(bool is_enabled) {
+  radio_auto_start_enabled = is_enabled;
+  eeprom_update(ADDR_CONF_RADIO_AUTO_START, is_enabled ? RADIO_AUTO_START_ENABLE_BYTE : RADIO_AUTO_START_DISABLE_BYTE);
+  // No live effect here - same reasoning as bt_auto_start_conf_save()
+  // above, this only governs what the NEXT boot's classic TNC-mode check
+  // does (RNode_Firmware.ino), not the radio's current session state.
+}
 
 void snd_conf_save(bool is_enabled) {
 	sound_enabled = is_enabled;

@@ -248,6 +248,17 @@
 	// Operational variables
 	bool radio_locked  = true;
 	bool radio_online  = false;
+	// Whether the classic TNC-mode boot path (RNode_Firmware.ino, "if
+	// (hw_ready && eeprom_have_conf())") automatically calls startRadio()
+	// once a saved radio config exists, instead of leaving the radio off
+	// until something explicitly starts it (host CMD_RADIO_STATE, on-device
+	// Radio menu's Start Radio, or URNS's own urns_radio_bringup() if
+	// urns_enabled - none of those are affected by this flag, it only
+	// gates the classic unconditional auto-start). Defaults true - matches
+	// every board's existing behavior today (a configured RNode has always
+	// come up hot), see RNode Settings > Radio > Auto Start (Menu.h) for
+	// the opt-out.
+	bool radio_auto_start_enabled = true;
 	bool community_fw  = true;
 	bool hw_ready      = false;
 	bool radio_error   = false;

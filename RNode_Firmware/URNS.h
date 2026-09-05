@@ -188,14 +188,18 @@ RNS::Destination urns_destination({RNS::Type::NONE});
 bool urns_ready = false;
 
 // Master switch (ADDR_CONF_URNS, ROM.h; RNode Settings > URNS > Enabled).
-// Defaults true - the onboard node ran unconditionally before this toggle
-// existed, so a never-touched EEPROM byte should keep matching that,
-// same "leave the compiled default alone unless explicitly written"
-// convention as gnss_enabled (GNSS.h). Only takes effect at boot -
-// urns_init()/urns_radio_bringup() (RNode_Firmware.ino) are gated on it;
-// there's no live start/stop path (matches ESP-NOW's Enabled field, not
-// GNSS's live-toggle one), so flipping it in the menu requires a reboot.
-bool urns_enabled = true;
+// Defaults to URNS_ENABLED_DEFAULT (Boards.h global-defaults block, false
+// unless a board explicitly opts back in) - a never-touched EEPROM byte
+// falls back to this compiled default, same "leave the compiled default
+// alone unless explicitly written" convention as gnss_enabled (GNSS.h).
+// See URNS_ENABLED_DEFAULT's own comment for why this isn't a flat
+// `false`: MeshAdventurer-S3/MeshPoE-S3 override it back to true since
+// their onboard node ran unconditionally before this toggle existed.
+// Only takes effect at boot - urns_init()/urns_radio_bringup()
+// (RNode_Firmware.ino) are gated on it; there's no live start/stop path
+// (matches ESP-NOW's Enabled field, not GNSS's live-toggle one), so
+// flipping it in the menu requires a reboot.
+bool urns_enabled = URNS_ENABLED_DEFAULT;
 
 // Whether this node participates in RNS transport (relays other nodes'
 // traffic - RNS::Reticulum::transport_enabled(), called from urns_init()

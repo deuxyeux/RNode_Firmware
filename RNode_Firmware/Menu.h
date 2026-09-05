@@ -877,15 +877,16 @@
   // already use (lora_freq/lora_bw/lora_sf/lora_cr/lora_txp,
   // eeprom_conf_save(), Utilities.h), which work independently of the
   // onboard URNS node - see project plan for the Radio menu.
-  #define URNS_RADIO_ITEM_FREQ  0
-  #define URNS_RADIO_ITEM_BW    1
-  #define URNS_RADIO_ITEM_SF    2
-  #define URNS_RADIO_ITEM_CR    3
-  #define URNS_RADIO_ITEM_TXP   4
-  #define URNS_RADIO_ITEM_START 5
-  #define URNS_RADIO_ITEM_CLEAR 6
-  #define URNS_RADIO_ITEM_BACK  7
-  #define URNS_RADIO_ITEM_COUNT 8
+  #define URNS_RADIO_ITEM_FREQ       0
+  #define URNS_RADIO_ITEM_BW         1
+  #define URNS_RADIO_ITEM_SF         2
+  #define URNS_RADIO_ITEM_CR         3
+  #define URNS_RADIO_ITEM_TXP        4
+  #define URNS_RADIO_ITEM_AUTO_START 5
+  #define URNS_RADIO_ITEM_START      6
+  #define URNS_RADIO_ITEM_CLEAR      7
+  #define URNS_RADIO_ITEM_BACK       8
+  #define URNS_RADIO_ITEM_COUNT      9
 
   #if HAS_SENSORS == true
     // Fully read-only - no editable fields, so unlike GNSS's own list above
@@ -1492,6 +1493,7 @@
   uint8_t  staged_lora_sf   = 0;
   uint8_t  staged_lora_cr   = 0;
   uint8_t  staged_lora_txp  = 0;
+  bool staged_radio_auto_start_enabled = true;
 
   #if HAS_URNS == true
     uint8_t urns_menu_cursor = 0;
@@ -2131,44 +2133,52 @@
       staged_lora_txp = (uint8_t)v;
     }
 
-    // Messenger Settings > Retries (MENU_STATE_MSNGR_SETTINGS_EDIT) - fixed
-    // 0-5 range (LXMRouter::set_max_delivery_attempts(), LXMRouter.h),
-    // always clamped regardless of the wrap param - unlike Frequency/SF/
-    // TX Power above, there's no sensible "wrap past the end" behavior for
-    // a retry count (5 wrapping to 0 would silently disable retries, the
-    // opposite of what turning the encoder further clearly means).
-    void step_msngr_retries(int8_t dir, bool wrap = false) {
-      int8_t v = (int8_t)staged_msngr_max_retries + (dir > 0 ? 1 : -1);
-      if (v < 0) v = 0;
-      if (v > 5) v = 5;
-      staged_msngr_max_retries = (uint8_t)v;
-    }
+    // staged_msngr_* (below) only exists under HAS_LXMF == true (see its
+    // own declaration block above) - unlike step_urns_radio_txp() etc.
+    // above, this was missing the same guard until a HAS_URNS==true &&
+    // HAS_LXMF==false build (heltec32v4pa_urns) actually exercised it.
+    // Every other HAS_URNS board also sets HAS_LXMF true, which is why
+    // this went uncaught until now.
+    #if HAS_LXMF == true
+      // Messenger Settings > Retries (MENU_STATE_MSNGR_SETTINGS_EDIT) - fixed
+      // 0-5 range (LXMRouter::set_max_delivery_attempts(), LXMRouter.h),
+      // always clamped regardless of the wrap param - unlike Frequency/SF/
+      // TX Power above, there's no sensible "wrap past the end" behavior for
+      // a retry count (5 wrapping to 0 would silently disable retries, the
+      // opposite of what turning the encoder further clearly means).
+      void step_msngr_retries(int8_t dir, bool wrap = false) {
+        int8_t v = (int8_t)staged_msngr_max_retries + (dir > 0 ? 1 : -1);
+        if (v < 0) v = 0;
+        if (v > 5) v = 5;
+        staged_msngr_max_retries = (uint8_t)v;
+      }
 
-    // Messenger Settings > Retry Delay (MENU_STATE_MSNGR_SETTINGS_EDIT) -
-    // 1-60 second range, 1s steps. No natural small preset set the way
-    // Auto Announce has, so a plain clamped stepper like Retries above,
-    // not a preset table. Always clamped, never wraps - same reasoning as
-    // Retries (wrapping 60->1 would silently make retries near-instant,
-    // the opposite of what turning the encoder further past 60 means).
-    void step_msngr_retry_delay(int8_t dir, bool wrap = false) {
-      int8_t v = (int8_t)staged_msngr_retry_delay_s + (dir > 0 ? 1 : -1);
-      if (v < 1) v = 1;
-      if (v > 60) v = 60;
-      staged_msngr_retry_delay_s = (uint8_t)v;
-    }
+      // Messenger Settings > Retry Delay (MENU_STATE_MSNGR_SETTINGS_EDIT) -
+      // 1-60 second range, 1s steps. No natural small preset set the way
+      // Auto Announce has, so a plain clamped stepper like Retries above,
+      // not a preset table. Always clamped, never wraps - same reasoning as
+      // Retries (wrapping 60->1 would silently make retries near-instant,
+      // the opposite of what turning the encoder further past 60 means).
+      void step_msngr_retry_delay(int8_t dir, bool wrap = false) {
+        int8_t v = (int8_t)staged_msngr_retry_delay_s + (dir > 0 ? 1 : -1);
+        if (v < 1) v = 1;
+        if (v > 60) v = 60;
+        staged_msngr_retry_delay_s = (uint8_t)v;
+      }
 
-    // Messenger Settings > Auto Announce (MENU_STATE_MSNGR_SETTINGS_EDIT) -
-    // steps through msngr_announce_interval_presets_s's index range
-    // (Messenger.h: Off/15m/30m/1h/2h/3h/6h/12h). Same "always clamped,
-    // never wraps" reasoning as Retries above - wrapping from 12h back to
-    // Off would silently disable auto-announce, the opposite of what
-    // turning the encoder further past 12h clearly means.
-    void step_msngr_announce_interval(int8_t dir, bool wrap = false) {
-      int8_t v = (int8_t)staged_msngr_announce_interval_idx + (dir > 0 ? 1 : -1);
-      if (v < 0) v = 0;
-      if (v > MSNGR_ANNOUNCE_INTERVAL_PRESET_COUNT - 1) v = MSNGR_ANNOUNCE_INTERVAL_PRESET_COUNT - 1;
-      staged_msngr_announce_interval_idx = (uint8_t)v;
-    }
+      // Messenger Settings > Auto Announce (MENU_STATE_MSNGR_SETTINGS_EDIT) -
+      // steps through msngr_announce_interval_presets_s's index range
+      // (Messenger.h: Off/15m/30m/1h/2h/3h/6h/12h). Same "always clamped,
+      // never wraps" reasoning as Retries above - wrapping from 12h back to
+      // Off would silently disable auto-announce, the opposite of what
+      // turning the encoder further past 12h clearly means.
+      void step_msngr_announce_interval(int8_t dir, bool wrap = false) {
+        int8_t v = (int8_t)staged_msngr_announce_interval_idx + (dir > 0 ? 1 : -1);
+        if (v < 0) v = 0;
+        if (v > MSNGR_ANNOUNCE_INTERVAL_PRESET_COUNT - 1) v = MSNGR_ANNOUNCE_INTERVAL_PRESET_COUNT - 1;
+        staged_msngr_announce_interval_idx = (uint8_t)v;
+      }
+    #endif
 
     // Sane starting values for any field still at its Config.h "never
     // configured" sentinel (0/0/0/0xFF) - seeded the moment the user opens
@@ -2565,6 +2575,7 @@
     staged_lora_sf   = (uint8_t)lora_sf;
     staged_lora_cr   = (uint8_t)lora_cr;
     staged_lora_txp  = (uint8_t)lora_txp;
+    staged_radio_auto_start_enabled = radio_auto_start_enabled;
     #if HAS_ENCODER == true
       staged_encoder_enabled = encoder_enabled;
     #endif
@@ -2794,6 +2805,9 @@
         if (!radio_online) startRadio();
         eeprom_conf_save();
         hard_reset();
+      }
+      if (staged_radio_auto_start_enabled != radio_auto_start_enabled) {
+        radio_auto_start_conf_save(staged_radio_auto_start_enabled);
       }
     }
     #if HAS_ENCODER == true
@@ -3300,6 +3314,8 @@
         else if (urns_radio_menu_cursor == URNS_RADIO_ITEM_BW)   step_urns_radio_bw(dir, wrap);
         else if (urns_radio_menu_cursor == URNS_RADIO_ITEM_SF)   step_urns_radio_sf(dir, wrap);
         else if (urns_radio_menu_cursor == URNS_RADIO_ITEM_CR)   step_urns_radio_cr(dir, wrap);
+        else if (urns_radio_menu_cursor == URNS_RADIO_ITEM_AUTO_START)
+          staged_radio_auto_start_enabled = !staged_radio_auto_start_enabled;
         else                                                     step_urns_radio_txp(dir, wrap);
       }
     #if HAS_SENSORS == true
@@ -5592,7 +5608,15 @@
       icons[MENU_ITEM_SAVE_EXIT] = bm_menu_icon_saveexit;
       icon_widths[MENU_ITEM_SAVE_EXIT] = MENU_ICON_W_SAVEEXIT;
 
-      draw_menu_list_disp("RNODE SETTINGS", labels, valbufs, MENU_ITEM_COUNT, menu_cursor, icons, icon_widths, icon_dx);
+      // Same bt_dh[14]/bt_dh[15] 4-digit ID as bt_devname's "RNode XXXX"
+      // BLE name and the boot splash carousel (Display.h) - bt_dh is
+      // populated at boot on any ESP32 board or HAS_BLUETOOTH/HAS_BLE
+      // nRF52 board regardless of whether Bluetooth itself is enabled
+      // (see bt_init()'s own call-site gate, RNode_Firmware.ino), so this
+      // is available by the time the menu can ever be opened.
+      char settings_title[24];
+      sprintf(settings_title, "RNODE %02X%02X SETTINGS", bt_dh[14], bt_dh[15]);
+      draw_menu_list_disp(settings_title, labels, valbufs, MENU_ITEM_COUNT, menu_cursor, icons, icon_widths, icon_dx);
 
     } else if (menu_state == MENU_STATE_EDIT) {
       char valbuf[8];
@@ -6756,6 +6780,9 @@
         if (staged_lora_txp == 255) sprintf(valbufs[URNS_RADIO_ITEM_TXP], "Unset");
         else sprintf(valbufs[URNS_RADIO_ITEM_TXP], "%udBm", staged_lora_txp);
 
+        labels[URNS_RADIO_ITEM_AUTO_START] = "Auto Start";
+        sprintf(valbufs[URNS_RADIO_ITEM_AUTO_START], staged_radio_auto_start_enabled ? "ON" : "OFF");
+
         labels[URNS_RADIO_ITEM_START] = radio_online ? "Stop Radio" : "Start Radio";
         valbufs[URNS_RADIO_ITEM_START][0] = 0;
 
@@ -6781,6 +6808,8 @@
         } else if (urns_radio_menu_cursor == URNS_RADIO_ITEM_CR) {
           sprintf(valbuf, "4/%u", staged_lora_cr);
           draw_menu_edit_disp("CODING RATE", valbuf);
+        } else if (urns_radio_menu_cursor == URNS_RADIO_ITEM_AUTO_START) {
+          draw_menu_edit_disp("AUTO START", staged_radio_auto_start_enabled ? "ON" : "OFF");
         } else {
           sprintf(valbuf, "%u dBm", staged_lora_txp);
           draw_menu_edit_disp("TX POWER", valbuf);

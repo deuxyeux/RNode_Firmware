@@ -2932,7 +2932,18 @@ void validate_status() {
           if (hw_ready && eeprom_have_conf()) {
             eeprom_conf_load();
             op_mode = MODE_TNC;
-            startRadio();
+            // Raw physical byte, not through eeprom_addr() - see
+            // ADDR_CONF_RADIO_AUTO_START (ROM.h). Not gated on HAS_URNS -
+            // this is the classic TNC-mode auto-start, independent of
+            // urns_radio_bringup()'s own separate urns_enabled gate.
+            #if HAS_EEPROM
+              uint8_t radio_auto_start_raw = EEPROM.read(ADDR_CONF_RADIO_AUTO_START);
+            #elif MCU_VARIANT == MCU_NRF52
+              uint8_t radio_auto_start_raw = eeprom_read(ADDR_CONF_RADIO_AUTO_START);
+            #endif
+            if (radio_auto_start_raw == RADIO_AUTO_START_ENABLE_BYTE) radio_auto_start_enabled = true;
+            else if (radio_auto_start_raw == RADIO_AUTO_START_DISABLE_BYTE) radio_auto_start_enabled = false;
+            if (radio_auto_start_enabled) startRadio();
           }
         } else {
           hw_ready = false;
