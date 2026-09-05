@@ -5741,7 +5741,18 @@
 
         #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
           labels[BT_ITEM_BONDS] = "Bonds";
-          sprintf(valbufs[BT_ITEM_BONDS], "%d", bt_bond_count());
+          // bt_bond_count() -> ble_store_util_count() -> ble_hs_lock() derefs
+          // NimBLE host state that only exists once the host has actually
+          // started (see bt_security_setup()'s own comment on this exact
+          // crash). menu_confirm_select()'s bt_start() call on entering this
+          // list can silently no-op (BT_START_MIN_UPTIME_MS window, or
+          // SerialBT.begin() itself failing) and still land here with
+          // bt_state unchanged, so this can't assume the stack is up.
+          if (bt_state != BT_STATE_OFF) {
+            sprintf(valbufs[BT_ITEM_BONDS], "%d", bt_bond_count());
+          } else {
+            sprintf(valbufs[BT_ITEM_BONDS], "N/A");
+          }
 
           labels[BT_ITEM_UNPAIR] = "Forget Bonds";
           sprintf(valbufs[BT_ITEM_UNPAIR], ">"); // opens a confirm dialog, not an inline value

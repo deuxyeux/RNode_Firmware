@@ -244,41 +244,6 @@ char bt_da[BT_DEV_ADDR_LEN];
     }
 
   #elif HAS_BLE == true
-    #if HAS_URNS == true && (HAS_WIFI == true || HAS_ETHERNET == true)
-      // BLE and WiFi/Ethernet networking can't both be up at once on
-      // HAS_URNS boards - the internal-DRAM budget doesn't have room for
-      // both. Confirmed live: URNS/Reticulum's own init costs ~53KB,
-      // WiFi Remote's STA/lwIP bring-up costs ~50KB more (not ESP-NOW
-      // itself, which is cheap - it's the underlying WiFi.mode() call),
-      // leaving too little margin for bt_start()'s own ~78-82KB
-      // nimble_port_init() spike. A failed/partial bt_start() doesn't
-      // fail cleanly either - it drains the heap enough (observed: under
-      // 1KB free afterward) to also break the still-running WiFi stack,
-      // which is worse than just refusing up front. See
-      // project_meshpoe_s3_ble_urns_memory_crunch memory for the full
-      // budget breakdown.
-      //
-      // One-directional by design (matches what was actually asked for):
-      // this only blocks BLE from coming up while networking is active.
-      // It does NOT tear down BLE if WiFi/Ethernet gets turned on while
-      // BLE is already running - that reverse case can still recreate the
-      // same conflict and isn't guarded here.
-      #if HAS_WIFI == true
-        #include <WiFi.h>
-      #endif
-      #if HAS_ETHERNET == true
-        extern bool eth_disabled;
-      #endif
-      bool ble_networking_conflict() {
-          #if HAS_WIFI == true
-            if (WiFi.getMode() != WIFI_MODE_NULL) return true;
-          #endif
-          #if HAS_ETHERNET == true
-            if (!eth_disabled) return true;
-          #endif
-          return false;
-      }
-    #endif
     bool bt_setup_hw(); void bt_security_setup();
     BLESecurity *ble_security = new BLESecurity();
     bool ble_authenticated = false;
@@ -350,12 +315,6 @@ char bt_da[BT_DEV_ADDR_LEN];
     void bt_start() {
       // Serial.println("BT start");
       if (millis() < BT_START_MIN_UPTIME_MS) return;
-      #if HAS_URNS == true && (HAS_WIFI == true || HAS_ETHERNET == true)
-        // See ble_networking_conflict()'s own comment (above) for why -
-        // silent no-op, matching the BT_START_MIN_UPTIME_MS guard just
-        // above.
-        if (ble_networking_conflict()) return;
-      #endif
       display_unblank();
       if (bt_state == BT_STATE_OFF) {
         // SerialBT.begin() (BLESerial::begin(), BLESerial.cpp) now returns
@@ -372,8 +331,8 @@ char bt_da[BT_DEV_ADDR_LEN];
           SerialBT.setTimeout(10);
           // Gated on bt_state actually reaching ON, not on bt_start() merely
           // being called - this is the variant that can genuinely no-op
-          // above (BT_START_MIN_UPTIME_MS/ble_networking_conflict()) or
-          // right here (SerialBT.begin() returning false), most visibly
+          // above (BT_START_MIN_UPTIME_MS) or right here (SerialBT.begin()
+          // returning false), most visibly
           // right after boot (the ~10s BT_START_MIN_UPTIME_MS window) - the
           // button handler (RNode_Firmware.ino) used to play the "on" chirp
           // regardless of whether this actually happened, misleadingly
@@ -432,7 +391,15 @@ char bt_da[BT_DEV_ADDR_LEN];
         for (int i = 0; i < dev_num; i++) { esp_ble_remove_bond_device(dev_list[i].bd_addr); }
         free(dev_list);
       #elif defined(CONFIG_NIMBLE_ENABLED)
-        ble_store_clear();
+        // ble_store_clear() -> ble_hs_lock() derefs NimBLE host state that
+        // only exists once the host has actually started (same landmine as
+        // bt_bond_count(), see bt_security_setup()'s comment on it) - the
+        // direct NVS erase below is independent of host state either way,
+        // so just skip this call rather than crash when bt_state is OFF
+        // (e.g. bt_start() silently no-op'd from Menu.h's BT_LIST entry
+        // point - BT_START_MIN_UPTIME_MS window, or SerialBT.begin() itself
+        // failing).
+        if (bt_state != BT_STATE_OFF) ble_store_clear();
         // ble_store_clear() (NimBLE's own "delete every known object type")
         // doesn't reliably clear RPA identity-resolution records too, at
         // least in the exact esp-nimble/esp-idf version bundled with this
