@@ -56,6 +56,95 @@
   MessengerBookmark msngr_bookmarks[MSNGR_MAX_BOOKMARKS];
   uint8_t msngr_bookmark_count = 0;
 
+  // Outbound LXMF delivery retry count - forwarded to urns_lxmf_router's
+  // LXMRouter::set_max_delivery_attempts() (from messenger_init() below,
+  // and again here on every save) - RNode Settings > Messenger > Settings
+  // > Retries in the menu (Menu.h). Default matches LXMRouter's own
+  // compiled default (5, same as the Python reference implementation) -
+  // see ADDR_CONF_MSNGR_RETRIES (ROM.h) for the persisted-value/range
+  // details.
+  #define MSNGR_MAX_RETRIES_DEFAULT 5
+  uint8_t msngr_max_retries = MSNGR_MAX_RETRIES_DEFAULT;
+
+  void msngr_retries_conf_save(uint8_t retries) {
+    msngr_max_retries = retries;
+    eeprom_update(ADDR_CONF_MSNGR_RETRIES, retries);
+    if (urns_lxmf_router) urns_lxmf_router->set_max_delivery_attempts(retries);
+  }
+
+  // Delay (seconds) between outbound LXMF delivery retries - forwarded to
+  // LXMRouter::set_outbound_retry_delay(). RNode Settings > Messenger >
+  // Settings > Retry Delay in the menu (Menu.h), right after Retries.
+  // Default matches LXMRouter's own compiled default (10s, same as the
+  // Python reference implementation's DELIVERY_RETRY_WAIT) - see
+  // ADDR_CONF_MSNGR_RETRY_DELAY (ROM.h) for the persisted-value/range
+  // details.
+  #define MSNGR_RETRY_DELAY_DEFAULT 10
+  uint8_t msngr_retry_delay_s = MSNGR_RETRY_DELAY_DEFAULT;
+
+  void msngr_retry_delay_conf_save(uint8_t seconds) {
+    msngr_retry_delay_s = seconds;
+    eeprom_update(ADDR_CONF_MSNGR_RETRY_DELAY, seconds);
+    if (urns_lxmf_router) urns_lxmf_router->set_outbound_retry_delay((double)seconds);
+  }
+
+  // Whether RNode_Firmware.ino's existing one-shot post-boot LXMF announce
+  // (urns_announce_lxmf(), URNS.h) actually runs - gates that call, does
+  // NOT touch LXMRouter's own _announce_at_start (see ADDR_CONF_MSNGR_
+  // ANNOUNCE_AT_START's comment, ROM.h, for why). Default true - the
+  // one-shot fires unconditionally today, this must preserve that for a
+  // fresh/erased EEPROM.
+  bool msngr_announce_at_start = true;
+
+  void msngr_announce_at_start_conf_save(bool enabled) {
+    msngr_announce_at_start = enabled;
+    eeprom_update(ADDR_CONF_MSNGR_ANNOUNCE_AT_START,
+      enabled ? MSNGR_ANNOUNCE_AT_START_ENABLE_BYTE : MSNGR_ANNOUNCE_AT_START_DISABLE_BYTE);
+  }
+
+  // Periodic LXMF re-announce interval, as a preset index into this table
+  // (seconds) - forwarded to LXMRouter::set_announce_interval(), which
+  // (as of this feature) process_outbound() actually checks on every
+  // loop() iteration. Index 0 (Off) matches the pre-existing behavior of
+  // no periodic auto-announce at all.
+  #define MSNGR_ANNOUNCE_INTERVAL_PRESET_COUNT 8
+  const uint32_t msngr_announce_interval_presets_s[MSNGR_ANNOUNCE_INTERVAL_PRESET_COUNT] = {
+    0,      // Off
+    900,    // 15 min
+    1800,   // 30 min
+    3600,   // 1h
+    7200,   // 2h
+    10800,  // 3h
+    21600,  // 6h
+    43200   // 12h
+  };
+  // Display labels, same index as msngr_announce_interval_presets_s above -
+  // Menu.h's MSNGR_SETTINGS/_EDIT draw code uses this directly rather than
+  // formatting seconds itself.
+  const char *const msngr_announce_interval_labels[MSNGR_ANNOUNCE_INTERVAL_PRESET_COUNT] = {
+    "Off", "15m", "30m", "1h", "2h", "3h", "6h", "12h"
+  };
+  uint8_t msngr_announce_interval_idx = 0;
+
+  void msngr_announce_interval_conf_save(uint8_t idx) {
+    msngr_announce_interval_idx = idx;
+    eeprom_update(ADDR_CONF_MSNGR_ANNOUNCE_INTERVAL, idx);
+    if (urns_lxmf_router) urns_lxmf_router->set_announce_interval(msngr_announce_interval_presets_s[idx]);
+  }
+
+  // LXMF display name - persisted to URNS_DISPLAY_NAME_PATH (URNS.h), same
+  // file urns_lxmf_display_name() already reads/falls back from at boot
+  // (that read/fallback logic already existed; this is the first writer -
+  // see URNS_DISPLAY_NAME_PATH's own comment). RNode Settings > Messenger
+  // > Settings > Display Name in the menu (MENU_STATE_MSNGR_TEXT_ENTRY,
+  // reused from the message composer - Menu.h). No length/emptiness
+  // validation here - the menu's Send-key handler already only calls this
+  // when text_len > 0, and MSNGR_TEXT_ENTRY_MAX_LEN already caps input.
+  void msngr_display_name_conf_save(const char* name) {
+    RNS::Utilities::OS::write_file(URNS_DISPLAY_NAME_PATH, RNS::bytesFromString(name));
+    if (urns_lxmf_router) urns_lxmf_router->set_display_name(std::string(name));
+  }
+
   // Ephemeral, in-RAM only - 1-hop lxmf.delivery announces heard on-air
   // since boot. Not persisted; a fresh boot starts with an empty list
   // until peers announce again. Oldest-by-last-heard is evicted once full.
@@ -819,7 +908,40 @@
     urns_message_store = new LXMF::MessageStore(URNS_BASE_PATH "/messages");
     RNS::Transport::register_announce_handler(msngr_announce_handler);
     messenger_bookmarks_load();
-    DEBUG_LOG("[Messenger] ready, %u bookmark(s) loaded\r\n", (unsigned)msngr_bookmark_count);
+
+    // ADDR_CONF_MSNGR_RETRIES (ROM.h) - raw physical byte, not through
+    // eeprom_addr(), same "out-of-range/erased (0xFF) keeps the compiled
+    // default" convention as ADDR_CONF_GNSS_INTERVAL's own boot-time load
+    // (RNode_Firmware.ino). Self-contained here (rather than in that big
+    // early-boot EEPROM block) since nothing needs msngr_max_retries
+    // before this point - messenger_init() always runs after urns_init(),
+    // so urns_lxmf_router already exists to push it into.
+    uint8_t retries_raw = EEPROM.read(ADDR_CONF_MSNGR_RETRIES);
+    if (retries_raw <= 5) msngr_max_retries = retries_raw;
+    if (urns_lxmf_router) urns_lxmf_router->set_max_delivery_attempts(msngr_max_retries);
+
+    // ADDR_CONF_MSNGR_RETRY_DELAY (ROM.h) - out-of-range/erased (0xFF, or
+    // anything outside the menu's 1-60 range) keeps the compiled default.
+    uint8_t retry_delay_raw = EEPROM.read(ADDR_CONF_MSNGR_RETRY_DELAY);
+    if (retry_delay_raw >= 1 && retry_delay_raw <= 60) msngr_retry_delay_s = retry_delay_raw;
+    if (urns_lxmf_router) urns_lxmf_router->set_outbound_retry_delay((double)msngr_retry_delay_s);
+
+    // ADDR_CONF_MSNGR_ANNOUNCE_AT_START (ROM.h) - only ENABLE_BYTE/
+    // DISABLE_BYTE are valid, so anything else (including erased 0xFF)
+    // keeps the compiled default (true) rather than the usual "0/absent
+    // means off" convention - see that address's own comment for why.
+    uint8_t announce_at_start_raw = EEPROM.read(ADDR_CONF_MSNGR_ANNOUNCE_AT_START);
+    if (announce_at_start_raw == MSNGR_ANNOUNCE_AT_START_DISABLE_BYTE) msngr_announce_at_start = false;
+    else if (announce_at_start_raw == MSNGR_ANNOUNCE_AT_START_ENABLE_BYTE) msngr_announce_at_start = true;
+
+    // ADDR_CONF_MSNGR_ANNOUNCE_INTERVAL (ROM.h) - same "out-of-range/
+    // erased keeps compiled default (0/Off)" shape as Retries above.
+    uint8_t announce_interval_raw = EEPROM.read(ADDR_CONF_MSNGR_ANNOUNCE_INTERVAL);
+    if (announce_interval_raw < MSNGR_ANNOUNCE_INTERVAL_PRESET_COUNT) msngr_announce_interval_idx = announce_interval_raw;
+    if (urns_lxmf_router) urns_lxmf_router->set_announce_interval(msngr_announce_interval_presets_s[msngr_announce_interval_idx]);
+
+    DEBUG_LOG("[Messenger] ready, %u bookmark(s) loaded, max_retries=%u, retry_delay_s=%u, announce_at_start=%u, announce_interval_idx=%u\r\n",
+      (unsigned)msngr_bookmark_count, (unsigned)msngr_max_retries, (unsigned)msngr_retry_delay_s, (unsigned)msngr_announce_at_start, (unsigned)msngr_announce_interval_idx);
   }
 
 #endif

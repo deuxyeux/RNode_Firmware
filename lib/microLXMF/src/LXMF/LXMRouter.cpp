@@ -612,6 +612,14 @@ LXMRouter::LXMRouter(
 	snprintf(buf, sizeof(buf), "  Destination direction: %u", (uint8_t)_delivery_destination.direction());
 	INFO(buf);
 
+	// Seeded unconditionally (not just when _announce_at_start fires and
+	// sets it via announce() itself) so process_outbound()'s periodic
+	// auto-announce check counts elapsed time from boot, not from 0.0 -
+	// without this, enabling set_announce_interval() before any announce()
+	// has ever run would see "now - 0.0" (a huge real epoch value) and
+	// fire immediately regardless of the configured interval.
+	_last_announce_time = Utilities::OS::time();
+
 	// Announce at start if enabled
 	if (_announce_at_start) {
 		INFO("  Auto-announce enabled");
@@ -853,6 +861,21 @@ void LXMRouter::on_delivery_announce(const Bytes& destination_hash, const Bytes&
 
 // Process outbound queue
 void LXMRouter::process_outbound() {
+	// Periodic re-announce, independent of any pending outbound message -
+	// checked here (before the pending-count early-return just below,
+	// which would otherwise skip this whenever the queue is empty) since
+	// process_outbound() already runs every loop() iteration well after
+	// boot/radio bring-up is complete, unlike the constructor's own
+	// _announce_at_start path. _announce_interval/_last_announce_time
+	// existed already (set_announce_interval() etc above) but nothing
+	// ever actually checked them until now.
+	if (_announce_interval > 0) {
+		double announce_now = Utilities::OS::time();
+		if (announce_now - _last_announce_time >= (double)_announce_interval) {
+			announce();
+		}
+	}
+
 	if (_pending_outbound_count == 0) {
 		return;
 	}
@@ -874,7 +897,7 @@ void LXMRouter::process_outbound() {
 
 	try {
 		// Check max delivery attempts
-		if (message.delivery_attempts() >= MAX_DELIVERY_ATTEMPTS) {
+		if (message.delivery_attempts() >= _max_delivery_attempts) {
 			WARNING("Max delivery attempts reached for message to " + message.destination_hash().toHex());
 			message.state(Type::Message::FAILED);
 			if (_failed_callback) {
@@ -910,7 +933,7 @@ void LXMRouter::process_outbound() {
 				pending_outbound_pop(dummy);
 			} else {
 				DEBUG("  Propagation delivery not ready, will retry...");
-				_next_outbound_process_time = now + OUTBOUND_RETRY_DELAY;
+				_next_outbound_process_time = now + _outbound_retry_delay;
 			}
 			return;
 		}
@@ -985,8 +1008,8 @@ void LXMRouter::process_outbound() {
 			if (!link) {
 				WARNING("Failed to establish link for message delivery");
 				// Set backoff timer to avoid tight loop
-				_next_outbound_process_time = now + OUTBOUND_RETRY_DELAY;
-				snprintf(buf, sizeof(buf), "  Will retry in %d seconds", (int)OUTBOUND_RETRY_DELAY);
+				_next_outbound_process_time = now + _outbound_retry_delay;
+				snprintf(buf, sizeof(buf), "  Will retry in %d seconds", (int)_outbound_retry_delay);
 				INFO(buf);
 				return;
 			}

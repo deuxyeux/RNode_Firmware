@@ -225,6 +225,68 @@
   #define BT_JUST_WORKS_ENABLE_BYTE  0x01
   #define BT_JUST_WORKS_DISABLE_BYTE 0x00
 
+  // Messenger app's (Messenger.h) LXMF outbound delivery retry count -
+  // RNode Settings > Messenger > Settings > Retries in the menu
+  // (MENU_STATE_MSNGR_SETTINGS/_EDIT, Menu.h). Same unclaimed 256-823 gap
+  // as ADDR_CONF_URNS/BT_LEGACY_PAIRING/BT_JUST_WORKS above, raw physical
+  // byte, no eeprom_addr() wrapper. Valid range is 0-5 (see
+  // LXMRouter::set_max_delivery_attempts()); an out-of-range/erased
+  // (0xFF) value leaves msngr_max_retries at its compiled default (5,
+  // same as the Python reference implementation) - see the boot-time load
+  // in messenger_init() (Messenger.h), same "if raw < COUNT, use it"
+  // shape as ADDR_CONF_GNSS_INTERVAL.
+  #define ADDR_CONF_MSNGR_RETRIES 266
+
+  // Whether RNode_Firmware.ino's existing one-shot post-boot LXMF announce
+  // (urns_announce_lxmf(), URNS.h, fired ~8s after boot) actually runs -
+  // that call itself is unconditional today; this just gates it. NOT
+  // wired to LXMRouter's own _announce_at_start/set_announce_at_start()
+  // (LXMRouter.h/cpp) - that path fires announce() synchronously inside
+  // the constructor, before the radio/TX queue is up, which is exactly
+  // the race the existing millis()>8000 one-shot was built to avoid (see
+  // urns_announce_lxmf()'s own comment). Default ON (byte value 0x01,
+  // not the usual 0x00/absent-EEPROM-is-off convention) since the
+  // existing one-shot already fires unconditionally for every board
+  // today - an erased/never-configured EEPROM must preserve that, not
+  // silently go quiet. Same unclaimed 256-823 gap as ADDR_CONF_MSNGR_
+  // RETRIES above.
+  #define ADDR_CONF_MSNGR_ANNOUNCE_AT_START 267
+  #define MSNGR_ANNOUNCE_AT_START_ENABLE_BYTE  0x01
+  #define MSNGR_ANNOUNCE_AT_START_DISABLE_BYTE 0x00
+
+  // Periodic LXMF re-announce interval - stores a preset index (Off/15m/
+  // 30m/1h/2h/3h/6h/12h, msngr_announce_interval_presets_s[], Messenger.h)
+  // into LXMRouter::set_announce_interval() (seconds), same "preset index,
+  // not a raw value" shape as ADDR_CONF_GNSS_INTERVAL. Out-of-range/erased
+  // (0xFF) leaves msngr_announce_interval_idx at its compiled default (0 =
+  // Off, matching that no periodic auto-announce exists at all before
+  // this feature). Same unclaimed 256-823 gap as the two above.
+  #define ADDR_CONF_MSNGR_ANNOUNCE_INTERVAL 268
+
+  // Delay (seconds) between outbound LXMF delivery retries -
+  // LXMRouter::set_outbound_retry_delay(), raw value not a preset index
+  // (unlike Announce Interval above - no natural small preset set for
+  // this one). Out-of-range/erased (0xFF, or anything outside the menu's
+  // 1-60 range) leaves msngr_retry_delay_s at its compiled default (10,
+  // matching LXMRouter's own compiled default). Same unclaimed 256-823
+  // gap as the three above.
+  #define ADDR_CONF_MSNGR_RETRY_DELAY 269
+
+  // Whether BLE auto-starts at boot (bt_start(), Bluetooth.h) instead of
+  // requiring a manual button-hold/menu trigger every power cycle - RNode
+  // Settings > Bluetooth > Settings > Auto Start in the menu (Menu.h),
+  // alongside Legacy Pairing/Just Works (moved into this same new
+  // submenu). Same unclaimed 256-823 gap as ADDR_CONF_BT_LEGACY_PAIRING/
+  // BT_JUST_WORKS above, raw physical byte, no eeprom_addr() wrapper.
+  // Default OFF (byte 0x00/absent-EEPROM-is-off, the usual convention
+  // here) - a new feature must not silently change existing boot
+  // behavior; auto-starting BLE costs real internal DRAM (see
+  // project_ble_wifi_mutual_exclusivity memory), so this stays an
+  // explicit opt-in.
+  #define ADDR_CONF_BT_AUTO_START 270
+  #define BT_AUTO_START_ENABLE_BYTE  0x01
+  #define BT_AUTO_START_DISABLE_BYTE 0x00
+
   #define CONFIG_SIZE     256
   #define ADDR_CONF_SSID 0x00
   #define ADDR_CONF_PSK  0x21

@@ -251,6 +251,7 @@ void drot_conf_save(uint8_t val);
 #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
   void bt_legacy_pairing_conf_save(bool is_enabled);
   void bt_just_works_conf_save(bool is_enabled);
+  void bt_auto_start_conf_save(bool is_enabled);
 #endif
 #if HAS_RTC == true
   void kiss_indicate_time();
@@ -2944,6 +2945,15 @@ void bt_just_works_conf_save(bool is_enabled) {
     bt_stop();
     bt_start();
   }
+}
+
+void bt_auto_start_conf_save(bool is_enabled) {
+  bt_auto_start_enabled = is_enabled;
+  eeprom_update(ADDR_CONF_BT_AUTO_START, is_enabled ? BT_AUTO_START_ENABLE_BYTE : BT_AUTO_START_DISABLE_BYTE);
+  // No live effect here (unlike Legacy Pairing/Just Works) - this only
+  // governs what happens at the NEXT boot's one-shot check
+  // (RNode_Firmware.ino loop()), not current session behavior. Turning
+  // it on doesn't start BLE right now if it isn't already running.
 }
 #endif
 

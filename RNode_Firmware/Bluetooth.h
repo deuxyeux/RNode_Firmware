@@ -270,13 +270,13 @@ char bt_da[BT_DEV_ADDR_LEN];
         extern bool eth_disabled;
       #endif
       bool ble_networking_conflict() {
-        #if HAS_WIFI == true
-          if (WiFi.getMode() != WIFI_MODE_NULL) return true;
-        #endif
-        #if HAS_ETHERNET == true
-          if (!eth_disabled) return true;
-        #endif
-        return false;
+          #if HAS_WIFI == true
+            if (WiFi.getMode() != WIFI_MODE_NULL) return true;
+          #endif
+          #if HAS_ETHERNET == true
+            if (!eth_disabled) return true;
+          #endif
+          return false;
       }
     #endif
     bool bt_setup_hw(); void bt_security_setup();
@@ -306,6 +306,16 @@ char bt_da[BT_DEV_ADDR_LEN];
     // below and BLESerial.cpp's SetupSerialService(). Default OFF, current
     // strict-MITM behavior unchanged out of the box.
     bool bt_just_works_enabled = false;
+
+    // Whether BLE auto-starts at boot instead of requiring a manual
+    // trigger every power cycle - see ADDR_CONF_BT_AUTO_START (ROM.h) for
+    // the full reasoning. Read by the one-shot boot check in
+    // RNode_Firmware.ino's loop() (same "static bool ...ed = false; if
+    // (enabled && !...ed && millis() > threshold)" shape as the LXMF
+    // one-shot boot announce, Messenger.h - has to wait past
+    // BT_START_MIN_UPTIME_MS the same way a manual press does). Default
+    // OFF, current manual-only behavior unchanged out of the box.
+    bool bt_auto_start_enabled = false;
 
     // Deferred post-pairing disconnect (bt_authentication_complete_callback()
     // below) - GAP callbacks run on the single dedicated NimBLE host task
@@ -764,6 +774,11 @@ char bt_da[BT_DEV_ADDR_LEN];
           bt_just_works_enabled = true;
         } else {
           bt_just_works_enabled = false;
+        }
+        if (EEPROM.read(ADDR_CONF_BT_AUTO_START) == BT_AUTO_START_ENABLE_BYTE) {
+          bt_auto_start_enabled = true;
+        } else {
+          bt_auto_start_enabled = false;
         }
         uint8_t mac[BT_DEV_ADDR_LEN];
         esp_read_mac(mac, ESP_MAC_BT);

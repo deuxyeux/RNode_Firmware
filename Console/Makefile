@@ -21,7 +21,7 @@ pages-debug:
 
 sourcepack:
 	@echo Packing firmware sources...
-	zip --junk-paths -r build/pkg/rnode_firmware.zip ../arduino-cli.yaml ../BLESerial.cpp ../BLESerial.h ../Bluetooth.h ../Boards.h ../Config.h ../Console.h ../Device.h ../Display.h ../Framing.h ../Graphics.h ../LICENSE ../Makefile ../MD5.cpp ../MD5.h ../partition_hashes ../Power.h ../README.md ../release_hashes.py ../RNode_Firmware.ino ../ROM.h ../sx126x.cpp ../sx126x.h ../sx127x.cpp ../sx127x.h ../sx128x.cpp ../sx128x.h ../Utilities.h ../esp32_btbufs.py
+	zip --junk-paths -r build/pkg/rnode_firmware.zip ../arduino-cli.yaml ../RNode_Firmware/BLESerial.cpp ../RNode_Firmware/BLESerial.h ../RNode_Firmware/Bluetooth.h ../RNode_Firmware/Boards.h ../RNode_Firmware/Config.h ../RNode_Firmware/Console.h ../RNode_Firmware/Device.h ../RNode_Firmware/Display.h ../RNode_Firmware/Framing.h ../RNode_Firmware/Graphics.h ../LICENSE ../Makefile ../RNode_Firmware/MD5.cpp ../RNode_Firmware/MD5.h ../partition_hashes ../RNode_Firmware/Power.h ../README.md ../release_hashes.py ../RNode_Firmware/RNode_Firmware.ino ../RNode_Firmware/ROM.h ../RNode_Firmware/sx126x.cpp ../RNode_Firmware/sx126x.h ../RNode_Firmware/sx127x.cpp ../RNode_Firmware/sx127x.h ../RNode_Firmware/sx128x.cpp ../RNode_Firmware/sx128x.h ../RNode_Firmware/Utilities.h ../esp32_btbufs.py
 	
 data:
 	@echo Including assets...

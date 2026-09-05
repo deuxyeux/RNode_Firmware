@@ -1,0 +1,96 @@
+# ESP-IDF Kconfig defaults for combined "arduino, espidf" build mode.
+#
+# Only one such file can exist per PlatformIO project (this platform version
+# has no per-env sdkconfig scoping - espidf.py always resolves this to a
+# single fixed path at the project root). Currently only [env:meshadventurer_s3]
+# in platformio.ini has "espidf" in its framework list, so this file only
+# applies there. If a second env is switched to combined mode later, it will
+# share this exact file unless the build is restructured.
+#
+# --- The actual goal: move WiFi/lwIP's own internal buffer allocations into
+# PSRAM (falls back to internal DRAM automatically for anything that must
+# stay internal for DMA reasons) to relieve internal-DRAM pressure ---
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+
+# --- Subsystems the precompiled framework-arduinoespressif32-libs bakes on
+# by default, but vanilla ESP-IDF ships OFF - confirmed by diffing against
+# the precompiled baseline's own sdkconfig.h (qio_opi variant) after the
+# BLE classes (BLEServer/BLECharacteristic/BLESecurity) failed to compile
+# with plain CONFIG_SPIRAM/exceptions/RTTI alone. Arduino-ESP32 3.x's BLE
+# wrapper is NimBLE-based (not the older Bluedroid classes), despite reusing
+# the same class names. WiFi's own enable flag included proactively since
+# it's just as central to this board (HAS_WIFI) and the same class of gap. ---
+CONFIG_BT_ENABLED=y
+CONFIG_BT_NIMBLE_ENABLED=y
+CONFIG_ESP_WIFI_ENABLED=y
+
+# --- NimBLE's own memory (host stack: GATT/GAP/SM/connection state) is a
+# SEPARATE budget from CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP above and
+# defaults to internal-DRAM-only (BT_NIMBLE_MEM_ALLOC_MODE_INTERNAL) even
+# with SPIRAM enabled - this was the actual reason BLE+WiFi/URNS still
+# crashed on this board with only the WiFi/lwIP option set (NimBLE's
+# nimble_port_init() spike was documented as the single largest chunk of
+# the internal-DRAM budget, ~78-82KB, larger than WiFi's own ~50KB, and was
+# entirely untouched by that option). Depends on SPIRAM_USE_MALLOC (already
+# set above). Doesn't cover the lower-level link-layer controller's own
+# radio buffer pools, which - like WiFi's DMA buffers - likely still need
+# internal DRAM regardless; this only moves the host stack. ---
+CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y
+
+# --- mbedTLS (TLS/crypto) own memory - a third, separate subsystem budget,
+# same pattern as the two above (default MBEDTLS_INTERNAL_MEM_ALLOC, depends
+# on SPIRAM_USE_CAPS_ALLOC || SPIRAM_USE_MALLOC, already set above). Directly
+# relevant here - this board has HAS_OTA (esp_https_ota, uses mbedTLS), and
+# TLS was already flagged as a memory-starved subsystem on this board in
+# earlier (pre-combined-mode) work (see feedback_meshpoe_s3_psram_opi
+# memory). NOTE: mbedTLS's own Kconfig help text flags a security tradeoff -
+# "recommended mode is always internal... unless hardware flash encryption
+# is enabled" (external SPIRAM is a physically separate chip on a bus, more
+# exposed than on-die internal DRAM for things like TLS session keys) - kept
+# in for this dev/test build, worth reconsidering before shipping. ---
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
+
+# --- Mandatory for Arduino-as-IDF-component to actually boot into Arduino's
+# setup()/loop() ---
+CONFIG_AUTOSTART_ARDUINO=y
+# IDF defaults to 100Hz; Arduino's millis()/delay()/timing (LoRa TX/RX
+# timing, BLE, debounce) assumes 1000Hz and this isn't auto-set under
+# combined mode.
+CONFIG_FREERTOS_HZ=1000
+
+# --- IDF-wide exceptions/RTTI - platformio.ini's -fexceptions/-frtti only
+# affect this project's own translation units; IDF defaults both to n
+# project-wide otherwise, and RNS/LXMF/ArduinoJson rely on exceptions ---
+CONFIG_COMPILER_CXX_EXCEPTIONS=y
+CONFIG_COMPILER_CXX_RTTI=y
+
+# --- PSRAM: platformio.ini's board_build.arduino.memory_type=qio_opi is NOT
+# auto-translated into Kconfig under combined framework mode; replicated
+# manually here (matches this board's octal PSRAM) ---
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_TYPE_AUTO=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_USE_MALLOC=y
+# Lowered from IDF's own default (16384) - below this size, plain malloc()/
+# new() anywhere in the whole app (not scoped to WiFi/NimBLE/mbedTLS like
+# the three options above) still defaults internal regardless of PSRAM
+# being available. First tried 8192 (half the default) - showed zero
+# measurable heap change on real hardware, meaning nothing meaningful lives
+# in the 8192-16384 band. Lowered further to 512 to actually test the
+# 512-8192 band, which was never exercised by the 8192 test - real risk of
+# hurting timing-sensitive code (LoRa TX/RX, NimBLE event processing) is
+# higher here since smaller/hotter objects are more likely to live in this
+# range, but the measured margin on this board (single-digit-KB free, one
+# observed 16-byte low-water mark under BLE+WiFi/URNS load) now justifies
+# testing it despite that risk. CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL
+# (32768, untouched) is the separate safety net guaranteeing that much
+# internal DRAM never gets handed to PSRAM-preferring requests regardless
+# of this threshold.
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=512
+
+# --- Flash: platformio.ini's board_upload.flash_size=16MB, same
+# non-translation caveat as PSRAM above ---
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y

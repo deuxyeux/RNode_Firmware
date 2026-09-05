@@ -12,7 +12,7 @@ This is a long-running (30-70 minute), multi-step batch job — not a single com
 ## 0. Version directory and build number
 
 ```
-PROTO_VERSION="$(grep 'define MAJ_VERS' Config.h | awk '{print strtonum($3)}').$(grep 'define MIN_VERS' Config.h | awk '{print strtonum($3)}')"
+PROTO_VERSION="$(grep 'define MAJ_VERS' RNode_Firmware/Config.h | awk '{print strtonum($3)}').$(grep 'define MIN_VERS' RNode_Firmware/Config.h | awk '{print strtonum($3)}')"
 BUILD_NUMBER="$(git rev-list --count HEAD)"
 VERSION_DIR="${PROTO_VERSION}.${BUILD_NUMBER}"   # e.g. 1.86.994
 ```

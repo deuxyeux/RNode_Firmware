@@ -303,7 +303,7 @@ volatile bool serial_buffering = false;
           int snr_raw;
           uint8_t data[];
   } modem_packet_t;
-  static xQueueHandle modem_packet_queue = NULL;
+  static QueueHandle_t modem_packet_queue = NULL;
 #endif
 
 // kiss_tx_task() (formerly its own dedicated FreeRTOS task, pinned to
@@ -3071,15 +3071,37 @@ void loop() {
 
       // One-shot: announce the LXMF delivery destination a few seconds
       // after boot so it goes out through the normal CSMA gate instead of
-      // racing radio/queue bring-up.
+      // racing radio/queue bring-up. Gated on msngr_announce_at_start
+      // (Messenger.h, RNode Settings > Messenger > Settings > Announce at
+      // Start) - default true, so this still fires unconditionally unless
+      // explicitly turned off.
       #if HAS_LXMF == true
         static bool urns_announced_lxmf = false;
-        if (!urns_announced_lxmf && millis() > 8000) {
+        if (msngr_announce_at_start && !urns_announced_lxmf && millis() > 8000) {
           urns_announced_lxmf = true;
           CP(CP_URNS_ANNOUNCE);
           urns_announce_lxmf();
         }
       #endif
+    }
+  #endif
+
+  // One-shot: start BLE a few seconds after boot, past BT_START_MIN_
+  // UPTIME_MS (10000ms, Bluetooth.h) - same shape as the LXMF one-shot
+  // boot announce above, but its own independent check (not nested inside
+  // the HAS_URNS/urns_ready block above - BLE auto-start has nothing to
+  // do with URNS being ready). Gated on bt_auto_start_enabled (Bluetooth.h,
+  // RNode Settings > Bluetooth > Settings > Auto Start) - default OFF, so
+  // this doesn't change anything unless explicitly turned on. bt_start()
+  // itself already no-ops if called too early; the extra millis() margin
+  // here just avoids wasting a call during that known-silent window.
+  #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
+    {
+      static bool bt_auto_started = false;
+      if (bt_auto_start_enabled && !bt_auto_started && bt_state == BT_STATE_OFF && millis() > 12000) {
+        bt_auto_started = true;
+        bt_start();
+      }
     }
   #endif
 

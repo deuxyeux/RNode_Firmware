@@ -508,6 +508,10 @@ void urns_init() {
   std::string display_name = urns_lxmf_display_name();
   urns_lxmf_router->set_display_name(display_name);
   DEBUG_LOG("[URNS] step 15b: LXMF display name set to \"%s\"\r\n", display_name.c_str());
+  // msngr_max_retries (Messenger.h) can't be referenced here - Utilities.h
+  // includes URNS.h before Messenger.h, so it isn't declared yet at this
+  // point. Pushed into the router from messenger_init() (Messenger.h)
+  // instead, which runs right after this and can see both.
 #endif
 
   urns_ready = true;

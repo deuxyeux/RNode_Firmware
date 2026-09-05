@@ -224,9 +224,16 @@
     #define MENU_STATE_GNSS_DIAG      49 // verbose GNSS diagnostics summary - opened from MENU_STATE_GNSS_LIST's Diagnostics row
     #define MENU_STATE_GNSS_DIAG_SATS 50 // satellites-in-view list (PRN/El/Az/SNR, from GPGSV) - opened from MENU_STATE_GNSS_DIAG's Sats In View row
   #endif
-  #define MENU_STATE_BT_LIST 51 // Bluetooth submenu list (HAS_BLUETOOTH/HAS_BLE boards) - Legacy Pairing (MCU_ESP32 && HAS_BLE only)/MAC/Bonds (MCU_ESP32 only)/Forget Bonds (MCU_ESP32 only)/Back
-  #define MENU_STATE_BT_EDIT 52 // editing the Legacy Pairing field (MCU_ESP32 && HAS_BLE only - the only editable row)
+  #define MENU_STATE_BT_LIST 51 // Bluetooth submenu list (HAS_BLUETOOTH/HAS_BLE boards) - Settings (MCU_ESP32 && HAS_BLE only, opens MENU_STATE_BT_SETTINGS)/MAC/Bonds (MCU_ESP32 only)/Forget Bonds (MCU_ESP32 only)/Back
+  // 52 (formerly MENU_STATE_BT_EDIT) intentionally left unused, not
+  // reassigned - Legacy Pairing/Just Works moved to MENU_STATE_BT_SETTINGS/
+  // _EDIT below; renumbering every constant after it wasn't worth it for a
+  // single freed slot.
   #define MENU_STATE_BT_UNPAIR_CONFIRM 53 // FORGET/CANCEL list before bt_debond_all() actually runs (MCU_ESP32 only) - same pattern as MENU_STATE_FWUPD_CONFIRM
+  #define MENU_STATE_MSNGR_SETTINGS 54 // Messenger's own Settings submenu (HAS_URNS boards) - Retries/Back, opened from MENU_STATE_MSNGR_LIST
+  #define MENU_STATE_MSNGR_SETTINGS_EDIT 55 // editing the Retries field (the only editable row in MENU_STATE_MSNGR_SETTINGS today)
+  #define MENU_STATE_BT_SETTINGS 56 // Bluetooth's own Settings submenu (MCU_ESP32 && HAS_BLE only) - Legacy Pairing/Just Works (moved from MENU_STATE_BT_LIST)/Auto Start/Back, opened from MENU_STATE_BT_LIST
+  #define MENU_STATE_BT_SETTINGS_EDIT 57 // editing whichever of Legacy Pairing/Just Works/Auto Start was selected
 
   // The Hardware page used to only exist when there was board-level info
   // worth showing (battery/voltage sensing via HAS_PMU, or an ESP32-S3's
@@ -630,38 +637,48 @@
   #endif
 
   #if HAS_BLUETOOTH == true || HAS_BLE == true
-    #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
-      // Editable - see bt_security_setup() (Bluetooth.h) and
-      // bt_legacy_pairing_conf_save() (Utilities.h). Default OFF (LE
-      // Secure Connections forced, unchanged behavior); ON lets pre-BT-4.2
-      // host controllers pair via LE Legacy Pairing instead. Not present
-      // on nRF52 (Bluefruit already forces Legacy Pairing unconditionally,
-      // no toggle needed there).
-      #define BT_ITEM_LEGACY_PAIRING 0
-      // Opt-in security tradeoff - see ADDR_CONF_BT_JUST_WORKS (ROM.h) and
-      // BLESerial.cpp's SetupSerialService() for the full reasoning.
-      // Default OFF, current strict-MITM behavior unchanged out of the box.
-      #define BT_ITEM_JUST_WORKS (BT_ITEM_LEGACY_PAIRING + 1)
-      #define BT_ITEM_MAC (BT_ITEM_JUST_WORKS + 1)
-    #else
-      #define BT_ITEM_MAC 0
-    #endif
     // Read-only - same MAC already shown on the Hardware page (HW_ITEM_BT_MAC
     // above), reads the live value directly, not staged/committed through
     // this submenu at all - same convention as ESP-NOW's own Channel row.
+    #define BT_ITEM_MAC 0
     #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
+      // Opens MENU_STATE_BT_SETTINGS (Legacy Pairing/Just Works/Auto
+      // Start) - below MAC, not above it. Not present on nRF52 (Bluefruit
+      // already forces Legacy Pairing unconditionally and has no
+      // auto-start toggle either, same reasoning as before this settings
+      // submenu existed).
+      #define BT_ITEM_SETTINGS (BT_ITEM_MAC + 1)
       // Bonds is read-only (bt_bond_count(), Bluetooth.h). Forget Bonds opens
       // MENU_STATE_BT_UNPAIR_CONFIRM and calls bt_debond_all() - nRF52
       // (Bluefruit) isn't wired up yet, and classic HAS_BLUETOOTH (Bluedroid
       // SPP, e.g. MeshAdventurer/DIY-V1) has no bond-list API either, only
       // the HAS_BLE (NimBLE) path defines bt_bond_count()/bt_debond_all().
-      #define BT_ITEM_BONDS (BT_ITEM_MAC + 1)
+      #define BT_ITEM_BONDS (BT_ITEM_SETTINGS + 1)
       #define BT_ITEM_UNPAIR (BT_ITEM_BONDS + 1)
       #define BT_ITEM_BACK (BT_ITEM_UNPAIR + 1)
     #else
       #define BT_ITEM_BACK (BT_ITEM_MAC + 1)
     #endif
     #define BT_ITEM_COUNT (BT_ITEM_BACK + 1)
+
+    // MENU_STATE_BT_SETTINGS/_EDIT (MCU_ESP32 && HAS_BLE only) - Legacy
+    // Pairing and Just Works moved here from the top-level BT_LIST above
+    // (per user request), Auto Start added alongside them. Own item-index
+    // space, same "list + single shared EDIT state, cursor-dispatched"
+    // shape as MSNGR_SETTINGS/_EDIT.
+    #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
+      #define BT_SETTINGS_ITEM_LEGACY_PAIRING 0
+      #define BT_SETTINGS_ITEM_JUST_WORKS     1
+      // Whether BLE auto-starts at boot - see ADDR_CONF_BT_AUTO_START
+      // (ROM.h) and the one-shot boot check (RNode_Firmware.ino) for the
+      // full reasoning, including the historical bt_init() comment
+      // (Bluetooth.h) confirming this exact behavior existed once before
+      // and was deliberately removed over a BLE+ESP-NOW heap-exhaustion
+      // crash - default OFF here for the same reason.
+      #define BT_SETTINGS_ITEM_AUTO_START     2
+      #define BT_SETTINGS_ITEM_BACK           3
+      #define BT_SETTINGS_ITEM_COUNT          4
+    #endif
   #endif
 
   #if HAS_URNS == true
@@ -755,8 +772,20 @@
     #define MSNGR_TOP_ITEM_BOOKMARKS     1
     #define MSNGR_TOP_ITEM_ANNOUNCES     2
     #define MSNGR_TOP_ITEM_ANNOUNCE_NODE 3 // sends our own LXMF delivery destination announce
-    #define MSNGR_TOP_ITEM_BACK          4
-    #define MSNGR_TOP_ITEM_COUNT         5
+    #define MSNGR_TOP_ITEM_SETTINGS      4 // opens MENU_STATE_MSNGR_SETTINGS
+    #define MSNGR_TOP_ITEM_BACK          5
+    #define MSNGR_TOP_ITEM_COUNT         6
+
+    // MENU_STATE_MSNGR_SETTINGS - just Retries + Back today, but its own
+    // item-index space (mirrors MSNGR_TOP_ITEM_* above) so more Messenger
+    // settings can be added later without renumbering the top screen.
+    #define MSNGR_SETTINGS_ITEM_RETRIES           0
+    #define MSNGR_SETTINGS_ITEM_RETRY_DELAY       1
+    #define MSNGR_SETTINGS_ITEM_ANNOUNCE_START    2
+    #define MSNGR_SETTINGS_ITEM_ANNOUNCE_INTERVAL 3
+    #define MSNGR_SETTINGS_ITEM_DISPLAY_NAME      4 // opens MENU_STATE_MSNGR_TEXT_ENTRY (reused from the message composer), not MSNGR_SETTINGS_EDIT
+    #define MSNGR_SETTINGS_ITEM_BACK              5
+    #define MSNGR_SETTINGS_ITEM_COUNT             6
 
     // "ANNOUNCED" has nothing to acknowledge (unlike "NOT READY", which
     // stays up until dismissed - same success/error asymmetry as NTP sync's
@@ -1532,6 +1561,16 @@
     uint8_t msngr_announces_cursor = 0;
     uint8_t msngr_peer_cursor = 0;
     uint8_t msngr_msg_detail_cursor = 0;
+    uint8_t msngr_settings_cursor = 0;
+
+    // MENU_STATE_MSNGR_SETTINGS/_EDIT - staged, no-write-until-confirmed
+    // values, same "staged, commit on exit" shape as
+    // staged_bt_legacy_pairing_enabled etc below. Seeded from the live
+    // msngr_* globals (Messenger.h) in menu_stage_from_live().
+    uint8_t staged_msngr_max_retries = MSNGR_MAX_RETRIES_DEFAULT;
+    uint8_t staged_msngr_retry_delay_s = MSNGR_RETRY_DELAY_DEFAULT;
+    bool staged_msngr_announce_at_start = true;
+    uint8_t staged_msngr_announce_interval_idx = 0;
 
     // Which peer MENU_STATE_MSNGR_PEER/MSG_DETAIL are currently showing -
     // set whenever a row is confirmed in Inbox/Bookmarks/Announces (or a
@@ -1558,6 +1597,16 @@
     bool msngr_kb_shift_on = false;
     char msngr_text_entry_buf[MSNGR_TEXT_ENTRY_MAX_LEN + 1] = {0};
 
+    // MENU_STATE_MSNGR_TEXT_ENTRY is reused for editing the LXMF display
+    // name (RNode Settings > Messenger > Settings > Display Name) as well
+    // as composing a message - this tracks which, since the Send key's
+    // actual action and the exit/discard target differ. All the actual
+    // typing mechanics (grid cursor/shift/buffer above) are identical
+    // either way, only these two branch on it.
+    #define MSNGR_TEXT_ENTRY_PURPOSE_MESSAGE      0
+    #define MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME 1
+    uint8_t msngr_text_entry_purpose = MSNGR_TEXT_ENTRY_PURPOSE_MESSAGE;
+
     // MENU_STATE_MSNGR_DISCARD_CONFIRM - same "default to CANCEL" pattern
     // as msngr_delete_confirm_cursor/msngr_clear_confirm_cursor above
     // (0 = DISCARD, 1 = CANCEL).
@@ -1572,8 +1621,10 @@
     // straight back to the peer screen if nothing's been typed; otherwise
     // opens a DISCARD/CANCEL confirmation instead of silently losing it.
     void menu_msngr_text_entry_leave() {
+      uint8_t return_state = (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME)
+        ? MENU_STATE_MSNGR_SETTINGS : MENU_STATE_MSNGR_PEER;
       if (strlen(msngr_text_entry_buf) == 0) {
-        menu_state = MENU_STATE_MSNGR_PEER;
+        menu_state = return_state;
       } else {
         msngr_discard_confirm_cursor = 1; // default CANCEL
         menu_state = MENU_STATE_MSNGR_DISCARD_CONFIRM;
@@ -1676,6 +1727,11 @@
   #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
     bool staged_bt_legacy_pairing_enabled = false;
     bool staged_bt_just_works_enabled = false;
+    bool staged_bt_auto_start_enabled = false;
+    // MENU_STATE_BT_SETTINGS/_EDIT's own cursor - separate from
+    // bt_menu_cursor below, which now only tracks position within
+    // BT_LIST's own (smaller) item space.
+    uint8_t bt_settings_cursor = 0;
   #endif
   #if HAS_BLUETOOTH == true || HAS_BLE == true
     uint8_t bt_menu_cursor = 0;
@@ -2073,6 +2129,45 @@
         if (v > max_txp) v = max_txp;
       }
       staged_lora_txp = (uint8_t)v;
+    }
+
+    // Messenger Settings > Retries (MENU_STATE_MSNGR_SETTINGS_EDIT) - fixed
+    // 0-5 range (LXMRouter::set_max_delivery_attempts(), LXMRouter.h),
+    // always clamped regardless of the wrap param - unlike Frequency/SF/
+    // TX Power above, there's no sensible "wrap past the end" behavior for
+    // a retry count (5 wrapping to 0 would silently disable retries, the
+    // opposite of what turning the encoder further clearly means).
+    void step_msngr_retries(int8_t dir, bool wrap = false) {
+      int8_t v = (int8_t)staged_msngr_max_retries + (dir > 0 ? 1 : -1);
+      if (v < 0) v = 0;
+      if (v > 5) v = 5;
+      staged_msngr_max_retries = (uint8_t)v;
+    }
+
+    // Messenger Settings > Retry Delay (MENU_STATE_MSNGR_SETTINGS_EDIT) -
+    // 1-60 second range, 1s steps. No natural small preset set the way
+    // Auto Announce has, so a plain clamped stepper like Retries above,
+    // not a preset table. Always clamped, never wraps - same reasoning as
+    // Retries (wrapping 60->1 would silently make retries near-instant,
+    // the opposite of what turning the encoder further past 60 means).
+    void step_msngr_retry_delay(int8_t dir, bool wrap = false) {
+      int8_t v = (int8_t)staged_msngr_retry_delay_s + (dir > 0 ? 1 : -1);
+      if (v < 1) v = 1;
+      if (v > 60) v = 60;
+      staged_msngr_retry_delay_s = (uint8_t)v;
+    }
+
+    // Messenger Settings > Auto Announce (MENU_STATE_MSNGR_SETTINGS_EDIT) -
+    // steps through msngr_announce_interval_presets_s's index range
+    // (Messenger.h: Off/15m/30m/1h/2h/3h/6h/12h). Same "always clamped,
+    // never wraps" reasoning as Retries above - wrapping from 12h back to
+    // Off would silently disable auto-announce, the opposite of what
+    // turning the encoder further past 12h clearly means.
+    void step_msngr_announce_interval(int8_t dir, bool wrap = false) {
+      int8_t v = (int8_t)staged_msngr_announce_interval_idx + (dir > 0 ? 1 : -1);
+      if (v < 0) v = 0;
+      if (v > MSNGR_ANNOUNCE_INTERVAL_PRESET_COUNT - 1) v = MSNGR_ANNOUNCE_INTERVAL_PRESET_COUNT - 1;
+      staged_msngr_announce_interval_idx = (uint8_t)v;
     }
 
     // Sane starting values for any field still at its Config.h "never
@@ -2476,6 +2571,13 @@
     #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
       staged_bt_legacy_pairing_enabled = bt_legacy_pairing_enabled;
       staged_bt_just_works_enabled = bt_just_works_enabled;
+      staged_bt_auto_start_enabled = bt_auto_start_enabled;
+    #endif
+    #if HAS_LXMF == true
+      staged_msngr_max_retries = msngr_max_retries;
+      staged_msngr_retry_delay_s = msngr_retry_delay_s;
+      staged_msngr_announce_at_start = msngr_announce_at_start;
+      staged_msngr_announce_interval_idx = msngr_announce_interval_idx;
     #endif
     // display_rotation itself is only a local variable inside display_init(),
     // applied once at boot - not a persisted global - so read the actual
@@ -2705,6 +2807,9 @@
       }
       if (staged_bt_just_works_enabled != bt_just_works_enabled) {
         bt_just_works_conf_save(staged_bt_just_works_enabled);
+      }
+      if (staged_bt_auto_start_enabled != bt_auto_start_enabled) {
+        bt_auto_start_conf_save(staged_bt_auto_start_enabled);
       }
     #endif
     #if HAS_WIFI == true
@@ -2997,16 +3102,20 @@
         bt_menu_cursor = menu_clamp_cursor(bt_menu_cursor, dir, BT_ITEM_COUNT, wrap);
       }
       #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
-        else if (menu_state == MENU_STATE_BT_EDIT) {
+        else if (menu_state == MENU_STATE_BT_SETTINGS) {
           buzzer_encoder_tick_melody();
-          // Legacy Pairing and Just Works are the only editable rows in
-          // this submenu - MAC/Bonds/Forget Bonds are read-only or open
-          // their own separate state, so bt_menu_cursor (preserved across
-          // the MENU_STATE_BT_LIST -> MENU_STATE_BT_EDIT transition, same
-          // convention as WiFi's text_edit_field) is always one of these
-          // two here.
-          if (bt_menu_cursor == BT_ITEM_JUST_WORKS) {
+          bt_settings_cursor = menu_clamp_cursor(bt_settings_cursor, dir, BT_SETTINGS_ITEM_COUNT, wrap);
+        }
+        else if (menu_state == MENU_STATE_BT_SETTINGS_EDIT) {
+          buzzer_encoder_tick_melody();
+          // Cursor-dispatched, same shape as MSNGR_SETTINGS_EDIT/URNS_EDIT -
+          // bt_settings_cursor still points at whichever field was open
+          // when this state was entered. All three rows here are plain
+          // boolean toggles.
+          if (bt_settings_cursor == BT_SETTINGS_ITEM_JUST_WORKS) {
             staged_bt_just_works_enabled = !staged_bt_just_works_enabled;
+          } else if (bt_settings_cursor == BT_SETTINGS_ITEM_AUTO_START) {
+            staged_bt_auto_start_enabled = !staged_bt_auto_start_enabled;
           } else {
             staged_bt_legacy_pairing_enabled = !staged_bt_legacy_pairing_enabled;
           }
@@ -3161,6 +3270,21 @@
       } else if (menu_state == MENU_STATE_MSNGR_SEND_RESULT) {
         buzzer_encoder_tick_melody();
         msngr_send_result_cursor = menu_clamp_cursor(msngr_send_result_cursor, dir, 2, wrap);
+      } else if (menu_state == MENU_STATE_MSNGR_SETTINGS) {
+        buzzer_encoder_tick_melody();
+        msngr_settings_cursor = menu_clamp_cursor(msngr_settings_cursor, dir, MSNGR_SETTINGS_ITEM_COUNT, wrap);
+      } else if (menu_state == MENU_STATE_MSNGR_SETTINGS_EDIT) {
+        buzzer_encoder_tick_melody();
+        // Cursor-dispatched, same shape as URNS_RADIO_EDIT/URNS_EDIT below -
+        // msngr_settings_cursor still points at whichever field was open
+        // when this state was entered. Announce at Start is a plain
+        // boolean toggle-on-turn, same convention as URNS_EDIT's own
+        // boolean fields (URNS_ITEM_ENABLED etc) - OK just confirms/exits,
+        // it doesn't flip the value itself.
+        if (msngr_settings_cursor == MSNGR_SETTINGS_ITEM_RETRIES) step_msngr_retries(dir, wrap);
+        else if (msngr_settings_cursor == MSNGR_SETTINGS_ITEM_RETRY_DELAY) step_msngr_retry_delay(dir, wrap);
+        else if (msngr_settings_cursor == MSNGR_SETTINGS_ITEM_ANNOUNCE_START) staged_msngr_announce_at_start = !staged_msngr_announce_at_start;
+        else if (msngr_settings_cursor == MSNGR_SETTINGS_ITEM_ANNOUNCE_INTERVAL) step_msngr_announce_interval(dir, wrap);
       }
       #endif
     #endif
@@ -3606,8 +3730,9 @@
           menu_state = MENU_STATE_LIST;
         }
         #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
-          else if (bt_menu_cursor == BT_ITEM_LEGACY_PAIRING || bt_menu_cursor == BT_ITEM_JUST_WORKS) {
-            menu_state = MENU_STATE_BT_EDIT;
+          else if (bt_menu_cursor == BT_ITEM_SETTINGS) {
+            menu_state = MENU_STATE_BT_SETTINGS;
+            bt_settings_cursor = 0;
           }
         #endif
         #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
@@ -3620,8 +3745,19 @@
         // edit state, selecting them does nothing.
       }
       #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
-        else if (menu_state == MENU_STATE_BT_EDIT) {
-          menu_state = MENU_STATE_BT_LIST; // confirms staged value, no write yet
+        else if (menu_state == MENU_STATE_BT_SETTINGS) {
+          if (bt_settings_cursor == BT_SETTINGS_ITEM_BACK) {
+            // No commit here, same as BT_LIST's own Back above - BT
+            // settings are part of the shared "RNode Settings" staged-
+            // commit tree (Radio/URNS/etc), actually written at that
+            // outer tree's own Save & Exit, not per-submenu.
+            menu_state = MENU_STATE_BT_LIST;
+          } else {
+            menu_state = MENU_STATE_BT_SETTINGS_EDIT;
+          }
+        }
+        else if (menu_state == MENU_STATE_BT_SETTINGS_EDIT) {
+          menu_state = MENU_STATE_BT_SETTINGS; // confirms staged value, no write yet
         }
       #endif
       #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
@@ -4060,7 +4196,52 @@
           } else {
             menu_open_popup("NOT READY", MENU_STATE_MSNGR_LIST);
           }
+        } else if (msngr_menu_cursor == MSNGR_TOP_ITEM_SETTINGS) {
+          menu_state = MENU_STATE_MSNGR_SETTINGS;
+          msngr_settings_cursor = 0;
         }
+      } else if (menu_state == MENU_STATE_MSNGR_SETTINGS) {
+        if (msngr_settings_cursor == MSNGR_SETTINGS_ITEM_RETRIES ||
+            msngr_settings_cursor == MSNGR_SETTINGS_ITEM_RETRY_DELAY ||
+            msngr_settings_cursor == MSNGR_SETTINGS_ITEM_ANNOUNCE_START ||
+            msngr_settings_cursor == MSNGR_SETTINGS_ITEM_ANNOUNCE_INTERVAL) {
+          menu_state = MENU_STATE_MSNGR_SETTINGS_EDIT;
+        } else if (msngr_settings_cursor == MSNGR_SETTINGS_ITEM_DISPLAY_NAME) {
+          // Pre-populated with the current live name (custom or computed
+          // default, whichever urns_lxmf_display_name() resolved to at
+          // boot - LXMRouter::display_name() always reflects whichever one
+          // is actually active) so opening this always shows a real
+          // starting value, never blank - satisfies "default value should
+          // still be populated" without needing separate placeholder text.
+          msngr_text_entry_purpose = MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME;
+          msngr_text_entry_buf[0] = 0;
+          if (urns_lxmf_router) {
+            strncpy(msngr_text_entry_buf, urns_lxmf_router->display_name().c_str(), MSNGR_TEXT_ENTRY_MAX_LEN);
+            msngr_text_entry_buf[MSNGR_TEXT_ENTRY_MAX_LEN] = 0;
+          }
+          msngr_kb_cursor = 0;
+          msngr_kb_shift_on = false;
+          menu_state = MENU_STATE_MSNGR_TEXT_ENTRY;
+        } else if (msngr_settings_cursor == MSNGR_SETTINGS_ITEM_BACK) {
+          if (staged_msngr_max_retries != msngr_max_retries) {
+            msngr_retries_conf_save(staged_msngr_max_retries);
+          }
+          if (staged_msngr_retry_delay_s != msngr_retry_delay_s) {
+            msngr_retry_delay_conf_save(staged_msngr_retry_delay_s);
+          }
+          if (staged_msngr_announce_at_start != msngr_announce_at_start) {
+            msngr_announce_at_start_conf_save(staged_msngr_announce_at_start);
+          }
+          if (staged_msngr_announce_interval_idx != msngr_announce_interval_idx) {
+            msngr_announce_interval_conf_save(staged_msngr_announce_interval_idx);
+          }
+          menu_state = MENU_STATE_MSNGR_LIST;
+        }
+      } else if (menu_state == MENU_STATE_MSNGR_SETTINGS_EDIT) {
+        // Confirms the staged value, no write yet - same "OK just returns
+        // to the list, actual eeprom_update() happens on the list's own
+        // BACK row" shape as MENU_STATE_BT_SETTINGS_EDIT.
+        menu_state = MENU_STATE_MSNGR_SETTINGS;
       } else if (menu_state == MENU_STATE_MSNGR_INBOX) {
         uint8_t row_count = msngr_inbox_row_count();
         if (msngr_inbox_cursor == row_count - 1) {
@@ -4238,7 +4419,17 @@
         size_t text_len = strlen(msngr_text_entry_buf);
 
         if (key_type == MSNGR_KB_CHAR || key_type == MSNGR_KB_SPACE) {
-          if (text_len < MSNGR_TEXT_ENTRY_MAX_LEN) {
+          // Display Name uses the same practical cap as bookmark/announce
+          // names elsewhere in this file (MSNGR_NAME_MAX_LEN=31) - the
+          // protocol's own single-announce-packet ceiling is much higher
+          // (~274-280 bytes, derived from Type::Reticulum::MTU/HEADER_
+          // MAXSIZE/IFAC_MIN_SIZE minus the announce's fixed identity/
+          // signature/ratchet fields), but that's not a sane UI limit for
+          // a name field. Message composing keeps the higher MSNGR_TEXT_
+          // ENTRY_MAX_LEN (140) unchanged.
+          size_t max_len = (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME)
+            ? MSNGR_NAME_MAX_LEN : MSNGR_TEXT_ENTRY_MAX_LEN;
+          if (text_len < max_len) {
             char c = (key_type == MSNGR_KB_SPACE) ? ' ' : key_ch;
             if (msngr_kb_shift_on && c >= 'a' && c <= 'z') c = c - 'a' + 'A';
             msngr_text_entry_buf[text_len] = c;
@@ -4251,7 +4442,14 @@
         } else if (key_type == MSNGR_KB_BACK) {
           menu_msngr_text_entry_leave();
         } else if (key_type == MSNGR_KB_SEND) {
-          if (text_len > 0) {
+          if (text_len > 0 && msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME) {
+            // No result screen needed - unlike an LXMF send, this can't
+            // fail in a way worth reporting (a local file write), so it's
+            // save-and-return rather than save-and-show-status.
+            msngr_display_name_conf_save(msngr_text_entry_buf);
+            msngr_text_entry_buf[0] = 0;
+            menu_state = MENU_STATE_MSNGR_SETTINGS;
+          } else if (text_len > 0) {
             // Only actually clear the composed text on a confirmed send -
             // a failure leaves it in place so the user can retry instead
             // of having to retype it. Same MENU_STATE_MSNGR_SEND_RESULT
@@ -4276,7 +4474,8 @@
       } else if (menu_state == MENU_STATE_MSNGR_DISCARD_CONFIRM) {
         if (msngr_discard_confirm_cursor == 0) { // DISCARD
           msngr_text_entry_buf[0] = 0;
-          menu_state = MENU_STATE_MSNGR_PEER;
+          menu_state = (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME)
+            ? MENU_STATE_MSNGR_SETTINGS : MENU_STATE_MSNGR_PEER;
         } else { // CANCEL - resume typing, buffer/cursor/shift untouched
           menu_state = MENU_STATE_MSNGR_TEXT_ENTRY;
         }
@@ -4742,7 +4941,7 @@
       MENU_GFX.setTextSize(1);
       MENU_GFX.setTextColor(SSD1306_WHITE);
       MENU_GFX.setCursor(6, 8);
-      MENU_GFX.print("Send Message");
+      MENU_GFX.print(msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME ? "Name" : "Send Message");
       MENU_GFX.drawFastHLine(4, 12, MENU_CONTENT_W, SSD1306_WHITE);
 
       // Input preview - tail of what's typed so far (leading "..." if it
@@ -5509,13 +5708,14 @@
       else if (menu_state == MENU_STATE_BT_LIST) {
         const char *labels[BT_ITEM_COUNT];
         char valbufs[BT_ITEM_COUNT][24];
+        const uint8_t *icons[BT_ITEM_COUNT] = { nullptr };
+        uint8_t icon_widths[BT_ITEM_COUNT] = { 0 };
 
         #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
-          labels[BT_ITEM_LEGACY_PAIRING] = "Legacy Pairing";
-          sprintf(valbufs[BT_ITEM_LEGACY_PAIRING], staged_bt_legacy_pairing_enabled ? "ON" : "OFF");
-
-          labels[BT_ITEM_JUST_WORKS] = "Just Works";
-          sprintf(valbufs[BT_ITEM_JUST_WORKS], staged_bt_just_works_enabled ? "ON" : "OFF");
+          labels[BT_ITEM_SETTINGS] = "Settings";
+          valbufs[BT_ITEM_SETTINGS][0] = 0;
+          icons[BT_ITEM_SETTINGS] = bm_menu_icon_msngr_settings;
+          icon_widths[BT_ITEM_SETTINGS] = MENU_ICON_W_MSNGR_SETTINGS;
         #endif
 
         labels[BT_ITEM_MAC] = "MAC";
@@ -5549,13 +5749,43 @@
 
         labels[BT_ITEM_BACK] = "BACK";
         valbufs[BT_ITEM_BACK][0] = 0;
+        // Explicit here (not auto-detected) since this list already builds
+        // its own icons[] table for Settings above - same reasoning as
+        // MSNGR_LIST's own BACK row.
+        icons[BT_ITEM_BACK] = bm_menu_icon_back;
+        icon_widths[BT_ITEM_BACK] = MENU_ICON_W_BACK;
 
-        draw_menu_list_disp("BLUETOOTH", labels, valbufs, BT_ITEM_COUNT, bt_menu_cursor);
+        // icon_col_shared=false - only Settings (the one row with an icon)
+        // gets the wider indent; MAC/Bonds/Forget Bonds stay at the plain
+        // x=8 the list used before Settings existed. BACK still auto-gets
+        // its own icon+narrow position via the explicit icons[BT_ITEM_BACK]
+        // entry above, same as every other plain submenu list.
+        draw_menu_list_disp("BLUETOOTH", labels, valbufs, BT_ITEM_COUNT, bt_menu_cursor, icons, icon_widths, nullptr, false);
       }
       #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
-        else if (menu_state == MENU_STATE_BT_EDIT) {
-          if (bt_menu_cursor == BT_ITEM_JUST_WORKS) {
+        else if (menu_state == MENU_STATE_BT_SETTINGS) {
+          const char *labels[BT_SETTINGS_ITEM_COUNT];
+          char valbufs[BT_SETTINGS_ITEM_COUNT][24];
+
+          labels[BT_SETTINGS_ITEM_LEGACY_PAIRING] = "Legacy Pairing";
+          sprintf(valbufs[BT_SETTINGS_ITEM_LEGACY_PAIRING], staged_bt_legacy_pairing_enabled ? "ON" : "OFF");
+
+          labels[BT_SETTINGS_ITEM_JUST_WORKS] = "Just Works";
+          sprintf(valbufs[BT_SETTINGS_ITEM_JUST_WORKS], staged_bt_just_works_enabled ? "ON" : "OFF");
+
+          labels[BT_SETTINGS_ITEM_AUTO_START] = "Auto Start";
+          sprintf(valbufs[BT_SETTINGS_ITEM_AUTO_START], staged_bt_auto_start_enabled ? "ON" : "OFF");
+
+          labels[BT_SETTINGS_ITEM_BACK] = "BACK";
+          valbufs[BT_SETTINGS_ITEM_BACK][0] = 0;
+
+          draw_menu_list_disp("BLUETOOTH SETTINGS", labels, valbufs, BT_SETTINGS_ITEM_COUNT, bt_settings_cursor);
+        }
+        else if (menu_state == MENU_STATE_BT_SETTINGS_EDIT) {
+          if (bt_settings_cursor == BT_SETTINGS_ITEM_JUST_WORKS) {
             draw_menu_edit_disp("JUST WORKS", staged_bt_just_works_enabled ? "ON" : "OFF");
+          } else if (bt_settings_cursor == BT_SETTINGS_ITEM_AUTO_START) {
+            draw_menu_edit_disp("AUTO START", staged_bt_auto_start_enabled ? "ON" : "OFF");
           } else {
             draw_menu_edit_disp("LEGACY PAIRING", staged_bt_legacy_pairing_enabled ? "ON" : "OFF");
           }
@@ -6168,6 +6398,11 @@
         icons[MSNGR_TOP_ITEM_ANNOUNCE_NODE] = bm_menu_icon_announce_node;
         icon_widths[MSNGR_TOP_ITEM_ANNOUNCE_NODE] = MENU_ICON_W_ANNOUNCE_NODE;
 
+        labels[MSNGR_TOP_ITEM_SETTINGS] = "Settings";
+        valbufs[MSNGR_TOP_ITEM_SETTINGS][0] = 0;
+        icons[MSNGR_TOP_ITEM_SETTINGS] = bm_menu_icon_msngr_settings;
+        icon_widths[MSNGR_TOP_ITEM_SETTINGS] = MENU_ICON_W_MSNGR_SETTINGS;
+
         labels[MSNGR_TOP_ITEM_BACK] = "BACK";
         valbufs[MSNGR_TOP_ITEM_BACK][0] = 0;
         // Explicit here (not auto-detected) since this list already builds
@@ -6178,7 +6413,11 @@
         icons[MSNGR_TOP_ITEM_BACK] = bm_menu_icon_back;
         icon_widths[MSNGR_TOP_ITEM_BACK] = MENU_ICON_W_BACK;
 
-        draw_menu_list_disp("MESSENGER", labels, valbufs, MSNGR_TOP_ITEM_COUNT, msngr_menu_cursor, icons, icon_widths, nullptr, true, text_dx);
+        // icon_col_shared=false - only Inbox/Announce Node/Settings (the
+        // rows with icons) get the wider indent; Bookmarks/Announces/BACK
+        // stay at the plain x=8 (BACK via its own auto-icon path, same as
+        // BT_LIST's own call).
+        draw_menu_list_disp("MESSENGER", labels, valbufs, MSNGR_TOP_ITEM_COUNT, msngr_menu_cursor, icons, icon_widths, nullptr, false, text_dx);
       } else if (menu_state == MENU_STATE_MSNGR_INBOX) {
         uint8_t row_count = msngr_inbox_row_count();
         const char *labels[MENU_MSNGR_LIST_MAX_ROWS + 1];
@@ -6415,6 +6654,59 @@
         char title[24];
         snprintf(title, sizeof(title), "SEND: %s", messenger_peer_display_name(msngr_active_peer_hash).c_str());
         draw_menu_list_disp(title, labels, valbufs, 2, msngr_send_result_cursor);
+      } else if (menu_state == MENU_STATE_MSNGR_SETTINGS) {
+        const char *labels[MSNGR_SETTINGS_ITEM_COUNT];
+        char valbufs[MSNGR_SETTINGS_ITEM_COUNT][24];
+
+        labels[MSNGR_SETTINGS_ITEM_RETRIES] = "Retries";
+        sprintf(valbufs[MSNGR_SETTINGS_ITEM_RETRIES], "%u", (unsigned)staged_msngr_max_retries);
+
+        labels[MSNGR_SETTINGS_ITEM_RETRY_DELAY] = "Retry Delay";
+        sprintf(valbufs[MSNGR_SETTINGS_ITEM_RETRY_DELAY], "%us", (unsigned)staged_msngr_retry_delay_s);
+
+        labels[MSNGR_SETTINGS_ITEM_ANNOUNCE_START] = "Announce at Start";
+        sprintf(valbufs[MSNGR_SETTINGS_ITEM_ANNOUNCE_START], staged_msngr_announce_at_start ? "ON" : "OFF");
+
+        labels[MSNGR_SETTINGS_ITEM_ANNOUNCE_INTERVAL] = "Auto Announce";
+        sprintf(valbufs[MSNGR_SETTINGS_ITEM_ANNOUNCE_INTERVAL], msngr_announce_interval_labels[staged_msngr_announce_interval_idx]);
+
+        labels[MSNGR_SETTINGS_ITEM_DISPLAY_NAME] = "Name";
+        // Not staged (opens the on-screen keyboard directly, not MSNGR_
+        // SETTINGS_EDIT - see that item's own OK-button comment), so this
+        // shows the live name, not a staged copy. Explicitly truncated to
+        // a fixed 10-char + "..." ellipsis (per user request) rather than
+        // relying on draw_menu_list_disp()'s own generic value-column
+        // eliding, for a consistent look regardless of font/pixel width.
+        #define MSNGR_SETTINGS_NAME_VALUE_SHOWN_LEN 10
+        valbufs[MSNGR_SETTINGS_ITEM_DISPLAY_NAME][0] = 0;
+        if (urns_lxmf_router) {
+          std::string name = urns_lxmf_router->display_name();
+          if (name.length() > MSNGR_SETTINGS_NAME_VALUE_SHOWN_LEN) {
+            snprintf(valbufs[MSNGR_SETTINGS_ITEM_DISPLAY_NAME], sizeof(valbufs[MSNGR_SETTINGS_ITEM_DISPLAY_NAME]), "%.*s...", MSNGR_SETTINGS_NAME_VALUE_SHOWN_LEN, name.c_str());
+          } else {
+            snprintf(valbufs[MSNGR_SETTINGS_ITEM_DISPLAY_NAME], sizeof(valbufs[MSNGR_SETTINGS_ITEM_DISPLAY_NAME]), "%s", name.c_str());
+          }
+        }
+
+        labels[MSNGR_SETTINGS_ITEM_BACK] = "BACK";
+        valbufs[MSNGR_SETTINGS_ITEM_BACK][0] = 0;
+
+        draw_menu_list_disp("MESSENGER SETTINGS", labels, valbufs, MSNGR_SETTINGS_ITEM_COUNT, msngr_settings_cursor);
+      } else if (menu_state == MENU_STATE_MSNGR_SETTINGS_EDIT) {
+        char valbuf[24];
+        if (msngr_settings_cursor == MSNGR_SETTINGS_ITEM_RETRIES) {
+          sprintf(valbuf, "%u", (unsigned)staged_msngr_max_retries);
+          draw_menu_edit_disp("RETRIES", valbuf);
+        } else if (msngr_settings_cursor == MSNGR_SETTINGS_ITEM_RETRY_DELAY) {
+          sprintf(valbuf, "%us", (unsigned)staged_msngr_retry_delay_s);
+          draw_menu_edit_disp("RETRY DELAY", valbuf);
+        } else if (msngr_settings_cursor == MSNGR_SETTINGS_ITEM_ANNOUNCE_START) {
+          sprintf(valbuf, staged_msngr_announce_at_start ? "ON" : "OFF");
+          draw_menu_edit_disp("ANNOUNCE AT START", valbuf);
+        } else {
+          sprintf(valbuf, msngr_announce_interval_labels[staged_msngr_announce_interval_idx]);
+          draw_menu_edit_disp("AUTO ANNOUNCE", valbuf);
+        }
       }
       #endif
     #endif

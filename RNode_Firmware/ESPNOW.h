@@ -26,7 +26,7 @@ typedef struct {
         uint8_t data[];
 } espnow_packet_t;
 
-static xQueueHandle espnow_packet_queue = NULL;
+static QueueHandle_t espnow_packet_queue = NULL;
 
 bool espnow_ready = false;
 
@@ -174,7 +174,7 @@ typedef struct {
         uint16_t len; // was uint8_t - an LR frame can reach MTU (508), truncating/wrapping at 255
         uint8_t data[ESPNOW_TX_CHUNK_CAP];
 } espnow_tx_chunk_t;
-static xQueueHandle espnow_tx_queue = NULL;
+static QueueHandle_t espnow_tx_queue = NULL;
 volatile bool espnow_tx_busy = false;
 
 uint8_t  espnow_rx_buf[MTU];

@@ -404,6 +404,35 @@ namespace LXMF {
 		void set_stamp_cost(uint8_t cost) { _stamp_cost = cost; }
 
 		/**
+		 * @brief Set the max outbound delivery attempts before a message fails
+		 *
+		 * Runtime-configurable version of what used to be the fixed
+		 * MAX_DELIVERY_ATTEMPTS constant (still 5 by default, matching the
+		 * Python reference implementation). 0 means a message is marked
+		 * FAILED without ever actually being sent - see process_outbound()'s
+		 * own check, which runs before the first send attempt.
+		 *
+		 * @param attempts Max attempts (0-5, RNode_Firmware's Messenger
+		 *   Settings menu is the only caller and already clamps to this
+		 *   range; not clamped again here since the library itself has no
+		 *   opinion on the range beyond >=0)
+		 */
+		void set_max_delivery_attempts(int attempts) { _max_delivery_attempts = attempts; }
+
+		/**
+		 * @brief Set the delay between outbound delivery retries
+		 *
+		 * Runtime-configurable version of what used to be the fixed
+		 * OUTBOUND_RETRY_DELAY constant (still 10.0 seconds by default,
+		 * matching the Python reference's DELIVERY_RETRY_WAIT).
+		 *
+		 * @param seconds Delay in seconds (RNode_Firmware's Messenger
+		 *   Settings menu is the only caller and already clamps to a
+		 *   sensible range; not clamped again here)
+		 */
+		void set_outbound_retry_delay(double seconds) { _outbound_retry_delay = seconds; }
+
+		/**
 		 * @brief Get the current stamp cost requirement
 		 *
 		 * @return Required stamp cost
@@ -785,9 +814,18 @@ namespace LXMF {
 
 		// Retry backoff
 		double _next_outbound_process_time = 0.0;  // Next time to process outbound queue
-		static constexpr double OUTBOUND_RETRY_DELAY = 10.0; // Seconds between retries (Python: DELIVERY_RETRY_WAIT = 10)
+		// Runtime-configurable (see set_outbound_retry_delay() above) - was
+		// static constexpr double OUTBOUND_RETRY_DELAY = 10.0, now an
+		// instance member so RNode_Firmware's Messenger Settings menu can
+		// override it per-device. Default unchanged (Python: DELIVERY_
+		// RETRY_WAIT = 10).
+		double _outbound_retry_delay = 10.0;
 		static constexpr double PATH_REQUEST_WAIT = 15.0;    // Seconds to wait after path request (Python: 7s, but LoRa needs more RX window)
-		static constexpr int MAX_DELIVERY_ATTEMPTS = 5;      // Max attempts before failing (Python: 5)
+		// Runtime-configurable (see set_max_delivery_attempts() above) -
+		// was static constexpr int MAX_DELIVERY_ATTEMPTS = 5, now an
+		// instance member so RNode_Firmware's Messenger Settings menu can
+		// override it per-device. Default unchanged (Python: 5).
+		int _max_delivery_attempts = 5;
 		static constexpr int MAX_PATHLESS_TRIES = 1;          // Attempts before requesting path (Python: 1)
 
 		// Propagation node support

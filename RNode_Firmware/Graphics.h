@@ -722,6 +722,7 @@ const unsigned char bm_hg_high [] PROGMEM = {
 #define MENU_ICON_W_ETHERNET   11
 #define MENU_ICON_W_LED_BRIGHTNESS 9
 #define MENU_ICON_W_BT_LEGACY_PAIRING 9
+#define MENU_ICON_W_MSNGR_SETTINGS 10
 
 const unsigned char bm_menu_icon_bt_legacy_pairing [] PROGMEM = {
   0x00, 0x00,
@@ -967,6 +968,27 @@ const unsigned char bm_menu_icon_announce_node [] PROGMEM = {
   0x1c, 0x80,
   0x0c, 0x40,
   0x00, 0x00,
+  0x00, 0x00,
+};
+
+// Messenger's own "Settings" row (MSNGR_TOP_ITEM_SETTINGS, Menu.h) - a
+// gear glyph, from ~/Downloads/Icons/rnode-settings-settings.c (10x10
+// Piskel export), converted to this project's 1bpp/PROGMEM format the
+// same way every other icon here is (each row: 2 bytes/16 bits, MSB-first,
+// one bit per pixel, black=1/background=0, padded with trailing zero bits
+// past the icon's actual width) - cross-checked by independently
+// converting rnode-settings-announce-node.c the same way and confirming
+// it reproduces bm_menu_icon_announce_node above byte-for-byte.
+const unsigned char bm_menu_icon_msngr_settings [] PROGMEM = {
+  0x00, 0x00,
+  0x06, 0x00,
+  0x0c, 0x00,
+  0x08, 0x80,
+  0x0d, 0x80,
+  0x1f, 0x00,
+  0x38, 0x00,
+  0x70, 0x00,
+  0x20, 0x00,
   0x00, 0x00,
 };
 

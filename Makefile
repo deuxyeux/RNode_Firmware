@@ -98,37 +98,37 @@ check_bt_buffers:
 	@./esp32_btbufs.py ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/libraries/BluetoothSerial/src/BluetoothSerial.cpp
 
 firmware:
-	arduino-cli compile --log --fqbn unsignedio:avr:rnode --build-property "compiler.cpp.extra_flags=\"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --log --fqbn unsignedio:avr:rnode --build-property "compiler.cpp.extra_flags=\"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 
 firmware-aethernode: check_bt_buffers
-	arduino-cli compile --log --fqbn esp32:esp32:esp32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x35\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --log --fqbn esp32:esp32:esp32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x35\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 
 firmware-aethernode_s3: check_bt_buffers
-	arduino-cli compile --log --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF7\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --log --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF7\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 
 firmware-diy_v1: check_bt_buffers
-	arduino-cli compile --log --fqbn esp32:esp32:esp32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF6\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --log --fqbn esp32:esp32:esp32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF6\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 
 firmware-featheresp32: check_bt_buffers
-	arduino-cli compile --log --fqbn esp32:esp32:featheresp32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x34\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --log --fqbn esp32:esp32:featheresp32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x34\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 
 firmware-heltec32_v2: check_bt_buffers
-	arduino-cli compile --log --fqbn esp32:esp32:heltec_wifi_lora_32_V2 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x38\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --log --fqbn esp32:esp32:heltec_wifi_lora_32_V2 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x38\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 
 firmware-heltec32_v2_extled: check_bt_buffers
-	arduino-cli compile --log --fqbn esp32:esp32:heltec_wifi_lora_32_V2 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x38\" \"-DEXTERNAL_LEDS=true\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --log --fqbn esp32:esp32:heltec_wifi_lora_32_V2 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x38\" \"-DEXTERNAL_LEDS=true\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 
 firmware-heltec32_v3:
-	arduino-cli compile --log --fqbn esp32:esp32:heltec_wifi_lora_32_V3 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x3A\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --log --fqbn esp32:esp32:heltec_wifi_lora_32_V3 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x3A\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 
 firmware-heltec32_v4:
-	arduino-cli compile --log --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x3F\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --log --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x3F\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 
 firmware-heltec_t114:
-	arduino-cli compile --log --fqbn Heltec_nRF52:Heltec_nRF52:HT-n5262 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x3C\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --log --fqbn Heltec_nRF52:Heltec_nRF52:HT-n5262 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x3C\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 
 firmware-heltec_t096:
-	arduino-cli compile --log --fqbn Heltec_nRF52:Heltec_nRF52:HT-n5262G -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xD2\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --log --fqbn Heltec_nRF52:Heltec_nRF52:HT-n5262G -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xD2\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 
 # Heltec Mesh Node T1 (Boards.h: BOARD_HELTEC_T1, 0x47) - nRF52840, same
 # display/GNSS chip as heltec_t096 above (ST7735 160x80 + UC6580), no
@@ -138,7 +138,7 @@ firmware-heltec_t096:
 # version needed. No physical unit available - see Boards.h's own
 # BOARD_HELTEC_T1 comment for the cross-referenced pin sourcing.
 firmware-heltec_t1:
-	arduino-cli compile --log --fqbn Heltec_nRF52:Heltec_nRF52:HT-mesh-node-t1 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x47\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --log --fqbn Heltec_nRF52:Heltec_nRF52:HT-mesh-node-t1 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x47\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 
 # Heltec Wireless Tracker V2 (Boards.h: BOARD_HELTEC_WTRACKER_V2, 0x46) -
 # ESP32-S3FN8 (8MB flash, no PSRAM - unlike meshpoe_s3/meshadventurer_s3's
@@ -150,34 +150,34 @@ firmware-heltec_t1:
 # MeshCore's own board.json for this board; upload.maximum_size is that
 # partition scheme's app0 slot size (0x330000).
 firmware-heltec_wtracker_v2:
-	arduino-cli compile --log --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=default_8MB" --build-property "build.flash_size=8MB" --build-property "upload.maximum_size=3342336" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x46\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --log --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=default_8MB" --build-property "build.flash_size=8MB" --build-property "upload.maximum_size=3342336" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x46\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 
 firmware-lora32_v10: check_bt_buffers
-	arduino-cli compile --log --fqbn esp32:esp32:ttgo-lora32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x39\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --log --fqbn esp32:esp32:ttgo-lora32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x39\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 
 firmware-lora32_v10_extled: check_bt_buffers
-	arduino-cli compile --log --fqbn esp32:esp32:ttgo-lora32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x39\" \"-DEXTERNAL_LEDS=true\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --log --fqbn esp32:esp32:ttgo-lora32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x39\" \"-DEXTERNAL_LEDS=true\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 
 firmware-lora32_v20: check_bt_buffers
-	arduino-cli compile --log --fqbn esp32:esp32:ttgo-lora32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x36\" \"-DEXTERNAL_LEDS=true\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --log --fqbn esp32:esp32:ttgo-lora32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x36\" \"-DEXTERNAL_LEDS=true\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 
 firmware-lora32_v21: check_bt_buffers
-	arduino-cli compile --log --fqbn esp32:esp32:ttgo-lora32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x37\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --log --fqbn esp32:esp32:ttgo-lora32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x37\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 
 firmware-lora32_v21_extled: check_bt_buffers
-	arduino-cli compile --log --fqbn esp32:esp32:ttgo-lora32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x37\" \"-DEXTERNAL_LEDS=true\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --log --fqbn esp32:esp32:ttgo-lora32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x37\" \"-DEXTERNAL_LEDS=true\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 
 firmware-lora32_v21_tcxo: check_bt_buffers
-	arduino-cli compile --log --fqbn esp32:esp32:ttgo-lora32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x37\" \"-DENABLE_TCXO=true\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --log --fqbn esp32:esp32:ttgo-lora32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x37\" \"-DENABLE_TCXO=true\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 
 firmware-meshadventurer: check_bt_buffers
-	arduino-cli compile --log --fqbn esp32:esp32:esp32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF4\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --log --fqbn esp32:esp32:esp32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF4\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 
 firmware-meshpoe_s3: check_bt_buffers
-	arduino-cli compile --log --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,PSRAM=opi" -e --build-property "build.partitions=default_16MB" --build-property "build.flash_size=16MB" --build-property "upload.maximum_size=6553600" --build-property "compiler.cpp.extra_flags=\"-DARDUINO_USB_MODE=1\" \"-DARDUINO_USB_CDC_ON_BOOT=1\" \"-DBOARD_MODEL=0xF1\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --log --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,PSRAM=opi" -e --build-property "build.partitions=default_16MB" --build-property "build.flash_size=16MB" --build-property "upload.maximum_size=6553600" --build-property "compiler.cpp.extra_flags=\"-DARDUINO_USB_MODE=1\" \"-DARDUINO_USB_CDC_ON_BOOT=1\" \"-DBOARD_MODEL=0xF1\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 
 firmware-meshadventurer_s3: check_bt_buffers
-	arduino-cli compile --log --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,PSRAM=opi" -e --build-property "build.partitions=default_16MB" --build-property "build.flash_size=16MB" --build-property "upload.maximum_size=6553600" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF2\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --log --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,PSRAM=opi" -e --build-property "build.partitions=default_16MB" --build-property "build.flash_size=16MB" --build-property "upload.maximum_size=6553600" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF2\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 
 # LilyGO T-Beam 1W (ESP32-S3, 16MB flash, octal PSRAM - same profile as
 # MeshAdventurer-S3/MeshPoE-S3). One firmware image covers both the 433 and
@@ -185,180 +185,180 @@ firmware-meshadventurer_s3: check_bt_buffers
 # the region is a MODEL byte (MODEL_E5/MODEL_E6, Boards.h) written into
 # EEPROM at provisioning time, not a compile-time split.
 firmware-tbeam_1w: check_bt_buffers
-	arduino-cli compile --log --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,PSRAM=opi" -e --build-property "build.partitions=default_16MB" --build-property "build.flash_size=16MB" --build-property "upload.maximum_size=6553600" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x45\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --log --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,PSRAM=opi" -e --build-property "build.partitions=default_16MB" --build-property "build.flash_size=16MB" --build-property "upload.maximum_size=6553600" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x45\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 
 firmware-rnode_ng_20: check_bt_buffers
-	arduino-cli compile --log --fqbn esp32:esp32:ttgo-lora32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x40\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --log --fqbn esp32:esp32:ttgo-lora32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x40\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 
 firmware-rnode_ng_21: check_bt_buffers
-	arduino-cli compile --log --fqbn esp32:esp32:ttgo-lora32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x41\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --log --fqbn esp32:esp32:ttgo-lora32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x41\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 
 firmware-promicro:
-	arduino-cli compile --log --fqbn promicro:nrf52:nicenanov2:softdevice=s140v6 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF5\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --log --fqbn promicro:nrf52:nicenanov2:softdevice=s140v6 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF5\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 
 firmware-rak4631:
-	arduino-cli compile --log --fqbn rakwireless:nrf52:WisCoreRAK4631Board -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x51\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --log --fqbn rakwireless:nrf52:WisCoreRAK4631Board -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x51\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 
 firmware-t3s3:
-	arduino-cli compile --log --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x42\" \"-DMODEM=0x03\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --log --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x42\" \"-DMODEM=0x03\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 
 firmware-t3s3_sx127x:
-	arduino-cli compile --log --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x42\" \"-DMODEM=0x01\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --log --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x42\" \"-DMODEM=0x01\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 
 firmware-t3s3_sx1280_pa:
-	arduino-cli compile --log --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x42\" \"-DMODEM=0x04\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --log --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x42\" \"-DMODEM=0x04\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 
 firmware-tbeam: check_bt_buffers
-	arduino-cli compile --log --fqbn esp32:esp32:t-beam -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x33\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --log --fqbn esp32:esp32:t-beam -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x33\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 
 firmware-tbeam_supreme:
-	arduino-cli compile --log --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x3D\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --log --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x3D\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 
 firmware-tbeam_supreme_v3:
-	arduino-cli compile --log --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x43\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --log --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x43\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 
 firmware-tbeam_sx126x: check_bt_buffers
-	arduino-cli compile --log --fqbn esp32:esp32:t-beam -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x33\" \"-DMODEM=0x03\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --log --fqbn esp32:esp32:t-beam -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x33\" \"-DMODEM=0x03\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 
 firmware-tdeck:
-	arduino-cli compile --log --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x3B\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --log --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x3B\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 
 firmware-techo:
-	arduino-cli compile --log --fqbn adafruit:nrf52:pca10056 -e --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x44\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --log --fqbn adafruit:nrf52:pca10056 -e --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x44\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 
 firmware-xiao_s3:
-	arduino-cli compile --log --fqbn "esp32:esp32:XIAO_ESP32S3" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x3E\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --log --fqbn "esp32:esp32:XIAO_ESP32S3" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x3E\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 
 firmware-genericesp32: check_bt_buffers
-	arduino-cli compile --log --fqbn esp32:esp32:esp32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x35\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --log --fqbn esp32:esp32:esp32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x35\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 
 firmware-mega2560:
-	arduino-cli compile --log --fqbn arduino:avr:mega --build-property "compiler.cpp.extra_flags=\"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --log --fqbn arduino:avr:mega --build-property "compiler.cpp.extra_flags=\"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 
 upload:
-	arduino-cli upload -p /dev/ttyUSB0 --fqbn unsignedio:avr:rnode
+	arduino-cli upload -p /dev/ttyUSB0 --fqbn unsignedio:avr:rnode RNode_Firmware
 
 upload-genericesp32:
-	arduino-cli upload -p /dev/ttyUSB0 --fqbn esp32:esp32:esp32
+	arduino-cli upload -p /dev/ttyUSB0 --fqbn esp32:esp32:esp32 RNode_Firmware
 	@sleep 1
 	rnodeconf /dev/ttyUSB0 --firmware-hash $$(./partition_hashes ./build/esp32.esp32.esp32/RNode_Firmware.ino.bin)
 	@sleep 3
 	python ./Release/esptool/esptool.py --chip esp32 --port /dev/ttyACM0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 80m --flash_size 4MB 0x210000 ./Release/console_image.bin
 
 upload-meshpoe_s3:
-	arduino-cli upload -p /dev/ttyACM0 --fqbn esp32:esp32:esp32s3
+	arduino-cli upload -p /dev/ttyACM0 --fqbn esp32:esp32:esp32s3 RNode_Firmware
 #	@sleep 1
 #	rnodeconf /dev/ttyACM0 --firmware-hash $$(./partition_hashes ./build/esp32.esp32.esp32s3/RNode_Firmware.ino.bin)
 	@sleep 3
 #	python ./Release/esptool/esptool.py --chip esp32s3 --port /dev/ttyACM0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode qio --flash_freq 80m --flash_size 16MB 0xc90000 ./Release/console_image_meshpoe_s3.bin
 
 upload-meshadventurer_s3:
-	arduino-cli upload -p /dev/ttyACM0 --fqbn esp32:esp32:esp32s3
+	arduino-cli upload -p /dev/ttyACM0 --fqbn esp32:esp32:esp32s3 RNode_Firmware
 #	@sleep 1
 #	rnodeconf /dev/ttyACM0 --firmware-hash $$(./partition_hashes ./build/esp32.esp32.esp32s3/RNode_Firmware.ino.bin)
 	@sleep 3
 #	python ./Release/esptool/esptool.py --chip esp32s3 --port /dev/ttyACM0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode qio --flash_freq 80m --flash_size 16MB 0xc90000 ./Release/console_image_meshadventurer_s3.bin
 
 upload-tbeam_1w:
-	arduino-cli upload -p /dev/ttyACM0 --fqbn esp32:esp32:esp32s3
+	arduino-cli upload -p /dev/ttyACM0 --fqbn esp32:esp32:esp32s3 RNode_Firmware
 	@sleep 3
 
 upload-meshadventurer_s3_usb:
-	arduino-cli upload -p /dev/ttyUSB0 --fqbn esp32:esp32:esp32s3
+	arduino-cli upload -p /dev/ttyUSB0 --fqbn esp32:esp32:esp32s3 RNode_Firmware
 #	@sleep 1
 #	rnodeconf /dev/ttyACM0 --firmware-hash $$(./partition_hashes ./build/esp32.esp32.esp32s3/RNode_Firmware.ino.bin)
 	@sleep 3
 #	python ./Release/esptool/esptool.py --chip esp32s3 --port /dev/ttyUSB0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode qio --flash_freq 80m --flash_size 16MB 0xc90000 ./Release/console_image_meshadventurer_s3.bin
 
 upload-meshadventurer:
-	arduino-cli upload -p /dev/ttyUSB0 --fqbn esp32:esp32:esp32
+	arduino-cli upload -p /dev/ttyUSB0 --fqbn esp32:esp32:esp32 RNode_Firmware
 	@sleep 1
 	rnodeconf /dev/ttyUSB0 --firmware-hash $$(./partition_hashes ./build/esp32.esp32.esp32/RNode_Firmware.ino.bin)
 	@sleep 3
 	python ./Release/esptool/esptool.py --chip esp32 --port /dev/ttyUSB0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 80m --flash_size 4MB 0x210000 ./Release/console_image.bin
 
 upload-diy_v1:
-	arduino-cli upload -p /dev/ttyUSB0 --fqbn esp32:esp32:esp32
+	arduino-cli upload -p /dev/ttyUSB0 --fqbn esp32:esp32:esp32 RNode_Firmware
 	@sleep 1
 	rnodeconf /dev/ttyUSB0 --firmware-hash $$(./partition_hashes ./build/esp32.esp32.esp32/RNode_Firmware.ino.bin)
 	@sleep 3
 	python ./Release/esptool/esptool.py --chip esp32 --port /dev/ttyUSB0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 80m --flash_size 4MB 0x210000 ./Release/console_image.bin
 
 upload-aethernode:
-	arduino-cli upload -p /dev/ttyUSB0 --fqbn esp32:esp32:esp32
+	arduino-cli upload -p /dev/ttyUSB0 --fqbn esp32:esp32:esp32 RNode_Firmware
 	@sleep 1
 	rnodeconf /dev/ttyUSB0 --firmware-hash $$(./partition_hashes ./build/esp32.esp32.esp32/RNode_Firmware.ino.bin)
 	@sleep 3
 	python ./Release/esptool/esptool.py --chip esp32 --port /dev/ttyACM0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 80m --flash_size 4MB 0x210000 ./Release/console_image.bin
 
 upload-aethernode_s3:
-	arduino-cli upload -p /dev/ttyACM0 --fqbn esp32:esp32:esp32s3
+	arduino-cli upload -p /dev/ttyACM0 --fqbn esp32:esp32:esp32s3 RNode_Firmware
 #	@sleep 1
 #	rnodeconf /dev/ttyACM0 --firmware-hash $$(./partition_hashes ./build/esp32.esp32.esp32s3/RNode_Firmware.ino.bin)
 	@sleep 3
 	python ./Release/esptool/esptool.py --chip esp32s3 --port /dev/ttyACM0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 80m --flash_size 4MB 0x210000 ./Release/console_image.bin
 
 upload-mega2560:
-	arduino-cli upload -p /dev/ttyACM0 --fqbn arduino:avr:mega
+	arduino-cli upload -p /dev/ttyACM0 --fqbn arduino:avr:mega RNode_Firmware
 
 upload-tbeam:
-	arduino-cli upload -p /dev/ttyUSB0 --fqbn esp32:esp32:t-beam
+	arduino-cli upload -p /dev/ttyUSB0 --fqbn esp32:esp32:t-beam RNode_Firmware
 	@sleep 1
 	rnodeconf /dev/ttyUSB0 --firmware-hash $$(./partition_hashes ./build/esp32.esp32.t-beam/RNode_Firmware.ino.bin)
 	@sleep 3
 	python ./Release/esptool/esptool.py --chip esp32 --port /dev/ttyACM0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 80m --flash_size 4MB 0x210000 ./Release/console_image.bin
 
 upload-tbeam_sx1262:
-	arduino-cli upload -p /dev/ttyACM0 --fqbn esp32:esp32:t-beam
+	arduino-cli upload -p /dev/ttyACM0 --fqbn esp32:esp32:t-beam RNode_Firmware
 	@sleep 1
 	rnodeconf /dev/ttyACM0 --firmware-hash $$(./partition_hashes ./build/esp32.esp32.t-beam/RNode_Firmware.ino.bin)
 	@sleep 3
 	python ./Release/esptool/esptool.py --chip esp32 --port /dev/ttyACM0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 80m --flash_size 4MB 0x210000 ./Release/console_image.bin
 
 upload-lora32_v10:
-	arduino-cli upload -p /dev/ttyUSB0 --fqbn esp32:esp32:ttgo-lora32
+	arduino-cli upload -p /dev/ttyUSB0 --fqbn esp32:esp32:ttgo-lora32 RNode_Firmware
 	@sleep 1
 	rnodeconf /dev/ttyUSB0 --firmware-hash $$(./partition_hashes ./build/esp32.esp32.ttgo-lora32/RNode_Firmware.ino.bin)
 	@sleep 3
 	python ./Release/esptool/esptool.py --chip esp32 --port /dev/ttyUSB0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 80m --flash_size 4MB 0x210000 ./Release/console_image.bin
 
 upload-lora32_v20:
-	arduino-cli upload -p /dev/ttyUSB0 --fqbn esp32:esp32:ttgo-lora32
+	arduino-cli upload -p /dev/ttyUSB0 --fqbn esp32:esp32:ttgo-lora32 RNode_Firmware
 	@sleep 1
 	rnodeconf /dev/ttyUSB0 --firmware-hash $$(./partition_hashes ./build/esp32.esp32.ttgo-lora32/RNode_Firmware.ino.bin)
 	@sleep 3
 	python ./Release/esptool/esptool.py --chip esp32 --port /dev/ttyUSB0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 80m --flash_size 4MB 0x210000 ./Release/console_image.bin
 
 upload-lora32_v21:
-	arduino-cli upload -p /dev/ttyACM0 --fqbn esp32:esp32:ttgo-lora32
+	arduino-cli upload -p /dev/ttyACM0 --fqbn esp32:esp32:ttgo-lora32 RNode_Firmware
 	@sleep 1
 	rnodeconf /dev/ttyACM0 --firmware-hash $$(./partition_hashes ./build/esp32.esp32.ttgo-lora32/RNode_Firmware.ino.bin)
 	@sleep 3
 	python ./Release/esptool/esptool.py --chip esp32 --port /dev/ttyACM0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 80m --flash_size 4MB 0x210000 ./Release/console_image.bin
 
 upload-heltec32_v2:
-	arduino-cli upload -p /dev/ttyUSB0 --fqbn esp32:esp32:heltec_wifi_lora_32_V2
+	arduino-cli upload -p /dev/ttyUSB0 --fqbn esp32:esp32:heltec_wifi_lora_32_V2 RNode_Firmware
 	@sleep 1
 	rnodeconf /dev/ttyUSB0 --firmware-hash $$(./partition_hashes ./build/esp32.esp32.heltec_wifi_lora_32_V2/RNode_Firmware.ino.bin)
 	@sleep 3
 	python ./Release/esptool/esptool.py --chip esp32 --port /dev/ttyUSB0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 80m --flash_size 4MB 0x210000 ./Release/console_image.bin
 
 upload-heltec32_v3:
-	arduino-cli upload -p /dev/ttyUSB0 --fqbn esp32:esp32:heltec_wifi_lora_32_V3
+	arduino-cli upload -p /dev/ttyUSB0 --fqbn esp32:esp32:heltec_wifi_lora_32_V3 RNode_Firmware
 	@sleep 1
 	rnodeconf /dev/ttyUSB0 --firmware-hash $$(./partition_hashes ./build/esp32.esp32.heltec_wifi_lora_32_V3/RNode_Firmware.ino.bin)
 	@sleep 3
 	python ./Release/esptool/esptool.py --chip esp32s3 --port /dev/ttyUSB0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 80m --flash_size 4MB 0x210000 ./Release/console_image.bin
 
 upload-heltec32_v4:
-	arduino-cli upload -p /dev/ttyACM0 --fqbn esp32:esp32:esp32s3
+	arduino-cli upload -p /dev/ttyACM0 --fqbn esp32:esp32:esp32s3 RNode_Firmware
 	@sleep 1
 	rnodeconf /dev/ttyACM0 --firmware-hash $$(./partition_hashes ./build/esp32.esp32.esp32s3/RNode_Firmware.ino.bin)
 	@sleep 3
 	python ./Release/esptool/esptool.py --chip esp32s3 --port /dev/ttyACM0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 80m --flash_size 4MB 0x210000 ./Release/console_image.bin
 
 upload-tdeck:
-	arduino-cli upload -p /dev/ttyACM0 --fqbn esp32:esp32:esp32s3
+	arduino-cli upload -p /dev/ttyACM0 --fqbn esp32:esp32:esp32s3 RNode_Firmware
 	@sleep 1
 	rnodeconf /dev/ttyACM0 --firmware-hash $$(./partition_hashes ./build/esp32.esp32.esp32s3/RNode_Firmware.ino.bin)
 	@sleep 3
@@ -369,86 +369,86 @@ upload-tdeck:
 # partitions/) - different from the no_ota-scheme boards' 0x210000 above,
 # which is a 4MB-flash partition layout this board doesn't use.
 upload-heltec_wtracker_v2:
-	arduino-cli upload -p /dev/ttyACM0 --fqbn esp32:esp32:esp32s3
+	arduino-cli upload -p /dev/ttyACM0 --fqbn esp32:esp32:esp32s3 RNode_Firmware
 	@sleep 1
 	rnodeconf /dev/ttyACM0 --firmware-hash $$(./partition_hashes ./build/esp32.esp32.esp32s3/RNode_Firmware.ino.bin)
 	@sleep 3
 	python ./Release/esptool/esptool.py --chip esp32s3 --port /dev/ttyACM0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 80m --flash_size 8MB 0x670000 ./Release/console_image.bin
 
 upload-tbeam_supreme:
-	arduino-cli upload -p /dev/ttyACM0 --fqbn esp32:esp32:esp32s3
+	arduino-cli upload -p /dev/ttyACM0 --fqbn esp32:esp32:esp32s3 RNode_Firmware
 	@sleep 1
 	rnodeconf /dev/ttyACM0 --firmware-hash $$(./partition_hashes ./build/esp32.esp32.esp32s3/RNode_Firmware.ino.bin)
 	@sleep 3
 	python ./Release/esptool/esptool.py --chip esp32s3 --port /dev/ttyACM0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 80m --flash_size 4MB 0x210000 ./Release/console_image.bin
 
 upload-tbeam_supreme_v3:
-	arduino-cli upload -p /dev/ttyACM0 --fqbn esp32:esp32:esp32s3
+	arduino-cli upload -p /dev/ttyACM0 --fqbn esp32:esp32:esp32s3 RNode_Firmware
 	@sleep 1
 	rnodeconf /dev/ttyACM0 --firmware-hash $$(./partition_hashes ./build/esp32.esp32.esp32s3/RNode_Firmware.ino.bin)
 	@sleep 3
 	python ./Release/esptool/esptool.py --chip esp32s3 --port /dev/ttyACM0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 80m --flash_size 4MB 0x210000 ./Release/console_image.bin
 
 upload-rnode_ng_20:
-	arduino-cli upload -p /dev/ttyUSB0 --fqbn esp32:esp32:ttgo-lora32
+	arduino-cli upload -p /dev/ttyUSB0 --fqbn esp32:esp32:ttgo-lora32 RNode_Firmware
 	@sleep 1
 	rnodeconf /dev/ttyUSB0 --firmware-hash $$(./partition_hashes ./build/esp32.esp32.ttgo-lora32/RNode_Firmware.ino.bin)
 	@sleep 3
 	python ./Release/esptool/esptool.py --chip esp32 --port /dev/ttyUSB0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 80m --flash_size 4MB 0x210000 ./Release/console_image.bin
 
 upload-rnode_ng_21:
-	arduino-cli upload -p /dev/ttyACM0 --fqbn esp32:esp32:ttgo-lora32
+	arduino-cli upload -p /dev/ttyACM0 --fqbn esp32:esp32:ttgo-lora32 RNode_Firmware
 	@sleep 1
 	rnodeconf /dev/ttyACM0 --firmware-hash $$(./partition_hashes ./build/esp32.esp32.ttgo-lora32/RNode_Firmware.ino.bin)
 	@sleep 3
 	python ./Release/esptool/esptool.py --chip esp32 --port /dev/ttyACM0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 80m --flash_size 4MB 0x210000 ./Release/console_image.bin
 
 upload-t3s3:
-	arduino-cli upload -p /dev/ttyACM0 --fqbn esp32:esp32:esp32s3
+	arduino-cli upload -p /dev/ttyACM0 --fqbn esp32:esp32:esp32s3 RNode_Firmware
 	@sleep 1
 	rnodeconf /dev/ttyACM0 --firmware-hash $$(./partition_hashes ./build/esp32.esp32.esp32s3/RNode_Firmware.ino.bin)
 	@sleep 3
 	python ./Release/esptool/esptool.py --chip esp32s3 --port /dev/ttyACM0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 80m --flash_size 4MB 0x210000 ./Release/console_image.bin
 
 upload-featheresp32:
-	arduino-cli upload -p /dev/ttyUSB0 --fqbn esp32:esp32:featheresp32
+	arduino-cli upload -p /dev/ttyUSB0 --fqbn esp32:esp32:featheresp32 RNode_Firmware
 	@sleep 1
 	rnodeconf /dev/ttyUSB0 --firmware-hash $$(./partition_hashes ./build/esp32.esp32.featheresp32/RNode_Firmware.ino.bin)
 	@sleep 3
 	python ./Release/esptool/esptool.py --chip esp32 --port /dev/ttyUSB0 --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 80m --flash_size 4MB 0x210000 ./Release/console_image.bin
 
 upload-rak4631:
-	arduino-cli upload -p /dev/ttyACM0 --fqbn rakwireless:nrf52:WisCoreRAK4631Board
+	arduino-cli upload -p /dev/ttyACM0 --fqbn rakwireless:nrf52:WisCoreRAK4631Board RNode_Firmware
 	@sleep 1
 	rnodeconf /dev/ttyACM0 --firmware-hash $$(./partition_hashes from_device /dev/ttyACM0)
 
 upload-heltec_t114:
-	arduino-cli upload -p /dev/ttyACM0 --fqbn Heltec_nRF52:Heltec_nRF52:HT-n5262
+	arduino-cli upload -p /dev/ttyACM0 --fqbn Heltec_nRF52:Heltec_nRF52:HT-n5262 RNode_Firmware
 	@sleep 1
 	rnodeconf /dev/ttyACM0 --firmware-hash $$(./partition_hashes from_device /dev/ttyACM0)
 
 upload-heltec_t096:
-	arduino-cli upload -p /dev/ttyACM0 --fqbn Heltec_nRF52:Heltec_nRF52:HT-n5262G
+	arduino-cli upload -p /dev/ttyACM0 --fqbn Heltec_nRF52:Heltec_nRF52:HT-n5262G RNode_Firmware
 	@sleep 1
 	rnodeconf /dev/ttyACM0 --firmware-hash $$(./partition_hashes from_device /dev/ttyACM0)
 
 upload-heltec_t1:
-	arduino-cli upload -p /dev/ttyACM0 --fqbn Heltec_nRF52:Heltec_nRF52:HT-mesh-node-t1
+	arduino-cli upload -p /dev/ttyACM0 --fqbn Heltec_nRF52:Heltec_nRF52:HT-mesh-node-t1 RNode_Firmware
 	@sleep 1
 	rnodeconf /dev/ttyACM0 --firmware-hash $$(./partition_hashes from_device /dev/ttyACM0)
 
 upload-promicro:
-	arduino-cli upload -p /dev/ttyACM0 --fqbn promicro:nrf52:nicenanov2
+	arduino-cli upload -p /dev/ttyACM0 --fqbn promicro:nrf52:nicenanov2 RNode_Firmware
 	@sleep 6
 	rnodeconf /dev/ttyACM0 --firmware-hash $$(./partition_hashes from_device /dev/ttyACM0)
 
 upload-techo:
-	arduino-cli upload -p /dev/ttyACM0 --fqbn adafruit:nrf52:pca10056
+	arduino-cli upload -p /dev/ttyACM0 --fqbn adafruit:nrf52:pca10056 RNode_Firmware
 	@sleep 6
 	rnodeconf /dev/ttyACM0 --firmware-hash $$(./partition_hashes from_device /dev/ttyACM0)
 
 upload-xiao_s3:
-	arduino-cli upload -p /dev/ttyACM0 --fqbn esp32:esp32:XIAO_ESP32S3
+	arduino-cli upload -p /dev/ttyACM0 --fqbn esp32:esp32:XIAO_ESP32S3 RNode_Firmware
 	@sleep 1
 	rnodeconf /dev/ttyACM0 --firmware-hash $$(./partition_hashes ./build/esp32.esp32.XIAO_ESP32S3/RNode_Firmware.ino.bin)
 	@sleep 3
@@ -464,12 +464,12 @@ release-hashes:
 	python ./release_hashes.py > ./Release/release.json
 
 release-rnode:
-	arduino-cli compile --fqbn unsignedio:avr:rnode -e --build-property "compiler.cpp.extra_flags=\"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --fqbn unsignedio:avr:rnode -e --build-property "compiler.cpp.extra_flags=\"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 	cp build/unsignedio.avr.rnode/RNode_Firmware.ino.hex Release/rnode_firmware.hex
 	rm -r build
 
 release-tbeam: check_bt_buffers
-	arduino-cli compile --fqbn esp32:esp32:t-beam -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x33\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --fqbn esp32:esp32:t-beam -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x33\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_tbeam.boot_app0
 	cp build/esp32.esp32.t-beam/RNode_Firmware.ino.bin build/rnode_firmware_tbeam.bin
 	cp build/esp32.esp32.t-beam/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_tbeam.bootloader
@@ -479,7 +479,7 @@ release-tbeam: check_bt_buffers
 	rm -r build
 
 release-tbeam_sx1262: check_bt_buffers
-	arduino-cli compile --fqbn esp32:esp32:t-beam -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x33\" \"-DMODEM=0x03\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --fqbn esp32:esp32:t-beam -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x33\" \"-DMODEM=0x03\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_tbeam_sx1262.boot_app0
 	cp build/esp32.esp32.t-beam/RNode_Firmware.ino.bin build/rnode_firmware_tbeam_sx1262.bin
 	cp build/esp32.esp32.t-beam/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_tbeam_sx1262.bootloader
@@ -489,7 +489,7 @@ release-tbeam_sx1262: check_bt_buffers
 	rm -r build
 
 release-lora32_v10: check_bt_buffers
-	arduino-cli compile --fqbn esp32:esp32:ttgo-lora32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x39\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --fqbn esp32:esp32:ttgo-lora32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x39\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_lora32v10.boot_app0
 	cp build/esp32.esp32.ttgo-lora32/RNode_Firmware.ino.bin build/rnode_firmware_lora32v10.bin
 	cp build/esp32.esp32.ttgo-lora32/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_lora32v10.bootloader
@@ -499,7 +499,7 @@ release-lora32_v10: check_bt_buffers
 	rm -r build
 
 release-lora32_v20: check_bt_buffers
-	arduino-cli compile --fqbn esp32:esp32:ttgo-lora32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x36\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --fqbn esp32:esp32:ttgo-lora32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x36\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_lora32v20.boot_app0
 	cp build/esp32.esp32.ttgo-lora32/RNode_Firmware.ino.bin build/rnode_firmware_lora32v20.bin
 	cp build/esp32.esp32.ttgo-lora32/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_lora32v20.bootloader
@@ -509,7 +509,7 @@ release-lora32_v20: check_bt_buffers
 	rm -r build
 
 release-lora32_v21: check_bt_buffers
-	arduino-cli compile --fqbn esp32:esp32:ttgo-lora32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x37\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --fqbn esp32:esp32:ttgo-lora32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x37\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_lora32v21.boot_app0
 	cp build/esp32.esp32.ttgo-lora32/RNode_Firmware.ino.bin build/rnode_firmware_lora32v21.bin
 	cp build/esp32.esp32.ttgo-lora32/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_lora32v21.bootloader
@@ -519,7 +519,7 @@ release-lora32_v21: check_bt_buffers
 	rm -r build
 
 release-lora32_v10_extled: check_bt_buffers
-	arduino-cli compile --fqbn esp32:esp32:ttgo-lora32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x39\" \"-DEXTERNAL_LEDS=true\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --fqbn esp32:esp32:ttgo-lora32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x39\" \"-DEXTERNAL_LEDS=true\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_lora32v10.boot_app0
 	cp build/esp32.esp32.ttgo-lora32/RNode_Firmware.ino.bin build/rnode_firmware_lora32v10.bin
 	cp build/esp32.esp32.ttgo-lora32/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_lora32v10.bootloader
@@ -529,7 +529,7 @@ release-lora32_v10_extled: check_bt_buffers
 	rm -r build
 
 release-lora32_v20_extled: check_bt_buffers
-	arduino-cli compile --fqbn esp32:esp32:ttgo-lora32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x36\" \"-DEXTERNAL_LEDS=true\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --fqbn esp32:esp32:ttgo-lora32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x36\" \"-DEXTERNAL_LEDS=true\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_lora32v20.boot_app0
 	cp build/esp32.esp32.ttgo-lora32/RNode_Firmware.ino.bin build/rnode_firmware_lora32v20.bin
 	cp build/esp32.esp32.ttgo-lora32/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_lora32v20.bootloader
@@ -539,7 +539,7 @@ release-lora32_v20_extled: check_bt_buffers
 	rm -r build
 
 release-lora32_v21_extled: check_bt_buffers
-	arduino-cli compile --fqbn esp32:esp32:ttgo-lora32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x37\" \"-DEXTERNAL_LEDS=true\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --fqbn esp32:esp32:ttgo-lora32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x37\" \"-DEXTERNAL_LEDS=true\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_lora32v21.boot_app0
 	cp build/esp32.esp32.ttgo-lora32/RNode_Firmware.ino.bin build/rnode_firmware_lora32v21.bin
 	cp build/esp32.esp32.ttgo-lora32/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_lora32v21.bootloader
@@ -549,7 +549,7 @@ release-lora32_v21_extled: check_bt_buffers
 	rm -r build
 
 release-lora32_v21_tcxo: check_bt_buffers
-	arduino-cli compile --fqbn esp32:esp32:ttgo-lora32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x37\" \"-DENABLE_TCXO=true\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --fqbn esp32:esp32:ttgo-lora32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x37\" \"-DENABLE_TCXO=true\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_lora32v21_tcxo.boot_app0
 	cp build/esp32.esp32.ttgo-lora32/RNode_Firmware.ino.bin build/rnode_firmware_lora32v21_tcxo.bin
 	cp build/esp32.esp32.ttgo-lora32/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_lora32v21_tcxo.bootloader
@@ -559,7 +559,7 @@ release-lora32_v21_tcxo: check_bt_buffers
 	rm -r build
 
 release-heltec32_v2: check_bt_buffers
-	arduino-cli compile --fqbn esp32:esp32:heltec_wifi_lora_32_V2 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x38\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --fqbn esp32:esp32:heltec_wifi_lora_32_V2 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x38\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_heltec32v2.boot_app0
 	cp build/esp32.esp32.heltec_wifi_lora_32_V2/RNode_Firmware.ino.bin build/rnode_firmware_heltec32v2.bin
 	cp build/esp32.esp32.heltec_wifi_lora_32_V2/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_heltec32v2.bootloader
@@ -569,7 +569,7 @@ release-heltec32_v2: check_bt_buffers
 	rm -r build
 
 release-heltec32_v3: check_bt_buffers
-	arduino-cli compile --fqbn esp32:esp32:heltec_wifi_lora_32_V3 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x3A\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --fqbn esp32:esp32:heltec_wifi_lora_32_V3 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x3A\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_heltec32v3.boot_app0
 	cp build/esp32.esp32.heltec_wifi_lora_32_V3/RNode_Firmware.ino.bin build/rnode_firmware_heltec32v3.bin
 	cp build/esp32.esp32.heltec_wifi_lora_32_V3/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_heltec32v3.bootloader
@@ -579,7 +579,7 @@ release-heltec32_v3: check_bt_buffers
 	rm -r build
 
 release-heltec32_v4: check_bt_buffers
-	arduino-cli compile --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x3F\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x3F\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_heltec32v4pa.boot_app0
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bin build/rnode_firmware_heltec32v4pa.bin
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_heltec32v4pa.bootloader
@@ -589,7 +589,7 @@ release-heltec32_v4: check_bt_buffers
 	rm -r build
 
 release-heltec32_v2_extled: check_bt_buffers
-	arduino-cli compile --fqbn esp32:esp32:heltec_wifi_lora_32_V2 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x38\" \"-DEXTERNAL_LEDS=true\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --fqbn esp32:esp32:heltec_wifi_lora_32_V2 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x38\" \"-DEXTERNAL_LEDS=true\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_heltec32v2.boot_app0
 	cp build/esp32.esp32.heltec_wifi_lora_32_V2/RNode_Firmware.ino.bin build/rnode_firmware_heltec32v2.bin
 	cp build/esp32.esp32.heltec_wifi_lora_32_V2/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_heltec32v2.bootloader
@@ -599,7 +599,7 @@ release-heltec32_v2_extled: check_bt_buffers
 	rm -r build
 
 release-rnode_ng_20: check_bt_buffers
-	arduino-cli compile --fqbn esp32:esp32:ttgo-lora32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x40\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --fqbn esp32:esp32:ttgo-lora32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x40\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_ng20.boot_app0
 	cp build/esp32.esp32.ttgo-lora32/RNode_Firmware.ino.bin build/rnode_firmware_ng20.bin
 	cp build/esp32.esp32.ttgo-lora32/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_ng20.bootloader
@@ -609,7 +609,7 @@ release-rnode_ng_20: check_bt_buffers
 	rm -r build
 
 release-rnode_ng_21: check_bt_buffers
-	arduino-cli compile --fqbn esp32:esp32:ttgo-lora32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x41\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --fqbn esp32:esp32:ttgo-lora32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x41\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_ng21.boot_app0
 	cp build/esp32.esp32.ttgo-lora32/RNode_Firmware.ino.bin build/rnode_firmware_ng21.bin
 	cp build/esp32.esp32.ttgo-lora32/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_ng21.bootloader
@@ -619,7 +619,7 @@ release-rnode_ng_21: check_bt_buffers
 	rm -r build
 
 release-t3s3:
-	arduino-cli compile --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x42\" \"-DMODEM=0x03\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x42\" \"-DMODEM=0x03\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_t3s3.boot_app0
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bin build/rnode_firmware_t3s3.bin
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_t3s3.bootloader
@@ -629,7 +629,7 @@ release-t3s3:
 	rm -r build
 
 release-t3s3_sx1280_pa:
-	arduino-cli compile --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x42\" \"-DMODEM=0x04\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x42\" \"-DMODEM=0x04\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_t3s3_sx1280_pa.boot_app0
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bin build/rnode_firmware_t3s3_sx1280_pa.bin
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_t3s3_sx1280_pa.bootloader
@@ -639,7 +639,7 @@ release-t3s3_sx1280_pa:
 	rm -r build
 
 release-t3s3_sx127x:
-	arduino-cli compile --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x42\" \"-DMODEM=0x01\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x42\" \"-DMODEM=0x01\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_t3s3_sx127x.boot_app0
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bin build/rnode_firmware_t3s3_sx127x.bin
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_t3s3_sx127x.bootloader
@@ -649,7 +649,7 @@ release-t3s3_sx127x:
 	rm -r build
 
 release-tdeck:
-	arduino-cli compile --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x3B\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x3B\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_tdeck.boot_app0
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bin build/rnode_firmware_tdeck.bin
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_tdeck.bootloader
@@ -659,7 +659,7 @@ release-tdeck:
 	rm -r build
 
 release-tbeam_supreme:
-	arduino-cli compile --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x3D\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x3D\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_tbeam_supreme.boot_app0
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bin build/rnode_firmware_tbeam_supreme.bin
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_tbeam_supreme.bootloader
@@ -669,7 +669,7 @@ release-tbeam_supreme:
 	rm -r build
 
 release-tbeam_supreme_v3:
-	arduino-cli compile --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x43\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x43\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_tbeam_supreme_v3.boot_app0
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bin build/rnode_firmware_tbeam_supreme_v3.bin
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_tbeam_supreme_v3.bootloader
@@ -679,7 +679,7 @@ release-tbeam_supreme_v3:
 	rm -r build
 
 release-featheresp32: check_bt_buffers
-	arduino-cli compile --fqbn esp32:esp32:featheresp32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x34\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --fqbn esp32:esp32:featheresp32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x34\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_featheresp32.boot_app0
 	cp build/esp32.esp32.featheresp32/RNode_Firmware.ino.bin build/rnode_firmware_featheresp32.bin
 	cp build/esp32.esp32.featheresp32/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_featheresp32.bootloader
@@ -689,7 +689,7 @@ release-featheresp32: check_bt_buffers
 	rm -r build
 
 release-genericesp32: check_bt_buffers
-	arduino-cli compile --fqbn esp32:esp32:esp32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x35\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --fqbn esp32:esp32:esp32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x35\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_esp32_generic.boot_app0
 	cp build/esp32.esp32.esp32/RNode_Firmware.ino.bin build/rnode_firmware_esp32_generic.bin
 	cp build/esp32.esp32.esp32/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_esp32_generic.bootloader
@@ -699,7 +699,7 @@ release-genericesp32: check_bt_buffers
 	rm -r build
 
 release-meshpoe_s3: check_bt_buffers console-site spiffs-image-meshpoe_s3
-	arduino-cli compile --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,PSRAM=opi" -e --build-property "build.partitions=default_16MB" --build-property "build.flash_size=16MB" --build-property "upload.maximum_size=6553600" --build-property "compiler.cpp.extra_flags=\"-DARDUINO_USB_MODE=1\" \"-DARDUINO_USB_CDC_ON_BOOT=1\" \"-DBOARD_MODEL=0xF1\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,PSRAM=opi" -e --build-property "build.partitions=default_16MB" --build-property "build.flash_size=16MB" --build-property "upload.maximum_size=6553600" --build-property "compiler.cpp.extra_flags=\"-DARDUINO_USB_MODE=1\" \"-DARDUINO_USB_CDC_ON_BOOT=1\" \"-DBOARD_MODEL=0xF1\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_meshpoe_s3.boot_app0
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bin build/rnode_firmware_meshpoe_s3.bin
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_meshpoe_s3.bootloader
@@ -710,7 +710,7 @@ release-meshpoe_s3: check_bt_buffers console-site spiffs-image-meshpoe_s3
 	rm -r build
 
 release-meshadventurer_s3: check_bt_buffers console-site spiffs-image-meshadventurer_s3
-	arduino-cli compile --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,PSRAM=opi" -e --build-property "build.partitions=default_16MB" --build-property "build.flash_size=16MB" --build-property "upload.maximum_size=6553600" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF2\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,PSRAM=opi" -e --build-property "build.partitions=default_16MB" --build-property "build.flash_size=16MB" --build-property "upload.maximum_size=6553600" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF2\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_meshadventurer_s3.boot_app0
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bin build/rnode_firmware_meshadventurer_s3.bin
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_meshadventurer_s3.bootloader
@@ -721,7 +721,7 @@ release-meshadventurer_s3: check_bt_buffers console-site spiffs-image-meshadvent
 	rm -r build
 
 release-tbeam_1w: check_bt_buffers
-	arduino-cli compile --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,PSRAM=opi" -e --build-property "build.partitions=default_16MB" --build-property "build.flash_size=16MB" --build-property "upload.maximum_size=6553600" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x45\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,PSRAM=opi" -e --build-property "build.partitions=default_16MB" --build-property "build.flash_size=16MB" --build-property "upload.maximum_size=6553600" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x45\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_tbeam_1w.boot_app0
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bin build/rnode_firmware_tbeam_1w.bin
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_tbeam_1w.bootloader
@@ -731,7 +731,7 @@ release-tbeam_1w: check_bt_buffers
 	rm -r build
 
 release-meshadventurer: check_bt_buffers
-	arduino-cli compile --fqbn esp32:esp32:esp32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF4\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --fqbn esp32:esp32:esp32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF4\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_meshadventurer.boot_app0
 	cp build/esp32.esp32.esp32/RNode_Firmware.ino.bin build/rnode_firmware_meshadventurer.bin
 	cp build/esp32.esp32.esp32/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_meshadventurer.bootloader
@@ -741,7 +741,7 @@ release-meshadventurer: check_bt_buffers
 	rm -r build
 
 release-diy_v1: check_bt_buffers
-	arduino-cli compile --fqbn esp32:esp32:esp32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF6\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --fqbn esp32:esp32:esp32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF6\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_diy_v1.boot_app0
 	cp build/esp32.esp32.esp32/RNode_Firmware.ino.bin build/rnode_firmware_diy_v1.bin
 	cp build/esp32.esp32.esp32/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_diy_v1.bootloader
@@ -751,7 +751,7 @@ release-diy_v1: check_bt_buffers
 	rm -r build
 
 release-merged-diy_v1: check_bt_buffers
-	arduino-cli compile --fqbn esp32:esp32:esp32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF6\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --fqbn esp32:esp32:esp32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF6\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_diy_v1.boot_app0
 	cp build/esp32.esp32.esp32/RNode_Firmware.ino.bin build/rnode_firmware_diy_v1.bin
 	cp build/esp32.esp32.esp32/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_diy_v1.bootloader
@@ -761,7 +761,7 @@ release-merged-diy_v1: check_bt_buffers
 	rm -r build
 
 release-merged-meshadventurer: check_bt_buffers
-	arduino-cli compile --fqbn esp32:esp32:esp32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF4\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --fqbn esp32:esp32:esp32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF4\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_meshadventurer.boot_app0
 	cp build/esp32.esp32.esp32/RNode_Firmware.ino.bin build/rnode_firmware_meshadventurer.bin
 	cp build/esp32.esp32.esp32/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_meshadventurer.bootloader
@@ -771,7 +771,7 @@ release-merged-meshadventurer: check_bt_buffers
 	rm -r build
 
 release-aethernode: check_bt_buffers
-	arduino-cli compile --fqbn esp32:esp32:esp32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x35\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --fqbn esp32:esp32:esp32 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x35\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_aethernode.boot_app0
 	cp build/esp32.esp32.esp32/RNode_Firmware.ino.bin build/rnode_firmware_aethernode.bin
 	cp build/esp32.esp32.esp32/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_aethernode.bootloader
@@ -781,7 +781,7 @@ release-aethernode: check_bt_buffers
 	rm -r build
 
 release-aethernode_s3: check_bt_buffers
-	arduino-cli compile --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF7\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF7\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_aethernode_s3.boot_app0
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bin build/rnode_firmware_aethernode_s3.bin
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_aethernode_s3.bootloader
@@ -791,40 +791,40 @@ release-aethernode_s3: check_bt_buffers
 	rm -r build
 
 release-mega2560:
-	arduino-cli compile --fqbn arduino:avr:mega -e --build-property "compiler.cpp.extra_flags=\"-DMODEM=0x01\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --fqbn arduino:avr:mega -e --build-property "compiler.cpp.extra_flags=\"-DMODEM=0x01\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 	cp build/arduino.avr.mega/RNode_Firmware.ino.hex Release/rnode_firmware_m2560.hex
 	rm -r build
 
 release-rak4631:
-	arduino-cli compile --fqbn rakwireless:nrf52:WisCoreRAK4631Board -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x51\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --fqbn rakwireless:nrf52:WisCoreRAK4631Board -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x51\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 	cp build/rakwireless.nrf52.WisCoreRAK4631Board/RNode_Firmware.ino.hex build/rnode_firmware_rak4631.hex
 	adafruit-nrfutil dfu genpkg --dev-type 0x0052 --application build/rnode_firmware_rak4631.hex Release/rnode_firmware_rak4631.zip
 	echo "$(PROTO_VERSION).$(shell git rev-list --count HEAD)" > build/version.txt
 	zip --junk-paths Release/rnode_firmware_rak4631.zip build/version.txt
 
 release-heltec_t114:
-	arduino-cli compile --fqbn Heltec_nRF52:Heltec_nRF52:HT-n5262 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x3C\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --fqbn Heltec_nRF52:Heltec_nRF52:HT-n5262 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x3C\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 	cp build/Heltec_nRF52.Heltec_nRF52.HT-n5262/RNode_Firmware.ino.hex build/rnode_firmware_heltec_t114.hex
 	adafruit-nrfutil dfu genpkg --dev-type 0x0052 --application build/rnode_firmware_heltec_t114.hex Release/rnode_firmware_heltec_t114.zip
 	echo "$(PROTO_VERSION).$(shell git rev-list --count HEAD)" > build/version.txt
 	zip --junk-paths Release/rnode_firmware_heltec_t114.zip build/version.txt
 
 release-heltec_t096:
-	arduino-cli compile --fqbn Heltec_nRF52:Heltec_nRF52:HT-n5262G -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xD2\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --fqbn Heltec_nRF52:Heltec_nRF52:HT-n5262G -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xD2\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 	cp build/Heltec_nRF52.Heltec_nRF52.HT-n5262G/RNode_Firmware.ino.hex build/rnode_firmware_heltec_t096.hex
 	adafruit-nrfutil dfu genpkg --dev-type 0x0052 --application build/rnode_firmware_heltec_t096.hex Release/rnode_firmware_heltec_t096.zip
 	echo "$(PROTO_VERSION).$(shell git rev-list --count HEAD)" > build/version.txt
 	zip --junk-paths Release/rnode_firmware_heltec_t096.zip build/version.txt
 
 release-heltec_t1:
-	arduino-cli compile --fqbn Heltec_nRF52:Heltec_nRF52:HT-mesh-node-t1 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x47\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --fqbn Heltec_nRF52:Heltec_nRF52:HT-mesh-node-t1 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x47\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 	cp build/Heltec_nRF52.Heltec_nRF52.HT-mesh-node-t1/RNode_Firmware.ino.hex build/rnode_firmware_heltec_t1.hex
 	adafruit-nrfutil dfu genpkg --dev-type 0x0052 --application build/rnode_firmware_heltec_t1.hex Release/rnode_firmware_heltec_t1.zip
 	echo "$(PROTO_VERSION).$(shell git rev-list --count HEAD)" > build/version.txt
 	zip --junk-paths Release/rnode_firmware_heltec_t1.zip build/version.txt
 
 release-heltec_wtracker_v2: check_bt_buffers
-	arduino-cli compile --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=default_8MB" --build-property "build.flash_size=8MB" --build-property "upload.maximum_size=3342336" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x46\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -e --build-property "build.partitions=default_8MB" --build-property "build.flash_size=8MB" --build-property "upload.maximum_size=3342336" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x46\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_heltec_wtracker_v2.boot_app0
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bin build/rnode_firmware_heltec_wtracker_v2.bin
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_heltec_wtracker_v2.bootloader
@@ -834,21 +834,21 @@ release-heltec_wtracker_v2: check_bt_buffers
 	rm -r build
 
 release-promicro:
-	arduino-cli compile --log --fqbn promicro:nrf52:nicenanov2:softdevice=s140v6 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF5\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --log --fqbn promicro:nrf52:nicenanov2:softdevice=s140v6 -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0xF5\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 	cp build/promicro.nrf52.nicenanov2/RNode_Firmware.ino.hex build/rnode_firmware_promicro.hex
 	adafruit-nrfutil dfu genpkg --dev-type 0x0052 --sd-req 0xFFFE --application build/rnode_firmware_promicro.hex Release/rnode_firmware_promicro.zip
 	echo "$(PROTO_VERSION).$(shell git rev-list --count HEAD)" > build/version.txt
 	zip --junk-paths Release/rnode_firmware_promicro.zip build/version.txt
 
 release-techo:
-	arduino-cli compile --log --fqbn adafruit:nrf52:pca10056 -e --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x44\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --log --fqbn adafruit:nrf52:pca10056 -e --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x44\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 	cp build/adafruit.nrf52.pca10056/RNode_Firmware.ino.hex build/rnode_firmware_techo.hex
 	adafruit-nrfutil dfu genpkg --dev-type 0x0052 --application build/rnode_firmware_techo.hex Release/rnode_firmware_techo.zip
 	echo "$(PROTO_VERSION).$(shell git rev-list --count HEAD)" > build/version.txt
 	zip --junk-paths Release/rnode_firmware_techo.zip build/version.txt
 
 release-xiao_s3:
-	arduino-cli compile --fqbn "esp32:esp32:XIAO_ESP32S3" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x3E\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\""
+	arduino-cli compile --fqbn "esp32:esp32:XIAO_ESP32S3" -e --build-property "build.partitions=no_ota" --build-property "upload.maximum_size=2097152" --build-property "compiler.cpp.extra_flags=\"-DBOARD_MODEL=0x3E\" \"-DBUILD_NUMBER=$(shell git rev-list --count HEAD)\"" RNode_Firmware
 	cp ~/.arduino15/packages/esp32/hardware/esp32/$(ARDUINO_ESP_CORE_VER)/tools/partitions/boot_app0.bin build/rnode_firmware_xiao_esp32s3.boot_app0
 	cp build/esp32.esp32.XIAO_ESP32S3/RNode_Firmware.ino.bin build/rnode_firmware_xiao_esp32s3.bin
 	cp build/esp32.esp32.XIAO_ESP32S3/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_xiao_esp32s3.bootloader
