@@ -224,7 +224,7 @@
     #define MENU_STATE_GNSS_DIAG      49 // verbose GNSS diagnostics summary - opened from MENU_STATE_GNSS_LIST's Diagnostics row
     #define MENU_STATE_GNSS_DIAG_SATS 50 // satellites-in-view list (PRN/El/Az/SNR, from GPGSV) - opened from MENU_STATE_GNSS_DIAG's Sats In View row
   #endif
-  #define MENU_STATE_BT_LIST 51 // Bluetooth submenu list (HAS_BLUETOOTH/HAS_BLE boards) - Settings (MCU_ESP32 && HAS_BLE only, opens MENU_STATE_BT_SETTINGS)/MAC/Bonds (MCU_ESP32 only)/Forget Bonds (MCU_ESP32 only)/Back
+  #define MENU_STATE_BT_LIST 51 // Bluetooth submenu list (HAS_BLUETOOTH/HAS_BLE boards) - Settings (HAS_BLE only, opens MENU_STATE_BT_SETTINGS)/MAC/Bonds (MCU_ESP32 only)/Forget Bonds (MCU_ESP32 only)/Back
   // 52 (formerly MENU_STATE_BT_EDIT) intentionally left unused, not
   // reassigned - Legacy Pairing/Just Works moved to MENU_STATE_BT_SETTINGS/
   // _EDIT below; renumbering every constant after it wasn't worth it for a
@@ -232,8 +232,8 @@
   #define MENU_STATE_BT_UNPAIR_CONFIRM 53 // FORGET/CANCEL list before bt_debond_all() actually runs (MCU_ESP32 only) - same pattern as MENU_STATE_FWUPD_CONFIRM
   #define MENU_STATE_MSNGR_SETTINGS 54 // Messenger's own Settings submenu (HAS_URNS boards) - Retries/Back, opened from MENU_STATE_MSNGR_LIST
   #define MENU_STATE_MSNGR_SETTINGS_EDIT 55 // editing the Retries field (the only editable row in MENU_STATE_MSNGR_SETTINGS today)
-  #define MENU_STATE_BT_SETTINGS 56 // Bluetooth's own Settings submenu (MCU_ESP32 && HAS_BLE only) - Legacy Pairing/Just Works (moved from MENU_STATE_BT_LIST)/Auto Start/Back, opened from MENU_STATE_BT_LIST
-  #define MENU_STATE_BT_SETTINGS_EDIT 57 // editing whichever of Legacy Pairing/Just Works/Auto Start was selected
+  #define MENU_STATE_BT_SETTINGS 56 // Bluetooth's own Settings submenu (HAS_BLE only) - Legacy Pairing/Just Works (moved from MENU_STATE_BT_LIST)/Auto Start (all MCU_ESP32 only)/Battery Service (every HAS_BLE board)/Back, opened from MENU_STATE_BT_LIST
+  #define MENU_STATE_BT_SETTINGS_EDIT 57 // editing whichever of Legacy Pairing/Just Works/Auto Start/Battery Service was selected
 
   // The Hardware page used to only exist when there was board-level info
   // worth showing (battery/voltage sensing via HAS_PMU, or an ESP32-S3's
@@ -641,43 +641,57 @@
     // above), reads the live value directly, not staged/committed through
     // this submenu at all - same convention as ESP-NOW's own Channel row.
     #define BT_ITEM_MAC 0
-    #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
-      // Opens MENU_STATE_BT_SETTINGS (Legacy Pairing/Just Works/Auto
-      // Start) - below MAC, not above it. Not present on nRF52 (Bluefruit
-      // already forces Legacy Pairing unconditionally and has no
-      // auto-start toggle either, same reasoning as before this settings
-      // submenu existed).
+    #if HAS_BLE == true
+      // Opens MENU_STATE_BT_SETTINGS (Battery Service on every HAS_BLE
+      // board; Legacy Pairing/Just Works/Auto Start added on MCU_ESP32
+      // only) - below MAC, not above it. Widened from MCU_ESP32-only to
+      // every HAS_BLE board (this used to be ESP32/NimBLE-only, since
+      // Bluefruit already forces Legacy Pairing unconditionally and had no
+      // auto-start toggle) so MCU_NRF52 gets a place to host the new
+      // Battery Service toggle - see BT_SETTINGS_ITEM_* below.
       #define BT_ITEM_SETTINGS (BT_ITEM_MAC + 1)
-      // Bonds is read-only (bt_bond_count(), Bluetooth.h). Forget Bonds opens
-      // MENU_STATE_BT_UNPAIR_CONFIRM and calls bt_debond_all() - nRF52
-      // (Bluefruit) isn't wired up yet, and classic HAS_BLUETOOTH (Bluedroid
-      // SPP, e.g. MeshAdventurer/DIY-V1) has no bond-list API either, only
-      // the HAS_BLE (NimBLE) path defines bt_bond_count()/bt_debond_all().
-      #define BT_ITEM_BONDS (BT_ITEM_SETTINGS + 1)
-      #define BT_ITEM_UNPAIR (BT_ITEM_BONDS + 1)
-      #define BT_ITEM_BACK (BT_ITEM_UNPAIR + 1)
+      #if MCU_VARIANT == MCU_ESP32
+        // Bonds is read-only (bt_bond_count(), Bluetooth.h). Forget Bonds opens
+        // MENU_STATE_BT_UNPAIR_CONFIRM and calls bt_debond_all() - nRF52
+        // (Bluefruit) isn't wired up yet, and classic HAS_BLUETOOTH (Bluedroid
+        // SPP, e.g. MeshAdventurer/DIY-V1) has no bond-list API either, only
+        // the HAS_BLE (NimBLE) path defines bt_bond_count()/bt_debond_all().
+        #define BT_ITEM_BONDS (BT_ITEM_SETTINGS + 1)
+        #define BT_ITEM_UNPAIR (BT_ITEM_BONDS + 1)
+        #define BT_ITEM_BACK (BT_ITEM_UNPAIR + 1)
+      #else
+        #define BT_ITEM_BACK (BT_ITEM_SETTINGS + 1)
+      #endif
     #else
       #define BT_ITEM_BACK (BT_ITEM_MAC + 1)
     #endif
     #define BT_ITEM_COUNT (BT_ITEM_BACK + 1)
 
-    // MENU_STATE_BT_SETTINGS/_EDIT (MCU_ESP32 && HAS_BLE only) - Legacy
-    // Pairing and Just Works moved here from the top-level BT_LIST above
-    // (per user request), Auto Start added alongside them. Own item-index
-    // space, same "list + single shared EDIT state, cursor-dispatched"
-    // shape as MSNGR_SETTINGS/_EDIT.
-    #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
-      #define BT_SETTINGS_ITEM_LEGACY_PAIRING 0
-      #define BT_SETTINGS_ITEM_JUST_WORKS     1
-      // Whether BLE auto-starts at boot - see ADDR_CONF_BT_AUTO_START
-      // (ROM.h) and the one-shot boot check (RNode_Firmware.ino) for the
-      // full reasoning, including the historical bt_init() comment
-      // (Bluetooth.h) confirming this exact behavior existed once before
-      // and was deliberately removed over a BLE+ESP-NOW heap-exhaustion
-      // crash - default OFF here for the same reason.
-      #define BT_SETTINGS_ITEM_AUTO_START     2
-      #define BT_SETTINGS_ITEM_BACK           3
-      #define BT_SETTINGS_ITEM_COUNT          4
+    // MENU_STATE_BT_SETTINGS/_EDIT (HAS_BLE only) - Legacy Pairing/Just
+    // Works/Auto Start (MCU_ESP32 only, moved here from the top-level
+    // BT_LIST above per user request) plus Battery Service (every HAS_BLE
+    // board, both MCU_ESP32/NimBLE and MCU_NRF52/Bluefruit - see
+    // bt_battery_service_conf_save(), Utilities.h). Own item-index space,
+    // same "list + single shared EDIT state, cursor-dispatched" shape as
+    // MSNGR_SETTINGS/_EDIT.
+    #if HAS_BLE == true
+      #if MCU_VARIANT == MCU_ESP32
+        #define BT_SETTINGS_ITEM_LEGACY_PAIRING 0
+        #define BT_SETTINGS_ITEM_JUST_WORKS     1
+        // Whether BLE auto-starts at boot - see ADDR_CONF_BT_AUTO_START
+        // (ROM.h) and the one-shot boot check (RNode_Firmware.ino) for the
+        // full reasoning, including the historical bt_init() comment
+        // (Bluetooth.h) confirming this exact behavior existed once before
+        // and was deliberately removed over a BLE+ESP-NOW heap-exhaustion
+        // crash - default OFF here for the same reason.
+        #define BT_SETTINGS_ITEM_AUTO_START     2
+        #define BT_SETTINGS_ITEM_BATTERY_SERVICE 3
+        #define BT_SETTINGS_ITEM_BACK           4
+      #else // MCU_NRF52 - only Battery Service exists here today
+        #define BT_SETTINGS_ITEM_BATTERY_SERVICE 0
+        #define BT_SETTINGS_ITEM_BACK            1
+      #endif
+      #define BT_SETTINGS_ITEM_COUNT (BT_SETTINGS_ITEM_BACK + 1)
     #endif
   #endif
 
@@ -925,11 +939,24 @@
       #define HW_NEXT_A2 HW_NEXT_A
     #endif
 
+    // Read-only percentage, same battery_percent/battery_ready (Config.h,
+    // Power.h::measure_battery()) as HW_ITEM_BATTERY above, but broader -
+    // HAS_BATTERY_DIVIDER only covers resistor-divider boards, while PMU
+    // boards (T-Beam family etc) compute battery_percent too, just via a
+    // fuel gauge instead. No drilldown/edit state, same "plain display row"
+    // shape as HW_ITEM_UPTIME below, not HW_ITEM_BATTERY's MENU_STATE_HW_EDIT.
+    #if HAS_BATTERY_DIVIDER == true || HAS_PMU == true
+      #define HW_ITEM_BATTERY_LEVEL HW_NEXT_A2
+      #define HW_NEXT_A2B           (HW_NEXT_A2 + 1)
+    #else
+      #define HW_NEXT_A2B HW_NEXT_A2
+    #endif
+
     // No GPS chip-identification item here (removed - redundant with GNSS
     // chip identity, which only lives on the Diagnostics page now for
     // boards that have one: GNSS_DIAG_ITEM_MODULE. The main GNSS page no
     // longer shows chip identity at all, on any board.)
-    #define HW_NEXT_A3 HW_NEXT_A2
+    #define HW_NEXT_A3 HW_NEXT_A2B
 
     #if HAS_WIFI == true
       #define HW_ITEM_WIFI_IP  HW_NEXT_A3
@@ -1726,10 +1753,13 @@
   #if HAS_ENCODER == true
     bool staged_encoder_enabled = false;
   #endif
-  #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
-    bool staged_bt_legacy_pairing_enabled = false;
-    bool staged_bt_just_works_enabled = false;
-    bool staged_bt_auto_start_enabled = false;
+  #if HAS_BLE == true
+    #if MCU_VARIANT == MCU_ESP32
+      bool staged_bt_legacy_pairing_enabled = false;
+      bool staged_bt_just_works_enabled = false;
+      bool staged_bt_auto_start_enabled = false;
+    #endif
+    bool staged_bt_battery_service_enabled = false;
     // MENU_STATE_BT_SETTINGS/_EDIT's own cursor - separate from
     // bt_menu_cursor below, which now only tracks position within
     // BT_LIST's own (smaller) item space.
@@ -2579,10 +2609,13 @@
     #if HAS_ENCODER == true
       staged_encoder_enabled = encoder_enabled;
     #endif
-    #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
-      staged_bt_legacy_pairing_enabled = bt_legacy_pairing_enabled;
-      staged_bt_just_works_enabled = bt_just_works_enabled;
-      staged_bt_auto_start_enabled = bt_auto_start_enabled;
+    #if HAS_BLE == true
+      #if MCU_VARIANT == MCU_ESP32
+        staged_bt_legacy_pairing_enabled = bt_legacy_pairing_enabled;
+        staged_bt_just_works_enabled = bt_just_works_enabled;
+        staged_bt_auto_start_enabled = bt_auto_start_enabled;
+      #endif
+      staged_bt_battery_service_enabled = bt_battery_service_enabled;
     #endif
     #if HAS_LXMF == true
       staged_msngr_max_retries = msngr_max_retries;
@@ -2815,15 +2848,20 @@
         enc_conf_save(staged_encoder_enabled);
       }
     #endif
-    #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
-      if (staged_bt_legacy_pairing_enabled != bt_legacy_pairing_enabled) {
-        bt_legacy_pairing_conf_save(staged_bt_legacy_pairing_enabled);
-      }
-      if (staged_bt_just_works_enabled != bt_just_works_enabled) {
-        bt_just_works_conf_save(staged_bt_just_works_enabled);
-      }
-      if (staged_bt_auto_start_enabled != bt_auto_start_enabled) {
-        bt_auto_start_conf_save(staged_bt_auto_start_enabled);
+    #if HAS_BLE == true
+      #if MCU_VARIANT == MCU_ESP32
+        if (staged_bt_legacy_pairing_enabled != bt_legacy_pairing_enabled) {
+          bt_legacy_pairing_conf_save(staged_bt_legacy_pairing_enabled);
+        }
+        if (staged_bt_just_works_enabled != bt_just_works_enabled) {
+          bt_just_works_conf_save(staged_bt_just_works_enabled);
+        }
+        if (staged_bt_auto_start_enabled != bt_auto_start_enabled) {
+          bt_auto_start_conf_save(staged_bt_auto_start_enabled);
+        }
+      #endif
+      if (staged_bt_battery_service_enabled != bt_battery_service_enabled) {
+        bt_battery_service_conf_save(staged_bt_battery_service_enabled);
       }
     #endif
     #if HAS_WIFI == true
@@ -3115,7 +3153,7 @@
         buzzer_encoder_tick_melody();
         bt_menu_cursor = menu_clamp_cursor(bt_menu_cursor, dir, BT_ITEM_COUNT, wrap);
       }
-      #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
+      #if HAS_BLE == true
         else if (menu_state == MENU_STATE_BT_SETTINGS) {
           buzzer_encoder_tick_melody();
           bt_settings_cursor = menu_clamp_cursor(bt_settings_cursor, dir, BT_SETTINGS_ITEM_COUNT, wrap);
@@ -3124,15 +3162,21 @@
           buzzer_encoder_tick_melody();
           // Cursor-dispatched, same shape as MSNGR_SETTINGS_EDIT/URNS_EDIT -
           // bt_settings_cursor still points at whichever field was open
-          // when this state was entered. All three rows here are plain
-          // boolean toggles.
-          if (bt_settings_cursor == BT_SETTINGS_ITEM_JUST_WORKS) {
-            staged_bt_just_works_enabled = !staged_bt_just_works_enabled;
-          } else if (bt_settings_cursor == BT_SETTINGS_ITEM_AUTO_START) {
-            staged_bt_auto_start_enabled = !staged_bt_auto_start_enabled;
-          } else {
-            staged_bt_legacy_pairing_enabled = !staged_bt_legacy_pairing_enabled;
-          }
+          // when this state was entered. All rows here are plain boolean
+          // toggles.
+          #if MCU_VARIANT == MCU_ESP32
+            if (bt_settings_cursor == BT_SETTINGS_ITEM_JUST_WORKS) {
+              staged_bt_just_works_enabled = !staged_bt_just_works_enabled;
+            } else if (bt_settings_cursor == BT_SETTINGS_ITEM_AUTO_START) {
+              staged_bt_auto_start_enabled = !staged_bt_auto_start_enabled;
+            } else if (bt_settings_cursor == BT_SETTINGS_ITEM_BATTERY_SERVICE) {
+              staged_bt_battery_service_enabled = !staged_bt_battery_service_enabled;
+            } else {
+              staged_bt_legacy_pairing_enabled = !staged_bt_legacy_pairing_enabled;
+            }
+          #else // MCU_NRF52 - Battery Service is the only real row here
+            staged_bt_battery_service_enabled = !staged_bt_battery_service_enabled;
+          #endif
         }
       #endif
       #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
@@ -3745,7 +3789,7 @@
         if (bt_menu_cursor == BT_ITEM_BACK) {
           menu_state = MENU_STATE_LIST;
         }
-        #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
+        #if HAS_BLE == true
           else if (bt_menu_cursor == BT_ITEM_SETTINGS) {
             menu_state = MENU_STATE_BT_SETTINGS;
             bt_settings_cursor = 0;
@@ -3760,7 +3804,7 @@
         // MAC/Bonds are read-only - same shape as ESP-NOW's Channel row, no
         // edit state, selecting them does nothing.
       }
-      #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
+      #if HAS_BLE == true
         else if (menu_state == MENU_STATE_BT_SETTINGS) {
           if (bt_settings_cursor == BT_SETTINGS_ITEM_BACK) {
             // No commit here, same as BT_LIST's own Back above - BT
@@ -5735,7 +5779,7 @@
         const uint8_t *icons[BT_ITEM_COUNT] = { nullptr };
         uint8_t icon_widths[BT_ITEM_COUNT] = { 0 };
 
-        #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
+        #if HAS_BLE == true
           labels[BT_ITEM_SETTINGS] = "Settings";
           valbufs[BT_ITEM_SETTINGS][0] = 0;
           icons[BT_ITEM_SETTINGS] = bm_menu_icon_msngr_settings;
@@ -5797,19 +5841,24 @@
         // entry above, same as every other plain submenu list.
         draw_menu_list_disp("BLUETOOTH", labels, valbufs, BT_ITEM_COUNT, bt_menu_cursor, icons, icon_widths, nullptr, false);
       }
-      #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
+      #if HAS_BLE == true
         else if (menu_state == MENU_STATE_BT_SETTINGS) {
           const char *labels[BT_SETTINGS_ITEM_COUNT];
           char valbufs[BT_SETTINGS_ITEM_COUNT][24];
 
-          labels[BT_SETTINGS_ITEM_LEGACY_PAIRING] = "Legacy Pairing";
-          sprintf(valbufs[BT_SETTINGS_ITEM_LEGACY_PAIRING], staged_bt_legacy_pairing_enabled ? "ON" : "OFF");
+          #if MCU_VARIANT == MCU_ESP32
+            labels[BT_SETTINGS_ITEM_LEGACY_PAIRING] = "Legacy Pairing";
+            sprintf(valbufs[BT_SETTINGS_ITEM_LEGACY_PAIRING], staged_bt_legacy_pairing_enabled ? "ON" : "OFF");
 
-          labels[BT_SETTINGS_ITEM_JUST_WORKS] = "Just Works";
-          sprintf(valbufs[BT_SETTINGS_ITEM_JUST_WORKS], staged_bt_just_works_enabled ? "ON" : "OFF");
+            labels[BT_SETTINGS_ITEM_JUST_WORKS] = "Just Works";
+            sprintf(valbufs[BT_SETTINGS_ITEM_JUST_WORKS], staged_bt_just_works_enabled ? "ON" : "OFF");
 
-          labels[BT_SETTINGS_ITEM_AUTO_START] = "Auto Start";
-          sprintf(valbufs[BT_SETTINGS_ITEM_AUTO_START], staged_bt_auto_start_enabled ? "ON" : "OFF");
+            labels[BT_SETTINGS_ITEM_AUTO_START] = "Auto Start";
+            sprintf(valbufs[BT_SETTINGS_ITEM_AUTO_START], staged_bt_auto_start_enabled ? "ON" : "OFF");
+          #endif
+
+          labels[BT_SETTINGS_ITEM_BATTERY_SERVICE] = "Battery Service";
+          sprintf(valbufs[BT_SETTINGS_ITEM_BATTERY_SERVICE], staged_bt_battery_service_enabled ? "ON" : "OFF");
 
           labels[BT_SETTINGS_ITEM_BACK] = "BACK";
           valbufs[BT_SETTINGS_ITEM_BACK][0] = 0;
@@ -5817,13 +5866,19 @@
           draw_menu_list_disp("BLUETOOTH SETTINGS", labels, valbufs, BT_SETTINGS_ITEM_COUNT, bt_settings_cursor);
         }
         else if (menu_state == MENU_STATE_BT_SETTINGS_EDIT) {
-          if (bt_settings_cursor == BT_SETTINGS_ITEM_JUST_WORKS) {
-            draw_menu_edit_disp("JUST WORKS", staged_bt_just_works_enabled ? "ON" : "OFF");
-          } else if (bt_settings_cursor == BT_SETTINGS_ITEM_AUTO_START) {
-            draw_menu_edit_disp("AUTO START", staged_bt_auto_start_enabled ? "ON" : "OFF");
-          } else {
-            draw_menu_edit_disp("LEGACY PAIRING", staged_bt_legacy_pairing_enabled ? "ON" : "OFF");
-          }
+          #if MCU_VARIANT == MCU_ESP32
+            if (bt_settings_cursor == BT_SETTINGS_ITEM_JUST_WORKS) {
+              draw_menu_edit_disp("JUST WORKS", staged_bt_just_works_enabled ? "ON" : "OFF");
+            } else if (bt_settings_cursor == BT_SETTINGS_ITEM_AUTO_START) {
+              draw_menu_edit_disp("AUTO START", staged_bt_auto_start_enabled ? "ON" : "OFF");
+            } else if (bt_settings_cursor == BT_SETTINGS_ITEM_BATTERY_SERVICE) {
+              draw_menu_edit_disp("BATTERY SERVICE", staged_bt_battery_service_enabled ? "ON" : "OFF");
+            } else {
+              draw_menu_edit_disp("LEGACY PAIRING", staged_bt_legacy_pairing_enabled ? "ON" : "OFF");
+            }
+          #else // MCU_NRF52 - Battery Service is the only real row here
+            draw_menu_edit_disp("BATTERY SERVICE", staged_bt_battery_service_enabled ? "ON" : "OFF");
+          #endif
         }
       #endif
       #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
@@ -6879,6 +6934,12 @@
           labels[HW_ITEM_BATTERY] = "Battery Voltage";
           if (battery_ready) sprintf(valbufs[HW_ITEM_BATTERY], "%.2fV", battery_voltage);
           else                sprintf(valbufs[HW_ITEM_BATTERY], "N/A");
+        #endif
+
+        #if HAS_BATTERY_DIVIDER == true || HAS_PMU == true
+          labels[HW_ITEM_BATTERY_LEVEL] = "Battery Level";
+          if (battery_ready) sprintf(valbufs[HW_ITEM_BATTERY_LEVEL], "%.0f%%", battery_percent);
+          else                sprintf(valbufs[HW_ITEM_BATTERY_LEVEL], "N/A");
         #endif
 
         // No GNSS Chip row here anymore - redundant with GNSS chip

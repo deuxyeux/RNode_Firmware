@@ -45,6 +45,14 @@
   BLEUart SerialBT(BLE_RX_BUF);
   BLEDis  bledis;
   BLEBas  blebas;
+  // Battery Level Status (0x2BED, BAS v1.1) - BLEBas only covers plain
+  // Battery Level (0x2A19), so this is hand-built the same way BLEBas
+  // itself is (BLECharacteristic attaches to whichever BLEService most
+  // recently called begin() - BLEService::lastService, set by blebas.begin()
+  // in bt_start() below - so this must stay ordered right after it). See
+  // BLESerial.cpp's UpdateBatteryLevelStatus() for the MCU_ESP32 twin and
+  // the bit-packing this mirrors.
+  BLECharacteristic blebas_status((uint16_t)0x2BED);
   bool SerialBT_init = false;
 #endif
 
@@ -298,6 +306,18 @@ char bt_da[BT_DEV_ADDR_LEN];
     uint32_t bt_pairing_disconnect_at = 0;
 
     void bt_flush() { if (bt_state == BT_STATE_CONNECTED) { SerialBT.flush(); } }
+
+    // Battery level changes far slower than serial TX, so this is a coarse
+    // interval, not per-loop like bt_flush() above.
+    #define BLE_BATTERY_UPDATE_INTERVAL 30000
+    uint32_t bt_last_battery_update = 0;
+    void bt_update_battery_service() {
+      if (!bt_battery_service_enabled || bt_state != BT_STATE_CONNECTED) return;
+      if (millis()-bt_last_battery_update < BLE_BATTERY_UPDATE_INTERVAL) return;
+      bt_last_battery_update = millis();
+      SerialBT.UpdateBatteryLevel((uint8_t)battery_percent);
+      SerialBT.UpdateBatteryLevelStatus();
+    }
 
     // Minimum uptime before it's safe to actually bring up the NimBLE
     // stack (SerialBT.begin() below, which wraps BLEDevice::init() ->
@@ -747,6 +767,14 @@ char bt_da[BT_DEV_ADDR_LEN];
         } else {
           bt_auto_start_enabled = false;
         }
+        // Inverted polarity vs the three reads above - erased/never-written
+        // (0xFF) means ENABLED, same as ADDR_CONF_RADIO_AUTO_START. See
+        // ADDR_CONF_BT_BATTERY_SERVICE (ROM.h) for why.
+        if (EEPROM.read(ADDR_CONF_BT_BATTERY_SERVICE) == BT_BATTERY_SERVICE_DISABLE_BYTE) {
+          bt_battery_service_enabled = false;
+        } else {
+          bt_battery_service_enabled = true;
+        }
         uint8_t mac[BT_DEV_ADDR_LEN];
         esp_read_mac(mac, ESP_MAC_BT);
         char *data = (char*)malloc(BT_DEV_ADDR_LEN+1);
@@ -816,6 +844,7 @@ char bt_da[BT_DEV_ADDR_LEN];
           bt_flush();
         }
       }
+      bt_update_battery_service();
     }
   #else
     bool bt_init() {
@@ -1013,6 +1042,20 @@ char bt_da[BT_DEV_ADDR_LEN];
       } else {
         bt_enabled = false;
       }
+      // Inverted polarity vs ADDR_CONF_BT above - erased/never-written
+      // (0xFF) means ENABLED, same as ADDR_CONF_RADIO_AUTO_START. See
+      // ADDR_CONF_BT_BATTERY_SERVICE (ROM.h) for why. Raw physical byte,
+      // no eeprom_addr() wrapper - same as ADDR_CONF_RADIO_AUTO_START's own
+      // read (RNode_Firmware.ino).
+      #if HAS_EEPROM
+          if (EEPROM.read(ADDR_CONF_BT_BATTERY_SERVICE) == BT_BATTERY_SERVICE_DISABLE_BYTE) {
+      #else
+          if (eeprom_read(ADDR_CONF_BT_BATTERY_SERVICE) == BT_BATTERY_SERVICE_DISABLE_BYTE) {
+      #endif
+        bt_battery_service_enabled = false;
+      } else {
+        bt_battery_service_enabled = true;
+      }
       Bluefruit.configPrphBandwidth(BANDWIDTH_MAX);
       Bluefruit.autoConnLed(false);
       if (Bluefruit.begin()) {
@@ -1064,7 +1107,23 @@ char bt_da[BT_DEV_ADDR_LEN];
       bledis.setModel(BLE_MODEL);
       // start device information service
       bledis.begin();
-      blebas.begin();
+      // Skippable outright - blebas is never referenced by Advertising or
+      // any other module, so leaving it unregistered fully hides the
+      // Battery Service rather than just leaving it unwritten. See
+      // bt_battery_service_conf_save() (Utilities.h) for how a live toggle
+      // takes effect (stop/start cycle).
+      if (bt_battery_service_enabled) {
+        blebas.begin();
+        // Must stay immediately after blebas.begin() - BLECharacteristic::
+        // begin() attaches to BLEService::lastService, which blebas.begin()
+        // (a BLEService) just set. Any other service's begin() in between
+        // would misattach this. Same READ+NOTIFY, no security requirement
+        // as blebas's own Battery Level characteristic (SECMODE_OPEN).
+        blebas_status.setProperties(CHR_PROPS_READ | CHR_PROPS_NOTIFY);
+        blebas_status.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
+        blebas_status.setFixedLen(3);
+        blebas_status.begin();
+      }
 
       // Guard to ensure SerialBT service is not duplicated through BT being power cycled
       if (!SerialBT_init) {

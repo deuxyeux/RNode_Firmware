@@ -301,6 +301,18 @@
   #define RADIO_AUTO_START_ENABLE_BYTE  0x01
   #define RADIO_AUTO_START_DISABLE_BYTE 0x00
 
+  // Whether the standard BLE Battery Service (GATT 0x180F/0x2A19) is
+  // advertised - RNode Settings > Bluetooth > Settings > Battery Service
+  // (Menu.h), both MCU_ESP32/HAS_BLE (NimBLE) and MCU_NRF52 (Bluefruit's
+  // blebas, previously always-on with no toggle at all). Same unclaimed
+  // 256-823 gap, raw physical byte, no eeprom_addr() wrapper. Same
+  // erased-means-enabled polarity as ADDR_CONF_RADIO_AUTO_START above -
+  // nRF52 already shipped this always-on, so defaulting off would be a
+  // silent regression for existing devices.
+  #define ADDR_CONF_BT_BATTERY_SERVICE 272
+  #define BT_BATTERY_SERVICE_ENABLE_BYTE  0x01
+  #define BT_BATTERY_SERVICE_DISABLE_BYTE 0x00
+
   #define CONFIG_SIZE     256
   #define ADDR_CONF_SSID 0x00
   #define ADDR_CONF_PSK  0x21

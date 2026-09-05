@@ -254,6 +254,9 @@ void drot_conf_save(uint8_t val);
   void bt_auto_start_conf_save(bool is_enabled);
 #endif
 void radio_auto_start_conf_save(bool is_enabled);
+#if HAS_BLE == true
+  void bt_battery_service_conf_save(bool is_enabled);
+#endif
 #if HAS_RTC == true
   void kiss_indicate_time();
 #endif
@@ -2965,6 +2968,22 @@ void radio_auto_start_conf_save(bool is_enabled) {
   // above, this only governs what the NEXT boot's classic TNC-mode check
   // does (RNode_Firmware.ino), not the radio's current session state.
 }
+
+#if HAS_BLE == true
+void bt_battery_service_conf_save(bool is_enabled) {
+  bt_battery_service_enabled = is_enabled;
+  eeprom_update(ADDR_CONF_BT_BATTERY_SERVICE, is_enabled ? BT_BATTERY_SERVICE_ENABLE_BYTE : BT_BATTERY_SERVICE_DISABLE_BYTE);
+  // Same reasoning as bt_just_works_conf_save() above - on MCU_ESP32 this
+  // adds/removes a whole GATT service (BLESerial.cpp, SetupBatteryService()),
+  // baked in at creation time; on MCU_NRF52 it's blebas.begin() never having
+  // registered the service with the SoftDevice at all (Bluetooth.h). Both
+  // need a full stop/start cycle to take live effect.
+  if (bt_ready && bt_state != BT_STATE_OFF) {
+    bt_stop();
+    bt_start();
+  }
+}
+#endif
 
 void snd_conf_save(bool is_enabled) {
 	sound_enabled = is_enabled;

@@ -34,6 +34,14 @@ void bt_disconnect_callback(BLEServer *server);
 bool bt_client_authenticated();
 void bt_security_setup();
 extern bool bt_just_works_enabled;
+extern bool bt_battery_service_enabled;
+// Config.h globals, for UpdateBatteryLevelStatus() below - not #include-ing
+// Config.h itself into this separate translation unit, same reasoning as
+// the plain externs above.
+extern bool battery_installed;
+extern bool battery_ready;
+extern uint8_t battery_state;
+extern float battery_percent;
 
 uint32_t BLESerial::onPassKeyRequest() { return bt_passkey_callback(); }
 void BLESerial::onPassKeyNotify(uint32_t passkey) { bt_passkey_notify_callback(passkey); }
@@ -129,6 +137,77 @@ void BLESerial::flush() {
   }
 }
 
+void BLESerial::UpdateBatteryLevel(uint8_t level) {
+  if (BatteryLevelCharacteristic == nullptr) return;
+  BatteryLevelCharacteristic->setValue(&level, 1);
+  #if defined(CONFIG_NIMBLE_ENABLED)
+    // Same notify() no-op as BLESerial::flush() above - bypass it and call
+    // the underlying NimBLE host API directly with ble_conn_handle.
+    extern uint16_t ble_conn_handle;
+    if (ble_conn_handle != 0xFFFF) {
+      os_mbuf *om = ble_hs_mbuf_from_flat(&level, 1);
+      if (om != nullptr) { ble_gatts_notify_custom(ble_conn_handle, BatteryLevelCharacteristic->getHandle(), om); }
+    }
+  #else
+    BatteryLevelCharacteristic->notify(true);
+  #endif
+}
+
+void BLESerial::UpdateBatteryLevelStatus() {
+  if (BatteryLevelStatusCharacteristic == nullptr) return;
+
+  // Power State bitfield (BAS v1.1 GATT Specification Supplement, 0x2BED) -
+  // bit widths/shifts/enum values confirmed against Zephyr's own BAS
+  // implementation (subsys/bluetooth/services/bas/bas_bls.c), since the SIG
+  // spec text itself isn't reproduced here. battery_state/battery_percent/
+  // battery_ready/battery_installed are Config.h globals, externed above.
+  uint8_t battery_present = battery_installed ? 1 : 0;
+  uint8_t wired_power = 2;  // 0=not connected, 1=connected, 2=unknown
+  uint8_t charge_state = 0; // 0=unknown, 1=charging, 2=discharging active, 3=discharging inactive
+  uint8_t charge_level = 0; // 0=unknown, 1=good, 2=low, 3=critical
+  // Literal values, not the BATTERY_STATE_* macros (Config.h) - this is a
+  // separate translation unit and doesn't include Config.h (see the extern
+  // block above). 0x01=DISCHARGING, 0x02=CHARGING, 0x03=CHARGED.
+  if (battery_ready) {
+    switch (battery_state) {
+      case 0x02: // BATTERY_STATE_CHARGING
+        charge_state = 1; wired_power = 1; break;
+      case 0x01: // BATTERY_STATE_DISCHARGING
+        charge_state = 2; wired_power = 0; break;
+      case 0x03:
+        // BATTERY_STATE_CHARGED - battery isn't being drawn from while
+        // sitting on external power. "Discharging:Inactive" is the
+        // closest fit BAS 1.1 has for this, there's no dedicated
+        // "Full/Charged" charge state value.
+        charge_state = 3; wired_power = 1; break;
+      default:
+        charge_state = 0; wired_power = 2; break;
+    }
+    // Same 33% "low" cutoff as the on-device display's own low-battery
+    // indicator (Display.h, battery_low_lit) - critical is a new 10% tier
+    // this codebase didn't previously distinguish.
+    charge_level = (battery_percent <= 10.0) ? 3 : (battery_percent <= 33.0 ? 2 : 1);
+  }
+  uint16_t power_state = (battery_present & 0x1)
+                        | ((wired_power  & 0x3) << 1)
+                        | ((0            & 0x3) << 3)  // wireless power - no board supports it
+                        | ((charge_state & 0x3) << 5)
+                        | ((charge_level & 0x3) << 7);
+                        // charging type (bits 9-11) / fault reason (bits 12-14): no signal, left 0
+
+  uint8_t bls_value[3] = {0x00, (uint8_t)(power_state & 0xFF), (uint8_t)(power_state >> 8)};
+  BatteryLevelStatusCharacteristic->setValue(bls_value, 3);
+  #if defined(CONFIG_NIMBLE_ENABLED)
+    extern uint16_t ble_conn_handle;
+    if (ble_conn_handle != 0xFFFF) {
+      os_mbuf *om = ble_hs_mbuf_from_flat(bls_value, 3);
+      if (om != nullptr) { ble_gatts_notify_custom(ble_conn_handle, BatteryLevelStatusCharacteristic->getHandle(), om); }
+    }
+  #else
+    BatteryLevelStatusCharacteristic->notify(true);
+  #endif
+}
+
 void BLESerial::disconnect() {
   if (bt_client_authenticated()) {
     #if defined(CONFIG_NIMBLE_ENABLED)
@@ -204,6 +283,7 @@ bool BLESerial::begin(const char *name) {
   BLEDevice::setSecurityCallbacks(this);
 
   SetupSerialService();
+  if (bt_battery_service_enabled) { SetupBatteryService(); }
   this->startAdvertising();
   return true;
 }
@@ -211,6 +291,14 @@ bool BLESerial::begin(const char *name) {
 void BLESerial::startAdvertising() {
   ble_adv = BLEDevice::getAdvertising();
   ble_adv->addServiceUUID(BLE_SERIAL_SERVICE_UUID);
+  // Cheap (4 bytes: 2-byte AD header + 16-bit UUID) - confirmed live that
+  // manual GATT discovery (e.g. nRF Connect) finds the Battery Service
+  // fine without this, but several phone Bluetooth stacks (AOSP's
+  // included) only bother auto-probing a bonded device's battery level if
+  // 0x180F is already visible in the advertising/scan-response payload,
+  // rather than doing a full GATT walk on every connection. Only
+  // advertised when the service was actually created below.
+  if (BatteryLevelCharacteristic != nullptr) { ble_adv->addServiceUUID((uint16_t)0x180F); }
   ble_adv->setMinPreferred(0x20);
   ble_adv->setMaxPreferred(0x40);
   ble_adv->setScanResponse(true);
@@ -299,6 +387,31 @@ void BLESerial::SetupSerialService() {
   TxCharacteristic->setReadProperty(true);
 
   SerialService->start();
+}
+
+void BLESerial::SetupBatteryService() {
+  // Standard GATT Battery Service - no MITM/auth concerns here (unlike
+  // SetupSerialService() above), it's plain READ+NOTIFY, so no
+  // bt_just_works_enabled-style permission split is needed. Its UUID IS
+  // added to startAdvertising()'s advertised UUID list (unlike the
+  // MCU_NRF52/Bluefruit side's blebas, Bluetooth.h, which isn't) - some
+  // phone Bluetooth stacks only auto-probe a bonded device's battery
+  // level when 0x180F is visible in advertising, not via a full
+  // post-connection GATT walk. See startAdvertising()'s own comment.
+  BatteryService = ble_server->createService((uint16_t)0x180F);
+  BatteryLevelCharacteristic = BatteryService->createCharacteristic(
+    (uint16_t)0x2A19, BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY);
+  uint8_t initial_level = 0;
+  BatteryLevelCharacteristic->setValue(&initial_level, 1);
+
+  // Battery Level Status (0x2BED, BAS v1.1) - see UpdateBatteryLevelStatus()
+  // for the bit-packing. Same plain READ+NOTIFY, no ENC/AUTHEN.
+  BatteryLevelStatusCharacteristic = BatteryService->createCharacteristic(
+    (uint16_t)0x2BED, BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY);
+  uint8_t initial_bls[3] = {0, 0, 0};
+  BatteryLevelStatusCharacteristic->setValue(initial_bls, 3);
+
+  BatteryService->start();
 }
 
 BLESerial::BLESerial() { }

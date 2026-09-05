@@ -91,6 +91,8 @@ public:
   void flush();
   void onConnect(BLEServer *server);
   void onDisconnect(BLEServer *server);
+  void UpdateBatteryLevel(uint8_t level);
+  void UpdateBatteryLevelStatus();
 
   uint32_t onPassKeyRequest();
   void onPassKeyNotify(uint32_t passkey);
@@ -109,6 +111,19 @@ public:
   BLEService *SerialService;
   BLECharacteristic *TxCharacteristic;
   BLECharacteristic *RxCharacteristic;
+  // Standard GATT Battery Service (0x180F/0x2A19) - RNode Settings >
+  // Bluetooth > Settings > Battery Service (Menu.h). Only created when
+  // bt_battery_service_enabled (Config.h) is true at begin() time - see
+  // SetupBatteryService().
+  BLEService *BatteryService = nullptr;
+  BLECharacteristic *BatteryLevelCharacteristic = nullptr;
+  // Battery Level Status (0x2BED, BAS v1.1) - Flags byte + little-endian
+  // Power State u16 (Battery Present/Wired Power/Wireless Power/Charge
+  // State/Charge Level/Charging Type/Fault Reason bitfields). Same
+  // bt_battery_service_enabled gate as BatteryLevelCharacteristic above -
+  // created alongside it, not independently toggleable. See
+  // UpdateBatteryLevelStatus().
+  BLECharacteristic *BatteryLevelStatusCharacteristic = nullptr;
   size_t transmitBufferLength;
   unsigned long long lastFlushTime;
 
@@ -122,6 +137,7 @@ private:
 
   int ConnectedDeviceCount;
   void SetupSerialService();
+  void SetupBatteryService();
 
   uint16_t peerMTU;
   uint16_t maxTransferSize = BLE_BUFFER_SIZE;

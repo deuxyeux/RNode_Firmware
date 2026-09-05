@@ -385,7 +385,37 @@ void measure_battery() {
       }
 
       #if MCU_VARIANT == MCU_NRF52
-        if (bt_state != BT_STATE_OFF) { blebas.write(battery_percent); }
+        if (bt_battery_service_enabled && bt_state != BT_STATE_OFF) {
+          blebas.write(battery_percent);
+
+          // Battery Level Status (0x2BED) - see BLESerial.cpp's
+          // UpdateBatteryLevelStatus() (MCU_ESP32) for the same bit-packing
+          // with full field-by-field commentary; kept in sync with that.
+          uint8_t battery_present = battery_installed ? 1 : 0;
+          uint8_t wired_power = 2;  // 0=not connected, 1=connected, 2=unknown
+          uint8_t charge_state = 0; // 0=unknown, 1=charging, 2=discharging active, 3=discharging inactive
+          uint8_t charge_level = 0; // 0=unknown, 1=good, 2=low, 3=critical
+          if (battery_ready) {
+            switch (battery_state) {
+              case BATTERY_STATE_CHARGING:
+                charge_state = 1; wired_power = 1; break;
+              case BATTERY_STATE_DISCHARGING:
+                charge_state = 2; wired_power = 0; break;
+              case BATTERY_STATE_CHARGED:
+                charge_state = 3; wired_power = 1; break;
+              default:
+                charge_state = 0; wired_power = 2; break;
+            }
+            charge_level = (battery_percent <= 10.0) ? 3 : (battery_percent <= 33.0 ? 2 : 1);
+          }
+          uint16_t power_state = (battery_present & 0x1)
+                                | ((wired_power  & 0x3) << 1)
+                                | ((0            & 0x3) << 3)  // wireless power - no board supports it
+                                | ((charge_state & 0x3) << 5)
+                                | ((charge_level & 0x3) << 7);
+          uint8_t bls_value[3] = {0x00, (uint8_t)(power_state & 0xFF), (uint8_t)(power_state >> 8)};
+          blebas_status.write(bls_value, 3);
+        }
       #endif
 
       // if (bt_state == BT_STATE_CONNECTED) {

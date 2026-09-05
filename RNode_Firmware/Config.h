@@ -259,6 +259,16 @@
 	// come up hot), see RNode Settings > Radio > Auto Start (Menu.h) for
 	// the opt-out.
 	bool radio_auto_start_enabled = true;
+	// Whether the standard BLE Battery Service (GATT 0x180F/0x2A19) is
+	// advertised. Unlike bt_just_works_enabled/bt_auto_start_enabled
+	// (Bluetooth.h, MCU_ESP32 && HAS_BLE only), this needs to be reachable
+	// from both MCU_ESP32/BLESerial.cpp and MCU_NRF52's Bluetooth.h/Power.h,
+	// so it lives here alongside radio_auto_start_enabled rather than inside
+	// Bluetooth.h's ESP32-only branch. Defaults true - see
+	// ADDR_CONF_BT_BATTERY_SERVICE (ROM.h) for the "preserve nRF52's
+	// already-deployed always-on behavior" reasoning; boot overrides this
+	// from EEPROM in bt_setup_hw() (Bluetooth.h, both MCU variants).
+	bool bt_battery_service_enabled = true;
 	bool community_fw  = true;
 	bool hw_ready      = false;
 	bool radio_error   = false;
