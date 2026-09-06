@@ -1403,6 +1403,16 @@ void drawBitmap(int16_t startX, int16_t startY, const uint8_t* bitmap, int16_t b
                   uint8_t bt_c = sx-3; uint8_t bt_r = sy-st_box_y1;
                   if (!(bm_bt[bt_icon_i*32 + bt_r*2 + bt_c/8] & (0x80 >> (bt_c%8)))) { fg = COLOR_BT_ON; }
                 }
+                // GPS box: fill tints yellow/green, "GPS"/status text drawn in
+                // SSD1306_BLACK straight into stat_area (draw_gps_icon())
+                // always renders as literal black since only bit=1 (fill)
+                // pixels ever reach this branch - no bitmap introspection
+                // needed, unlike bt_enabled_lit above. +15 (not T114's +16) -
+                // this board's box interior is 16 rows, not 17, see
+                // draw_gps_icon()'s own comment.
+                else if (gps_status_lit && sx >= 61 && sx <= 76 && sy >= st_box_y1 && sy <= st_box_y1+15) {
+                  fg = (gps_status_lit == 2) ? COLOR_GPS_FIX : COLOR_GPS_NOFIX;
+                }
                 else if (sx >= WF_POS_X && sx < WF_POS_X+WF_PIXEL_WIDTH &&
                          sy >= wf_y && sy < wf_y+WATERFALL_SIZE) {
                   int wf_m = waterfall_meta[(waterfall_head + (sy-wf_y)) % WATERFALL_SIZE];
@@ -1804,7 +1814,15 @@ void draw_lora_icon(int px, int py, Adafruit_GFX &gfx = stat_area) {
   // there - both of its frames end in a solid line, by design, see
   // bm_envelope's own comment (Graphics.h) - stays stuck permanently,
   // showing as a stray line at the bottom of the box.
-  gfx.fillRect(px, py, 16, 17, SSD1306_BLACK);
+  // T096-family's bm_frame_t096 box is only 18 rows tall (16-row interior),
+  // one row shorter than the generic/T114 19-tall box this 17-row height
+  // was sized for - a 17-row fill there paints straight over the bottom
+  // border, blacking it out on every frame.
+  #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1
+    gfx.fillRect(px, py, 16, 16, SSD1306_BLACK);
+  #else
+    gfx.fillRect(px, py, 16, 17, SSD1306_BLACK);
+  #endif
   if (radio_online) {
     gfx.drawBitmap(px, py, bm_rf+1*32, 16, 16, SSD1306_WHITE, SSD1306_BLACK);
   } else {
@@ -1843,19 +1861,35 @@ void draw_gps_icon(int px, int py, Adafruit_GFX &gfx = stat_area) {
   #endif
 
   // 17px-tall fill (not 16), same as draw_espnow_icon()/draw_eth_icon()
-  // below - bm_frame's border lines sit one row further apart than the
-  // 16px icon grid, so a 16px fill leaves the bottom interior row
-  // showing through as an unfilled dark line.
-  gfx.fillRect(px, py, 16, 17, active ? SSD1306_WHITE : SSD1306_BLACK);
+  // below - the generic/T114 bm_frame's border lines sit one row further
+  // apart than the 16px icon grid, so a 16px fill there leaves the bottom
+  // interior row showing through as an unfilled dark line. T096-family's
+  // bm_frame_t096 box is one row shorter (18-row box, 16-row interior,
+  // same geometry draw_lora_icon() has to account for) - a 17-row fill
+  // there would instead paint over the bottom border itself.
+  #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1
+    gfx.fillRect(px, py, 16, 16, active ? SSD1306_WHITE : SSD1306_BLACK);
+  #else
+    gfx.fillRect(px, py, 16, 17, active ? SSD1306_WHITE : SSD1306_BLACK);
+  #endif
   gfx.setFont(&Picopixel);
   gfx.setTextSize(1);
   gfx.setTextWrap(false);
   gfx.setTextColor(active ? SSD1306_BLACK : SSD1306_WHITE);
 
+  // T096-family's box interior is one row shorter than T114's (16 rows vs
+  // 17, see the fillRect above) - shifting both lines up 1px keeps them
+  // centred instead of crowding the bottom border.
+  #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1
+    const int16_t text_dy = -1;
+  #else
+    const int16_t text_dy = 0;
+  #endif
+
   const char *top_buf = "GPS";
   int16_t tx1, ty1; uint16_t tw, th;
   gfx.getTextBounds(top_buf, 0, 0, &tx1, &ty1, &tw, &th);
-  gfx.setCursor(px + (16 - (int16_t)tw) / 2, py + 7);
+  gfx.setCursor(px + (16 - (int16_t)tw) / 2, py + 7 + text_dy);
   gfx.print(top_buf);
 
   // "NO FIX"/"NOFIX" both ran wider than the 16px box and looked cramped
@@ -1865,7 +1899,7 @@ void draw_gps_icon(int px, int py, Adafruit_GFX &gfx = stat_area) {
   const char *bot_buf = !active ? "OFF" : (fix ? "RDY" : "ACQ");
   int16_t bx1, by1; uint16_t bw, bh;
   gfx.getTextBounds(bot_buf, 0, 0, &bx1, &by1, &bw, &bh);
-  gfx.setCursor(px + (16 - (int16_t)bw) / 2, py + 14);
+  gfx.setCursor(px + (16 - (int16_t)bw) / 2, py + 14 + text_dy);
   gfx.print(bot_buf);
 }
 #endif
@@ -2394,7 +2428,15 @@ void draw_stat_area() {
       draw_cable_icon(3, st_box_y0);
       draw_bt_icon(3, st_box_y1);
       draw_lora_icon(61, st_box_y0);
-      draw_mw_icon(61, st_box_y1);
+      // mw_radio_online (draw_mw_icon()) is never set anywhere on this
+      // board family - there's no 2.4G radio here - so that box always
+      // rendered its permanently-off frame. This board has GPS instead, so
+      // give the box to draw_gps_icon() in that slot.
+      #if HAS_GPS == true
+        draw_gps_icon(61, st_box_y1);
+      #else
+        draw_mw_icon(61, st_box_y1);
+      #endif
       draw_battery_bars(4, 90);
       // The low-battery tint is colour-only: flipping it doesn't change
       // the mono canvas (the outline pixels stay identical), so force a
@@ -3493,6 +3535,28 @@ void draw_disp_area() {
               free(b_str);
             }
           } else if (disp_page == 3) {
+            if (!console_active) {
+              draw_disp_art(37, bm_hwok, 27);
+              #if (BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1 || BOARD_MODEL == BOARD_HELTEC_T114) && USE_COLOR_DISPLAY == true
+                disp_banner_fg = COLOR_BANNER_OK;
+              #endif
+            } else {
+              draw_disp_art(37, bm_console_active, 27);
+            }
+          } else if (disp_page == 4) {
+            // The systime page (HAS_RTC/HAS_GPS boards, pages==5) - this
+            // banner row has no dedicated content of its own for this page,
+            // it just keeps showing the same "hardware OK" state as pages
+            // 1/3 while the systime line above (display_alt/show_systime)
+            // takes over rows 20-36. Without this branch, disp_banner_fg
+            // (reset to 0 at the top of every draw_disp_area() call) never
+            // gets re-set to green while disp_page == 4 - the banner's own
+            // pixels stay correct (nothing here changes them), but the
+            // ticking systime line elsewhere in this same canvas keeps
+            // triggering the push's dirty-rectangle repaint, which recolors
+            // that whole bounding box - including this unchanged text -
+            // using whatever disp_banner_fg currently is, so the banner
+            // silently drains from green to white.
             if (!console_active) {
               draw_disp_art(37, bm_hwok, 27);
               #if (BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1 || BOARD_MODEL == BOARD_HELTEC_T114) && USE_COLOR_DISPLAY == true

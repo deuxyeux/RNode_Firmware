@@ -51,7 +51,12 @@
     // an 11px row - see MENU_LIST_BASELINE_OFF's use in draw_menu_list_disp().
     #define MENU_LIST_BASELINE_OFF 7
     #define MENU_LIST_FOOTER_HLINE_Y (MENU_CANVAS_H - 10)
-    #define MENU_LIST_FOOTER_TEXT_Y (MENU_CANVAS_H - 6)
+    // Org_01's 'p' (the deepest descender in "tap:next hold:open"/"turn:move
+    // press:open") has yOffset=-3, height=5, so its bottom row sits at
+    // baseline+1 - putting the baseline at MENU_CANVAS_H-2 lands that row
+    // exactly on the canvas's last physical pixel row, flush with the
+    // screen's bottom edge.
+    #define MENU_LIST_FOOTER_TEXT_Y (MENU_CANVAS_H - 2)
     #define MENU_EDIT_VALUE_CX (MENU_CANVAS_W / 2)
     #define MENU_EDIT_VALUE_Y 36
     #define MENU_EDIT_ARROW_Y 34
