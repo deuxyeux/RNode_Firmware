@@ -625,12 +625,15 @@
     #define ESPNOW_ITEM_ENABLED 0   // editable - staged only, no self-reboot until SAVE & EXIT
     #define ESPNOW_ITEM_MODE    1   // editable - "v1" (classic chunked) / "v2" (unfragmented) - framing only
     #define ESPNOW_ITEM_LR      2   // editable - 802.11 LR mode ON/OFF - PHY rate only, independent of Mode
-    // Read-only - same wr_channel WiFi's own Channel field edits (WIFI_ITEM_CHANNEL,
-    // Remote.h/ESPNOW.h both use it), not a separate value. Shown here purely
-    // for visibility while looking at ESP-NOW's own settings - deliberately not
-    // a second editable control for the same byte, see menu_confirm_select()'s
-    // own comment on why. Reads the live value directly (not staged/committed
-    // through this submenu at all), same as HW_LIST's read-only info rows.
+    // Editable - same wr_channel WiFi's own Channel field edits (WIFI_ITEM_CHANNEL,
+    // Remote.h/ESPNOW.h both use it), not a separate value - shares the exact
+    // same staged_wifi_channel/step_wifi_channel() (HAS_WIFI section above,
+    // guaranteed present since HAS_ESPNOW implies HAS_WIFI on every board
+    // that has it) rather than a second staged variable for the same byte,
+    // so editing it from either submenu can never drift out of sync. Exposed
+    // here too so an ESP-NOW-only workflow (e.g. URNS Interface set to
+    // ESP-NOW, see URNS.h) never needs to dig into the unrelated WiFi
+    // submenu just to change the channel that actually matters to it.
     #define ESPNOW_ITEM_CHANNEL 3
     #define ESPNOW_ITEM_BACK    4
     #define ESPNOW_ITEM_COUNT   5
@@ -704,6 +707,18 @@
     // deliberately a leaf/client node, not a relay - see
     // project_microreticulum_onboard_node memory.
     #define URNS_ITEM_TRANSPORT 1
+    #if HAS_ESPNOW == true
+      // Editable, 3-way cycle (not a bool toggle) - LoRa Only / ESP-NOW
+      // Only / Both, selecting which interface(s) urns_init() (URNS.h)
+      // registers with RNS::Transport (ADDR_CONF_URNS_INTERFACE, ROM.h).
+      // Same "staged, no self-reboot until SAVE & EXIT" shape as Enabled/
+      // Transport Mode above. Only exists on boards that also have
+      // HAS_ESPNOW - a LoRa-less onboard node makes no sense otherwise.
+      #define URNS_ITEM_INTERFACE (URNS_ITEM_TRANSPORT + 1)
+      #define URNS_ITEM_LINK_MTU_DISCOVERY_BASE URNS_ITEM_INTERFACE
+    #else
+      #define URNS_ITEM_LINK_MTU_DISCOVERY_BASE URNS_ITEM_TRANSPORT
+    #endif
     // Editable - RNS::Reticulum::link_mtu_discovery()/remote_management_
     // enabled()/probe_destination_enabled() (urns_init(), URNS.h;
     // ADDR_CONF_URNS_LINK_MTU_DISCOVERY/_REMOTE_MGMT/_PROBE_DEST, ROM.h).
@@ -712,19 +727,19 @@
     // start/stop path, same reasoning as the built-in "uReticulum General
     // Config" Provisioning namespace's own bool fields for these
     // (BuiltinNamespaces.cpp) exposing the exact same accessors.
-    #define URNS_ITEM_LINK_MTU_DISCOVERY 2
+    #define URNS_ITEM_LINK_MTU_DISCOVERY (URNS_ITEM_LINK_MTU_DISCOVERY_BASE + 1)
     // Defaults ON - matches this file's own prior hardcoded
     // remote_management_enabled(true) (see urns_init()'s own comment on
     // why that was safe unconditionally: the real security gate is the
     // separate, empty-by-default remote_management_allowed() ALLOW_LIST).
-    #define URNS_ITEM_REMOTE_MGMT        3
+    #define URNS_ITEM_REMOTE_MGMT (URNS_ITEM_LINK_MTU_DISCOVERY + 1)
     // Defaults OFF - matches RNS::Reticulum::probe_destination_enabled()'s
     // own library default (Reticulum.cpp).
-    #define URNS_ITEM_PROBE_DEST         4
+    #define URNS_ITEM_PROBE_DEST (URNS_ITEM_REMOTE_MGMT + 1)
     // Opens MENU_STATE_URNS_PATHS - a read-only, scrollable dump of
     // RNS::Transport's live path table (destination hash + hop count),
     // same "own submenu, only BACK does anything" shape as SENSORS_LIST.
-    #define URNS_ITEM_PATHS     5
+    #define URNS_ITEM_PATHS (URNS_ITEM_PROBE_DEST + 1)
     // Read-only info row - remaining free space on the "urns" LittleFS
     // partition (identity/path-table persistence + the LXMF MessageStore,
     // see MessageStore.h). LittleFS.usedBytes()/totalBytes() report for
@@ -736,9 +751,9 @@
     // does anything" shape as URNS_PATH_DETAIL/SENSORS_LIST. Computed
     // once on entry (urns_free_detail_refresh(), Menu.h) rather than in
     // the draw path - see the row's own draw-code comment for why.
-    #define URNS_ITEM_FREE      6
-    #define URNS_ITEM_BACK      7
-    #define URNS_ITEM_COUNT     8
+    #define URNS_ITEM_FREE (URNS_ITEM_PATHS + 1)
+    #define URNS_ITEM_BACK (URNS_ITEM_FREE + 1)
+    #define URNS_ITEM_COUNT (URNS_ITEM_BACK + 1)
 
     // MENU_STATE_URNS_FREE_DETAIL rows - each is one data-type bucket on
     // the urns partition (see urns_free_detail_refresh()):
@@ -1529,6 +1544,9 @@
     bool staged_urns_link_mtu_discovery = true;
     bool staged_urns_remote_mgmt_enabled = true;
     bool staged_urns_probe_dest_enabled = false;
+    #if HAS_ESPNOW == true
+      uint8_t staged_urns_interface_mode = URNS_INTERFACE_LORA_ONLY;
+    #endif
 
     uint8_t urns_paths_menu_cursor = 0;
     uint8_t urns_path_detail_cursor = 0;
@@ -1687,7 +1705,7 @@
         messenger_refresh_peer_cache(msngr_active_peer_hash);
       }
       if ((msngr_send_state == MSNGR_SEND_DELIVERED || msngr_send_state == MSNGR_SEND_TIMEOUT ||
-           msngr_send_state == MSNGR_SEND_UNRESOLVED) &&
+           msngr_send_state == MSNGR_SEND_UNRESOLVED || msngr_send_state == MSNGR_SEND_FAILED) &&
           menu_state == MENU_STATE_MSNGR_SEND_RESULT &&
           millis() - msngr_send_result_at_ms > MSNGR_SEND_RESULT_POPUP_MS) {
         menu_state = MENU_STATE_MSNGR_PEER;
@@ -2598,6 +2616,9 @@
       staged_urns_link_mtu_discovery = urns_link_mtu_discovery;
       staged_urns_remote_mgmt_enabled = urns_remote_management_enabled;
       staged_urns_probe_dest_enabled = urns_probe_destination_enabled;
+      #if HAS_ESPNOW == true
+        staged_urns_interface_mode = urns_interface_mode;
+      #endif
     #endif
     // Radio submenu - not gated on HAS_URNS, see project plan for the Radio menu.
     staged_lora_freq = lora_freq;
@@ -2785,6 +2806,11 @@
         bool urns_link_mtu_changed = (staged_urns_link_mtu_discovery != urns_link_mtu_discovery);
         bool urns_remote_mgmt_changed = (staged_urns_remote_mgmt_enabled != urns_remote_management_enabled);
         bool urns_probe_dest_changed = (staged_urns_probe_dest_enabled != urns_probe_destination_enabled);
+        #if HAS_ESPNOW == true
+          bool urns_interface_changed = (staged_urns_interface_mode != urns_interface_mode);
+        #else
+          bool urns_interface_changed = false;
+        #endif
         if (urns_enable_changed) {
           // Raw physical byte, not through eeprom_addr() - same convention
           // as ADDR_CONF_ESPNOW_MODE/LR above (ADDR_CONF_URNS, ROM.h).
@@ -2807,8 +2833,14 @@
           eeprom_update(ADDR_CONF_URNS_PROBE_DEST, staged_urns_probe_dest_enabled ? URNS_PROBE_DEST_ENABLE_BYTE : URNS_PROBE_DEST_DISABLE_BYTE);
           urns_probe_destination_enabled = staged_urns_probe_dest_enabled;
         }
+        #if HAS_ESPNOW == true
+          if (urns_interface_changed) {
+            eeprom_update(ADDR_CONF_URNS_INTERFACE, staged_urns_interface_mode);
+            urns_interface_mode = staged_urns_interface_mode;
+          }
+        #endif
         if (urns_enable_changed || urns_transport_changed || urns_link_mtu_changed ||
-            urns_remote_mgmt_changed || urns_probe_dest_changed) { hard_reset(); }
+            urns_remote_mgmt_changed || urns_probe_dest_changed || urns_interface_changed) { hard_reset(); }
       }
     #endif
     {
@@ -2934,7 +2966,27 @@
       // wifi_remote_init() re-reads static IP/netmask/gateway/DNS from
       // EEPROM itself (see wifi_remote_start_sta(), Remote.h), same as it
       // already does for SSID/PSK above - no separate "apply" call needed.
-      if (wifi_changed) { wifi_remote_init(); }
+      if (wifi_changed) {
+        // wifi_remote_init()'s WiFi.mode(WIFI_MODE_NULL) fully deinitializes
+        // the shared esp_wifi driver state ESP-NOW rides on top of,
+        // deregistering its peer/callbacks along with it - and since
+        // espnow_init() (ESPNOW.h) only ever runs once, at boot, ESP-NOW
+        // never recovers (confirmed on hardware, see wifi_remote_init()'s
+        // own comment, Remote.h - the same reasoning behind that file's
+        // separate lighter STA-reconnect-retry path that avoids WiFi.mode()
+        // entirely). Calling it here while ESP-NOW is live would silently
+        // kill the running ESP-NOW session for the rest of the boot.
+        // EEPROM writes above already happened regardless - defer applying
+        // them live until the next boot (or ESP-NOW being disabled, which
+        // itself always reboots - see espnow_conf_save(), Utilities.h) -
+        // instead of leaving the user with no way to change these settings
+        // without also being warned they need a reboot for them to take.
+        #if HAS_ESPNOW == true
+          if (!espnow_ready) { wifi_remote_init(); }
+        #else
+          wifi_remote_init();
+        #endif
+      }
     #endif
     #if MENU_HAS_HW_PAGE == true
       // Flush an in-progress immediate-commit screen (Voltage/Battery cal,
@@ -3250,6 +3302,7 @@
         // the same "list cursor persists across states" behavior).
         if (espnow_menu_cursor == ESPNOW_ITEM_ENABLED)      staged_espnow_enabled = !staged_espnow_enabled;
         else if (espnow_menu_cursor == ESPNOW_ITEM_MODE)    staged_espnow_mode_v2 = !staged_espnow_mode_v2;
+        else if (espnow_menu_cursor == ESPNOW_ITEM_CHANNEL) step_wifi_channel(dir, wrap);
         else                                                staged_espnow_lr_enabled = !staged_espnow_lr_enabled;
       } else if (menu_state == MENU_STATE_ESPNOW_LR_CONFIRM) {
         // 3-item list (info row/ENABLE/CANCEL) - same tap-to-move/hold-to-
@@ -3270,6 +3323,9 @@
         // was open when this state was entered.
         if (urns_menu_cursor == URNS_ITEM_ENABLED) staged_urns_enabled = !staged_urns_enabled;
         else if (urns_menu_cursor == URNS_ITEM_TRANSPORT) staged_urns_transport_enabled = !staged_urns_transport_enabled;
+        #if HAS_ESPNOW == true
+        else if (urns_menu_cursor == URNS_ITEM_INTERFACE) staged_urns_interface_mode = menu_clamp_cursor(staged_urns_interface_mode, dir, 3, wrap);
+        #endif
         else if (urns_menu_cursor == URNS_ITEM_LINK_MTU_DISCOVERY) staged_urns_link_mtu_discovery = !staged_urns_link_mtu_discovery;
         else if (urns_menu_cursor == URNS_ITEM_REMOTE_MGMT) staged_urns_remote_mgmt_enabled = !staged_urns_remote_mgmt_enabled;
         else                                                staged_urns_probe_dest_enabled = !staged_urns_probe_dest_enabled;
@@ -3570,8 +3626,27 @@
       }
       #if HAS_WIFI == true
         else if (menu_cursor == MENU_ITEM_WIFI) {
-          menu_state = MENU_STATE_WIFI_LIST;
           wifi_menu_cursor = 0;
+          // Settings here are still fully editable and get saved to EEPROM
+          // as normal (see menu_commit_and_exit()'s own ESP-NOW guard) -
+          // this is purely a heads-up that they won't take effect live
+          // while ESP-NOW is running (WiFi.mode(WIFI_MODE_NULL), which
+          // wifi_remote_init() needs to apply a change, tears down the
+          // shared esp_wifi driver state ESP-NOW depends on - see that
+          // guard's own comment). Checks espnow_ready (is ESP-NOW's driver
+          // actually live right now), not just the enabled setting -
+          // applies regardless of LR mode, since the conflict isn't LR-
+          // specific. Dismissed by any input, same as every other
+          // MENU_STATE_STATUS_POPUP use - lands in the WiFi list either way.
+          #if HAS_ESPNOW == true
+            if (espnow_ready) {
+              menu_open_popup("WIFI DISABLED (ESP-NOW)", MENU_STATE_WIFI_LIST);
+            } else {
+              menu_state = MENU_STATE_WIFI_LIST;
+            }
+          #else
+            menu_state = MENU_STATE_WIFI_LIST;
+          #endif
         }
       #endif
       #if HAS_BLUETOOTH == true || HAS_BLE == true
@@ -4112,13 +4187,17 @@
     #endif
     #if HAS_ESPNOW == true
       else if (menu_state == MENU_STATE_ESPNOW_LIST) {
-        // Channel is read-only (see its own declaration) - only
-        // ENABLED/MODE/LR actually open the shared edit screen.
         if (espnow_menu_cursor == ESPNOW_ITEM_BACK) {
           menu_state = MENU_STATE_LIST;
+        } else if (espnow_menu_cursor == ESPNOW_ITEM_MODE
+                   #if HAS_URNS == true
+                     && staged_urns_interface_mode == URNS_INTERFACE_LORA_ONLY
+                   #endif
+                  ) {
+          menu_state = MENU_STATE_ESPNOW_EDIT;
         } else if (espnow_menu_cursor == ESPNOW_ITEM_ENABLED ||
-                   espnow_menu_cursor == ESPNOW_ITEM_MODE ||
-                   espnow_menu_cursor == ESPNOW_ITEM_LR) {
+                   espnow_menu_cursor == ESPNOW_ITEM_LR ||
+                   espnow_menu_cursor == ESPNOW_ITEM_CHANNEL) {
           menu_state = MENU_STATE_ESPNOW_EDIT;
         }
       } else if (menu_state == MENU_STATE_ESPNOW_EDIT) {
@@ -4172,6 +4251,9 @@
           // before SAVE & EXIT reboots into the new state.
           if (staged_urns_transport_enabled) { menu_state = MENU_STATE_URNS_EDIT; }
         } else if (urns_menu_cursor == URNS_ITEM_ENABLED || urns_menu_cursor == URNS_ITEM_TRANSPORT ||
+                   #if HAS_ESPNOW == true
+                   urns_menu_cursor == URNS_ITEM_INTERFACE ||
+                   #endif
                    urns_menu_cursor == URNS_ITEM_LINK_MTU_DISCOVERY || urns_menu_cursor == URNS_ITEM_REMOTE_MGMT) {
           menu_state = MENU_STATE_URNS_EDIT;
         } else if (urns_menu_cursor == URNS_ITEM_PATHS) {
@@ -5002,6 +5084,23 @@
       MENU_GFX.setTextColor(SSD1306_WHITE);
       MENU_GFX.setCursor(6, 8);
       MENU_GFX.print(msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME ? "Name" : "Send Message");
+
+      // Char count, right-aligned on the same title line - "(used/max)",
+      // max matching whichever buffer msngr_kb_key_type()'s DEL/typing
+      // handlers are actually enforcing for this purpose (MSNGR_NAME_MAX_LEN
+      // for the display-name reuse of this screen, MSNGR_TEXT_ENTRY_MAX_LEN
+      // otherwise - same ternary already used at the input-handling site).
+      {
+        uint8_t max_len = (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME)
+          ? MSNGR_NAME_MAX_LEN : MSNGR_TEXT_ENTRY_MAX_LEN;
+        char count_buf[16];
+        snprintf(count_buf, sizeof(count_buf), "(%u/%u)", (unsigned)strlen(msngr_text_entry_buf), (unsigned)max_len);
+        int16_t x1, y1; uint16_t cw, ch;
+        MENU_GFX.getTextBounds(count_buf, 0, 0, &x1, &y1, &cw, &ch);
+        MENU_GFX.setCursor(4 + MENU_CONTENT_W - (int16_t)cw, 8);
+        MENU_GFX.print(count_buf);
+      }
+
       MENU_GFX.drawFastHLine(4, 12, MENU_CONTENT_W, SSD1306_WHITE);
 
       // Input preview - tail of what's typed so far (leading "..." if it
@@ -6236,13 +6335,25 @@
         sprintf(valbufs[ESPNOW_ITEM_ENABLED], staged_espnow_enabled ? "ON" : "OFF");
 
         labels[ESPNOW_ITEM_MODE] = "Version";
-        sprintf(valbufs[ESPNOW_ITEM_MODE], staged_espnow_mode_v2 ? "v2.0" : "v1.0");
+        #if HAS_URNS == true
+          // v1's per-packet seq/more header is meaningless to
+          // UrnsEspNowInterface (URNS.h), which speaks unfragmented v2
+          // directly - whenever URNS shares this channel the whole device
+          // is forced to v2 at boot (RNode_Firmware.ino), so this row shows
+          // that override instead of pretending the field is still free to
+          // pick (see menu_confirm_select()'s matching gate on entering
+          // MENU_STATE_ESPNOW_EDIT for this item).
+          if (staged_urns_interface_mode != URNS_INTERFACE_LORA_ONLY) {
+            sprintf(valbufs[ESPNOW_ITEM_MODE], "v2.0 (URNS)");
+          } else
+        #endif
+          sprintf(valbufs[ESPNOW_ITEM_MODE], staged_espnow_mode_v2 ? "v2.0" : "v1.0");
 
         labels[ESPNOW_ITEM_LR] = "LR Mode";
         sprintf(valbufs[ESPNOW_ITEM_LR], staged_espnow_lr_enabled ? "ON" : "OFF");
 
         labels[ESPNOW_ITEM_CHANNEL] = "Channel";
-        sprintf(valbufs[ESPNOW_ITEM_CHANNEL], "%u", wr_channel);
+        sprintf(valbufs[ESPNOW_ITEM_CHANNEL], "%u", staged_wifi_channel);
 
         labels[ESPNOW_ITEM_BACK] = "BACK";
         valbufs[ESPNOW_ITEM_BACK][0] = 0;
@@ -6253,6 +6364,10 @@
           draw_menu_edit_disp("ESP-NOW ENABLED", staged_espnow_enabled ? "ON" : "OFF");
         } else if (espnow_menu_cursor == ESPNOW_ITEM_MODE) {
           draw_menu_edit_disp("ESP-NOW VERSION", staged_espnow_mode_v2 ? "v2.0" : "v1.0");
+        } else if (espnow_menu_cursor == ESPNOW_ITEM_CHANNEL) {
+          char valbuf[8];
+          sprintf(valbuf, "%u", staged_wifi_channel);
+          draw_menu_edit_disp("ESP-NOW CHANNEL", valbuf);
         } else {
           draw_menu_edit_disp("ESP-NOW LR MODE", staged_espnow_lr_enabled ? "ON" : "OFF");
         }
@@ -6281,6 +6396,15 @@
 
         labels[URNS_ITEM_TRANSPORT] = "Transport Mode";
         sprintf(valbufs[URNS_ITEM_TRANSPORT], staged_urns_transport_enabled ? "ON" : "OFF");
+
+        #if HAS_ESPNOW == true
+          labels[URNS_ITEM_INTERFACE] = "Interface";
+          switch (staged_urns_interface_mode) {
+            case URNS_INTERFACE_ESPNOW_ONLY: sprintf(valbufs[URNS_ITEM_INTERFACE], "ESP-NOW"); break;
+            case URNS_INTERFACE_BOTH:        sprintf(valbufs[URNS_ITEM_INTERFACE], "Both"); break;
+            default:                         sprintf(valbufs[URNS_ITEM_INTERFACE], "LoRa"); break;
+          }
+        #endif
 
         labels[URNS_ITEM_LINK_MTU_DISCOVERY] = "Link MTU Discovery";
         sprintf(valbufs[URNS_ITEM_LINK_MTU_DISCOVERY], staged_urns_link_mtu_discovery ? "ON" : "OFF");
@@ -6367,6 +6491,12 @@
           draw_menu_edit_disp("URNS ENABLED", staged_urns_enabled ? "ON" : "OFF");
         } else if (urns_menu_cursor == URNS_ITEM_TRANSPORT) {
           draw_menu_edit_disp("TRANSPORT MODE", staged_urns_transport_enabled ? "ON" : "OFF");
+        #if HAS_ESPNOW == true
+        } else if (urns_menu_cursor == URNS_ITEM_INTERFACE) {
+          const char *v = staged_urns_interface_mode == URNS_INTERFACE_ESPNOW_ONLY ? "ESP-NOW" :
+                          staged_urns_interface_mode == URNS_INTERFACE_BOTH ? "BOTH" : "LORA";
+          draw_menu_edit_disp("URNS INTERFACE", v);
+        #endif
         } else if (urns_menu_cursor == URNS_ITEM_LINK_MTU_DISCOVERY) {
           draw_menu_edit_disp("LINK MTU DISCOVERY", staged_urns_link_mtu_discovery ? "ON" : "OFF");
         } else if (urns_menu_cursor == URNS_ITEM_REMOTE_MGMT) {
@@ -6730,10 +6860,33 @@
         char status_buf[24];
         switch (msngr_send_state) {
           case MSNGR_SEND_RESOLVING:  snprintf(status_buf, sizeof(status_buf), "Resolving..."); break;
-          case MSNGR_SEND_PENDING:    snprintf(status_buf, sizeof(status_buf), "Sending..."); break;
+          case MSNGR_SEND_PENDING: {
+            // msngr_send_method - which method LXMessage::pack() actually
+            // resolved this send to (see its own declaration, Messenger.h) -
+            // OPPORTUNISTIC vs the silent DIRECT upgrade for anything over
+            // LORA_ENCRYPTED_PACKET_MDU, not just always "Sending...".
+            const char *method_name = (msngr_send_method == LXMF::Type::Message::DIRECT) ? "Direct" : "Opportunistic";
+            // Only show the attempt count once a retry has actually
+            // started (msngr_send_attempt > 1, set by messenger_send_
+            // process()'s live poll of the router's own delivery_
+            // attempts() - see msngr_send_attempt's own declaration,
+            // Messenger.h) - keeps the common first-try case uncluttered.
+            // Drops the "Sending" prefix in that case to leave room for
+            // the attempt count within status_buf's 24-byte budget.
+            if (msngr_send_attempt > 1) {
+              snprintf(status_buf, sizeof(status_buf), "%s (%u/%u)", method_name, (unsigned)msngr_send_attempt, (unsigned)msngr_max_retries);
+            } else {
+              snprintf(status_buf, sizeof(status_buf), "Sending %s", method_name);
+            }
+            break;
+          }
           case MSNGR_SEND_DELIVERED:  snprintf(status_buf, sizeof(status_buf), "Delivered"); break;
           case MSNGR_SEND_TIMEOUT:    snprintf(status_buf, sizeof(status_buf), "No Confirmation"); break;
           case MSNGR_SEND_UNRESOLVED: snprintf(status_buf, sizeof(status_buf), "Unknown Destination"); break;
+          // Router-confirmed failure (messenger_on_failed(), Messenger.h) -
+          // exhausted delivery_attempts() and gave up for good. Distinct
+          // from MSNGR_SEND_TIMEOUT (this screen's own blind guess-timeout).
+          case MSNGR_SEND_FAILED:     snprintf(status_buf, sizeof(status_buf), "Delivery Failed"); break;
           default:                    snprintf(status_buf, sizeof(status_buf), "..."); break;
         }
         labels[0] = status_buf;

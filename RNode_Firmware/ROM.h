@@ -313,6 +313,18 @@
   #define BT_BATTERY_SERVICE_ENABLE_BYTE  0x01
   #define BT_BATTERY_SERVICE_DISABLE_BYTE 0x00
 
+  // Which interface(s) the onboard URNS node registers with RNS::Transport -
+  // RNode Settings > URNS > Interface (Menu.h). Same unclaimed 256-823 gap,
+  // raw physical byte, no eeprom_addr() wrapper (HAS_URNS is ESP32-only,
+  // same as every other ADDR_CONF_URNS_* byte above). 0x00/erased-0xFF both
+  // resolve to LoRa-only so existing deployed devices see no behavior
+  // change - only boards that explicitly opt into ESP-NOW-only or Both ever
+  // skip registering UrnsLoRaInterface.
+  #define ADDR_CONF_URNS_INTERFACE 273
+  #define URNS_INTERFACE_LORA_ONLY   0x00
+  #define URNS_INTERFACE_ESPNOW_ONLY 0x01
+  #define URNS_INTERFACE_BOTH        0x02
+
   #define CONFIG_SIZE     256
   #define ADDR_CONF_SSID 0x00
   #define ADDR_CONF_PSK  0x21

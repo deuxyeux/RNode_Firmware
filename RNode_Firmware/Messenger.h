@@ -506,6 +506,15 @@
   // recall() failure means neither is known yet.
   #define MSNGR_SEND_RESOLVING  4
   #define MSNGR_SEND_UNRESOLVED 5 // no identity within MSNGR_SEND_RESOLVE_TIMEOUT_MS
+  // Router-confirmed failure (messenger_on_failed(), registered via
+  // LXMRouter::register_failed_callback()) - LXMRouter.cpp's
+  // static_proof_timeout_callback() exhausted msngr_max_retries attempts
+  // for this OPPORTUNISTIC send and gave up for good. Distinct from
+  // MSNGR_SEND_TIMEOUT (this screen's own blind guess-timeout, which still
+  // exists as a backstop for delivery methods this specific fix doesn't
+  // cover) - this one is a real, router-confirmed "it's not going to be
+  // delivered", not just "we haven't heard back yet".
+  #define MSNGR_SEND_FAILED     6
   // Generous - OPPORTUNISTIC delivery's proof has to travel from the
   // recipient back to us, potentially multiple LoRa hops each way, with
   // no guaranteed path warm already. PacketReceipt's own auto-computed
@@ -536,6 +545,24 @@
   uint8_t msngr_send_state = MSNGR_SEND_IDLE;
   RNS::Bytes msngr_send_message_hash;
   unsigned long msngr_send_started_ms = 0;
+  // Live attempt count for the MSNGR_SEND_PENDING screen (Menu.h) - kept
+  // in sync from urns_lxmf_router->pending_outbound_front()->
+  // delivery_attempts() by messenger_send_process()'s own poll below,
+  // since OPPORTUNISTIC retries (LXMRouter.cpp's static_proof_timeout_
+  // callback()) happen entirely inside the router, asynchronously, with
+  // no other signal back to the UI in between the PENDING and final
+  // DELIVERED/FAILED states. 1 means "first attempt, no retry yet".
+  uint8_t msngr_send_attempt = 1;
+  // Which method LXMessage::pack() actually resolved this send to
+  // (LXMF::Type::Message::OPPORTUNISTIC or ::DIRECT) - read straight off
+  // the local msg object in messenger_send_lxmf_resolved() right after
+  // handle_outbound() returns, since handle_outbound() calls pack()
+  // synchronously (LXMRouter.cpp) before queueing, so msg.method() is
+  // already resolved by then even though the caller only ever *requested*
+  // OPPORTUNISTIC - LXMRouter silently upgrades to DIRECT for anything
+  // over LORA_ENCRYPTED_PACKET_MDU. Displayed on the MSNGR_SEND_PENDING
+  // screen (Menu.h) so it's clear which path a given send actually took.
+  uint8_t msngr_send_method = LXMF::Type::Message::OPPORTUNISTIC;
   unsigned long msngr_send_result_at_ms = 0; // set when state becomes DELIVERED/TIMEOUT/UNRESOLVED
   // Valid only while msngr_send_state == MSNGR_SEND_RESOLVING - the send
   // that's parked waiting for messenger_send_process() to find out whether
@@ -559,9 +586,45 @@
   // check the hash before touching UI state (a proof for some earlier,
   // already-timed-out send arriving late shouldn't resurrect/overwrite
   // whatever's currently being tracked).
+  //
+  // FIXED (local patch, not upstream): save_message() used to happen
+  // unconditionally in messenger_send_lxmf_resolved(), at send time,
+  // regardless of whether delivery was ever actually confirmed - so a
+  // message that failed still showed up in the conversation history as if
+  // it had gone through. Moved here, since this only ever fires once
+  // delivery is genuinely confirmed (LXMRouter.cpp's static_proof_
+  // callback() now pops the real, full-content message from its outbound
+  // queue and hands it to this callback - see that function's own
+  // comment - rather than the hash-only placeholder it used to pass).
   void messenger_on_delivered(LXMF::LXMessage &msg) {
+    // See messenger_on_delivery()'s own comment (this file) for why -
+    // same flash-I/O-vs-DIO0-ISR hazard.
+    LoRa->maskDio0();
+    bool saved = urns_message_store->save_message(msg);
+    LoRa->unmaskDio0();
+    if (!saved) {
+      DEBUG_LOG("[Messenger] delivered: save_message failed for %s\r\n", msg.hash().toHex().c_str());
+    }
+    msngr_send_needs_cache_refresh = true;
+
     if (msngr_send_state == MSNGR_SEND_PENDING && msg.hash() == msngr_send_message_hash) {
       msngr_send_state = MSNGR_SEND_DELIVERED;
+      msngr_send_result_at_ms = millis();
+    }
+  }
+
+  // Registered via LXMRouter::register_failed_callback() (URNS.h) - fires
+  // once LXMRouter has exhausted msngr_max_retries attempts for an
+  // OPPORTUNISTIC send (see static_proof_timeout_callback()'s own comment,
+  // LXMRouter.cpp) and given up for good. Deliberately does NOT call
+  // save_message() - a message that never got delivered has no business
+  // in the conversation history (see messenger_on_delivered()'s own
+  // comment for the matching success-side half of this fix). Same hash-
+  // check reasoning as messenger_on_delivered() - fires for every failed
+  // outbound message on this router, not just the one the UI is tracking.
+  void messenger_on_failed(LXMF::LXMessage &msg) {
+    if (msngr_send_state == MSNGR_SEND_PENDING && msg.hash() == msngr_send_message_hash) {
+      msngr_send_state = MSNGR_SEND_FAILED;
       msngr_send_result_at_ms = millis();
     }
   }
@@ -589,14 +652,15 @@
     LXMF::LXMessage msg(dest, urns_lxmf_router->delivery_destination(), RNS::bytesFromString(content),
       RNS::Bytes(), LXMF::Type::Message::OPPORTUNISTIC);
     urns_lxmf_router->handle_outbound(msg);
-    // See messenger_on_delivery()'s own comment (this file) for why -
-    // same flash-I/O-vs-DIO0-ISR hazard.
-    LoRa->maskDio0();
-    bool send_saved = urns_message_store->save_message(msg);
-    LoRa->unmaskDio0();
-    if (!send_saved) {
-      DEBUG_LOG("[Messenger] send: save_message failed for %s\r\n", msg.hash().toHex().c_str());
-    }
+    // handle_outbound() calls pack() synchronously before queueing
+    // (LXMRouter.cpp), so msg.method() already reflects OPPORTUNISTIC vs
+    // the silent DIRECT upgrade for oversized content - see
+    // msngr_send_method's own declaration.
+    msngr_send_method = msg.method();
+    // FIXED (local patch, not upstream): save_message() moved to
+    // messenger_on_delivered() - see that function's own comment for why
+    // saving unconditionally here (regardless of whether delivery is ever
+    // confirmed) was wrong.
     msngr_send_needs_cache_refresh = true;
 
     // Start delivery-proof tracking - see its own declaration above for
@@ -607,12 +671,23 @@
     msngr_send_message_hash = msg.hash();
     msngr_send_state = MSNGR_SEND_PENDING;
     msngr_send_started_ms = millis();
+    msngr_send_attempt = 1;
 
     DEBUG_LOG("[Messenger] send: queued message to %s\r\n", dest_hash.toHex().c_str());
   }
 
   void messenger_send_process() {
     if (msngr_send_state == MSNGR_SEND_PENDING) {
+      // Live-refresh the attempt count for MENU_STATE_MSNGR_SEND_RESULT
+      // (Menu.h) - see msngr_send_attempt's own declaration for why this
+      // has to be polled rather than pushed. The message being tracked is
+      // only ever at the front of the router's outbound queue (single-
+      // in-flight-message design, see LXMRouter.cpp's process_outbound())
+      // while a retry cycle is in progress - once delivered or failed for
+      // good it's popped and messenger_on_delivered()/_on_failed() (above)
+      // take over via their own hash check.
+      int attempts = urns_lxmf_router->pending_outbound_attempts_for(msngr_send_message_hash);
+      if (attempts > 0) { msngr_send_attempt = (uint8_t)attempts; }
       if (millis() - msngr_send_started_ms > MSNGR_SEND_DELIVERY_TIMEOUT_MS) {
         msngr_send_state = MSNGR_SEND_TIMEOUT;
         msngr_send_result_at_ms = millis();

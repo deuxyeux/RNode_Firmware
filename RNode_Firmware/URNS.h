@@ -108,6 +108,13 @@ bool urns_enqueue_outgoing(const uint8_t* data, uint16_t len);
   // device sent, not one it received. Forward-declared for the same reason
   // as messenger_on_delivery() above.
   void messenger_on_delivered(LXMF::LXMessage& msg);
+
+  // Outbound-proof-of-delivery FAILURE counterpart - fires when
+  // static_proof_timeout_callback() (lib/microLXMF's LXMRouter.cpp) has
+  // exhausted delivery attempts for an OPPORTUNISTIC send this device made
+  // and given up for good. Forward-declared for the same reason as
+  // messenger_on_delivery()/messenger_on_delivered() above.
+  void messenger_on_failed(LXMF::LXMessage& msg);
 #endif
 
 // RX-side counterpart to urns_enqueue_outgoing() above - kiss_write_packet()
@@ -162,6 +169,21 @@ public:
   UrnsLoRaInterface(const char* name = "UrnsLoRaInterface") : RNS::InterfaceImpl(name) {
     _IN = true;
     _OUT = true;
+    // Real hardware MTU, not the InterfaceImpl default of 0 - a 0 here
+    // makes Transport::inbound()'s LINKREQUEST handling (Transport.cpp)
+    // treat "no known HW MTU" as license to strip the trailing MTU-
+    // signalling bytes an initiator includes by default (link_mtu_
+    // discovery, on by default), silently mutating the packet's data
+    // *before* Link::validate_request() hashes it into a link_id -
+    // meanwhile the initiator's own copy of the same packet is never
+    // touched, since that stripping is receive-side only. Result:
+    // sender and receiver compute different link_ids for the identical
+    // LINKREQUEST, every time, and Link/Ping fails with a plain
+    // establishment timeout that looks like packet loss. Confirmed live
+    // via a byte-for-byte TX/RX hex comparison across two boards -
+    // wire bytes matched exactly, only the post-receive-processing
+    // packet.data().size() differed (67 vs 64, exactly LINK_MTU_SIZE).
+    _HW_MTU = MTU;
   }
   virtual ~UrnsLoRaInterface() {}
 
@@ -176,10 +198,56 @@ private:
   }
 };
 
+#if HAS_ESPNOW == true
+// ESP-NOW's RX-side counterpart to urns_stage_incoming() above - called
+// from espnow_rx_deliver() (ESPNOW.h), itself reached from espnow_recv_cb(),
+// esp_now's registered receive callback. Same "plain memcpy, no heap, no
+// Transport/LXMF work here" constraint as urns_stage_incoming(), and its own
+// independent single-slot buffer so this path never contends with the
+// KISS-forwarding consumer's espnow_packet_queue for the same packet.
+uint8_t urns_rx_staging_buf_espnow[MTU];
+volatile uint16_t urns_rx_staging_len_espnow = 0;
+volatile bool urns_rx_pending_espnow = false;
+
+void urns_stage_incoming_espnow(const uint8_t* data, uint16_t len) {
+  if (urns_rx_pending_espnow) return; // previous packet not drained yet - drop rather than corrupt it
+  if (len > MTU) len = MTU;
+  memcpy(urns_rx_staging_buf_espnow, data, len);
+  urns_rx_staging_len_espnow = len;
+  urns_rx_pending_espnow = true;
+}
+
+// ESP-NOW counterpart to UrnsLoRaInterface above - same thin-adapter shape,
+// just calls espnow_send() (ESPNOW.h, forward-declared in Utilities.h)
+// directly instead of urns_enqueue_outgoing(). RX is fed the other way -
+// see the urns_stage_incoming_espnow() call site in espnow_rx_deliver()
+// (ESPNOW.h).
+class UrnsEspNowInterface : public RNS::InterfaceImpl {
+public:
+  UrnsEspNowInterface(const char* name = "UrnsEspNowInterface") : RNS::InterfaceImpl(name) {
+    _IN = true;
+    _OUT = true;
+    // See UrnsLoRaInterface's own comment on _HW_MTU above - same fix,
+    // same root cause (Transport.cpp's LINKREQUEST MTU-signalling strip
+    // firing on any interface with the InterfaceImpl default of 0).
+    _HW_MTU = MTU;
+  }
+  virtual ~UrnsEspNowInterface() {}
+
+private:
+  virtual bool send_outgoing(const RNS::Bytes& data) override {
+    return espnow_send(data.data(), (uint16_t)data.size());
+  }
+};
+#endif
+
 microStore::FileSystem urns_filesystem;
 RNS::Reticulum urns_reticulum({RNS::Type::NONE});
 RNS::Identity urns_identity({RNS::Type::NONE});
 RNS::Interface urns_lora_interface({RNS::Type::NONE});
+#if HAS_ESPNOW == true
+  RNS::Interface urns_espnow_interface({RNS::Type::NONE});
+#endif
 RNS::Destination urns_destination({RNS::Type::NONE});
 #if HAS_LXMF == true
   LXMF::LXMRouter::Ptr urns_lxmf_router;
@@ -224,6 +292,22 @@ bool urns_transport_enabled = false;
 bool urns_link_mtu_discovery = true;
 bool urns_remote_management_enabled = true;
 bool urns_probe_destination_enabled = false;
+
+// Which interface(s) urns_init() (below) registers with RNS::Transport -
+// ADDR_CONF_URNS_INTERFACE (ROM.h), RNode Settings > URNS > Interface
+// (Menu.h). Same "read once at boot, no live start/stop path" convention as
+// urns_enabled/urns_transport_enabled above. Default LORA_ONLY matches this
+// firmware's behavior before this setting existed - a never-configured
+// device keeps talking to the physical LoRa radio only.
+#if HAS_ESPNOW == true
+  uint8_t urns_interface_mode = URNS_INTERFACE_LORA_ONLY;
+  bool urns_wants_lora()   { return urns_interface_mode != URNS_INTERFACE_ESPNOW_ONLY; }
+  bool urns_wants_espnow() { return urns_interface_mode == URNS_INTERFACE_ESPNOW_ONLY ||
+                                    urns_interface_mode == URNS_INTERFACE_BOTH; }
+#else
+  bool urns_wants_lora()   { return true; }
+  bool urns_wants_espnow() { return false; }
+#endif
 
 #if HAS_LXMF == true
   #define URNS_LXMF_SEND_OK          0
@@ -473,11 +557,24 @@ void urns_init() {
     DEBUG_LOG("[URNS] step 11: saved new identity\r\n");
   }
 
-  DEBUG_LOG("[URNS] step 12: registering LoRa interface\r\n");
-  urns_lora_interface = new UrnsLoRaInterface("UrnsLoRaInterface");
-  urns_lora_interface.mode(RNS::Type::Interface::MODE_FULL);
-  RNS::Transport::register_interface(urns_lora_interface);
-  urns_lora_interface.start();
+#if HAS_ESPNOW == true
+  if (urns_wants_lora()) {
+#endif
+    DEBUG_LOG("[URNS] step 12: registering LoRa interface\r\n");
+    urns_lora_interface = new UrnsLoRaInterface("UrnsLoRaInterface");
+    urns_lora_interface.mode(RNS::Type::Interface::MODE_FULL);
+    RNS::Transport::register_interface(urns_lora_interface);
+    urns_lora_interface.start();
+#if HAS_ESPNOW == true
+  }
+  if (urns_wants_espnow()) {
+    DEBUG_LOG("[URNS] step 12b: registering ESP-NOW interface\r\n");
+    urns_espnow_interface = new UrnsEspNowInterface("UrnsEspNowInterface");
+    urns_espnow_interface.mode(RNS::Type::Interface::MODE_FULL);
+    RNS::Transport::register_interface(urns_espnow_interface);
+    urns_espnow_interface.start();
+  }
+#endif
 
   DEBUG_LOG("[URNS] step 13: creating destination\r\n");
   urns_destination = RNS::Destination(urns_identity, RNS::Type::Destination::IN, RNS::Type::Destination::SINGLE, "rnode", "onboard");
@@ -507,6 +604,10 @@ void urns_init() {
   urns_lxmf_router->register_delivered_callback([](LXMF::LXMessage& msg) {
     DEBUG_LOG("[URNS] LXMF delivery proof received for %s\r\n", msg.hash().toHex().c_str());
     messenger_on_delivered(msg);
+  });
+  urns_lxmf_router->register_failed_callback([](LXMF::LXMessage& msg) {
+    DEBUG_LOG("[URNS] LXMF delivery failed (attempts exhausted) for %s\r\n", msg.hash().toHex().c_str());
+    messenger_on_failed(msg);
   });
 
   std::string display_name = urns_lxmf_display_name();
@@ -595,6 +696,20 @@ void urns_lxmf_loop() {
     if (millis() - _fs_t0 > 40) DEBUG_LOG("[FS] handle_incoming took %lums\r\n", (unsigned long)(millis() - _fs_t0));
     urns_rx_pending = false;
   }
+#if HAS_ESPNOW == true
+  // Drains urns_stage_incoming_espnow()'s single-slot staging buffer, same
+  // pattern as the LoRa drain just above. Naturally dead code whenever
+  // urns_wants_espnow() was false at urns_init() time - espnow_rx_deliver()
+  // (ESPNOW.h) never calls urns_stage_incoming_espnow() in that case, so
+  // urns_rx_pending_espnow can never become true.
+  if (urns_rx_pending_espnow) {
+    CPV(CP_URNS_HANDLE_INCOMING_ESPNOW, urns_rx_staging_len_espnow);
+    _fs_t0 = millis();
+    urns_espnow_interface.handle_incoming(RNS::Bytes(urns_rx_staging_buf_espnow, urns_rx_staging_len_espnow));
+    if (millis() - _fs_t0 > 40) DEBUG_LOG("[FS] handle_incoming(espnow) took %lums\r\n", (unsigned long)(millis() - _fs_t0));
+    urns_rx_pending_espnow = false;
+  }
+#endif
 #if HAS_LXMF == true
   CP(CP_URNS_PROCESS_OUTBOUND);
   _fs_t0 = millis();

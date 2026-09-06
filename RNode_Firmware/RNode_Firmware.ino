@@ -79,6 +79,7 @@
     CP_TXQ_FLUSH_QUEUE,
     CP_TXQ_POP_QUEUE,
     CP_URNS_HANDLE_INCOMING,
+    CP_URNS_HANDLE_INCOMING_ESPNOW,
     CP_URNS_PROCESS_OUTBOUND,
     CP_URNS_PROCESS_INBOUND,
     CP_URNS_CULL_STORES,
@@ -137,6 +138,7 @@
       case CP_TXQ_FLUSH_QUEUE:       return "tx_queue_handler->flush_queue()";
       case CP_TXQ_POP_QUEUE:         return "tx_queue_handler->pop_queue()";
       case CP_URNS_HANDLE_INCOMING:  return "urns_lxmf_loop->handle_incoming()";
+      case CP_URNS_HANDLE_INCOMING_ESPNOW: return "urns_lxmf_loop->handle_incoming(espnow)";
       case CP_URNS_PROCESS_OUTBOUND: return "urns_lxmf_loop->process_outbound()";
       case CP_URNS_PROCESS_INBOUND:  return "urns_lxmf_loop->process_inbound()";
       case CP_URNS_CULL_STORES:      return "urns_lxmf_loop->urns_cull_stores()";
@@ -717,6 +719,18 @@ void setup() {
     if (urns_probe_dest_raw == URNS_PROBE_DEST_ENABLE_BYTE) urns_probe_destination_enabled = true;
     else if (urns_probe_dest_raw == URNS_PROBE_DEST_DISABLE_BYTE) urns_probe_destination_enabled = false;
 
+    #if HAS_ESPNOW == true
+      // Same "never touched" convention as urns_raw above - anything other
+      // than the two explicit values (including erased 0xFF) leaves
+      // urns_interface_mode at its compiled default (URNS_INTERFACE_LORA_ONLY,
+      // URNS.h). Must run before urns_init() below, which reads
+      // urns_wants_lora()/urns_wants_espnow() to decide what to register.
+      uint8_t urns_iface_raw = EEPROM.read(ADDR_CONF_URNS_INTERFACE);
+      if (urns_iface_raw == URNS_INTERFACE_ESPNOW_ONLY || urns_iface_raw == URNS_INTERFACE_BOTH) {
+        urns_interface_mode = urns_iface_raw;
+      }
+    #endif
+
     if (urns_enabled) {
       // Identity/persistence only - doesn't touch the radio, so it's fine
       // this early. urns_radio_bringup() is deferred to after
@@ -861,11 +875,36 @@ void setup() {
         uint8_t espnow_mode_raw = EEPROM.read(ADDR_CONF_ESPNOW_MODE);
         espnow_mode = (espnow_mode_raw == ESPNOW_MODE_V2) ? ESPNOW_MODE_V2 : ESPNOW_MODE_V1;
 
+        #if HAS_URNS == true
+          // v1's 1-byte seq/more fragmentation header is this firmware's own
+          // internal chunking scheme for the KISS/host path - wrong for
+          // UrnsEspNowInterface, which hands raw Reticulum bytes straight to
+          // espnow_send()/espnow_recv_cb(). espnow_mode is a single global with
+          // no per-packet v1/v2 tag (v2 frames carry zero envelope byte), so
+          // whenever URNS shares this channel the whole device must speak v2 -
+          // this silently overrides whatever the host's own ESP-NOW > Version
+          // menu field had saved (Menu.h grays that field out while URNS wants
+          // ESP-NOW, so the UI stays honest about it).
+          if (urns_wants_espnow()) { espnow_mode = ESPNOW_MODE_V2; }
+        #endif
+
         // Independent axis, own raw byte - see ADDR_CONF_ESPNOW_LR (ROM.h).
         // Any value other than ESPNOW_LR_ENABLE_BYTE (including erased
         // EEPROM) means off, matching espnow_lr_enabled's false default.
         uint8_t espnow_lr_raw = EEPROM.read(ADDR_CONF_ESPNOW_LR);
         espnow_lr_enabled = (espnow_lr_raw == ESPNOW_LR_ENABLE_BYTE);
+
+        #if HAS_URNS == true
+          // Fixed PHY rates (ESPNOW.h) - no rate-adaptation knob exists, so
+          // unlike LoRa's bitrate (Utilities.h's updateBitrate()) this is a
+          // one-time set, not something that needs live recalculation.
+          // Must run here, after espnow_lr_enabled's own EEPROM load just
+          // above - setting it any earlier (e.g. alongside the espnow_mode
+          // force-v2 a few lines up) would read the pre-load default.
+          if (urns_wants_espnow()) {
+            urns_espnow_interface.bitrate(espnow_lr_enabled ? ESPNOW_BITRATE_LR_BPS : ESPNOW_BITRATE_NORMAL_BPS);
+          }
+        #endif
       #endif
 
       #if HAS_WIFI
@@ -895,7 +934,14 @@ void setup() {
         if (!espnow_lr_active && (wifi_mode == WR_WIFI_STA || wifi_mode == WR_WIFI_AP)) { wifi_remote_init(); }
       #endif
       #if HAS_ESPNOW == true
-        if (espnow_enabled) espnow_init();
+        #if HAS_URNS == true
+          // URNS-over-ESP-NOW needs the radio/callbacks up independent of the
+          // host-facing toggle - espnow_init() is not idempotent (unconditional
+          // xQueueCreate()/esp_now_init()), so this must stay the only call site.
+          if (espnow_enabled || urns_wants_espnow()) espnow_init();
+        #else
+          if (espnow_enabled) espnow_init();
+        #endif
       #endif
       #if HAS_ETHERNET == true
         eth_speed_mode = EEPROM.read(eeprom_addr(ADDR_CONF_ETHSPD));
@@ -1417,6 +1463,9 @@ bool urns_enqueue_outgoing(const uint8_t* data, uint16_t len) {
 // loop()'s `if (radio_online)` branch.
 void urns_radio_bringup() {
   if (!urns_ready || radio_online) return;
+  #if HAS_ESPNOW == true
+    if (!urns_wants_lora()) return; // ESP-NOW-only mode: never key the LoRa radio
+  #endif
 
   lora_freq = 868825000; // 868.825 MHz
   lora_bw   = 125000;    // 125 kHz
@@ -3287,7 +3336,20 @@ void loop() {
   #endif
 
   #if HAS_ESPNOW == true
-    if (espnow_enabled) { CP(CP_ESPNOW_UPDATE); update_espnow(); update_espnow_tx(); }
+    #if HAS_URNS == true
+      // update_espnow_tx() is the only thing that actually calls esp_now_send()
+      // (espnow_send_chunk() only enqueues) - it must run whenever ESP-NOW
+      // hardware is up, regardless of the host-facing espnow_enabled toggle,
+      // or UrnsEspNowInterface::send_outgoing() would enqueue packets that
+      // never transmit (silent TX stall in ESP-NOW-only URNS mode with the
+      // host toggle off). KISS-forwarding to the host (update_espnow()) stays
+      // opt-in on espnow_enabled - a host that hasn't asked for vport 1
+      // shouldn't get unsolicited CMD_DATA frames tagged vport 1.
+      if (espnow_ready) { update_espnow_tx(); }
+      if (espnow_enabled) { CP(CP_ESPNOW_UPDATE); update_espnow(); }
+    #else
+      if (espnow_enabled) { CP(CP_ESPNOW_UPDATE); update_espnow(); update_espnow_tx(); }
+    #endif
   #endif
 
   #if HAS_GPS == true

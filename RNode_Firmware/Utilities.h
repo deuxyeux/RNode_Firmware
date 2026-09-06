@@ -325,6 +325,10 @@ void buzzer_wait_for_melody();
   void escaped_serial_write(uint8_t byte);
   #if HAS_ESPNOW == true
     void kiss_select_interface(uint8_t vport);
+    // Forward-declared for UrnsEspNowInterface::send_outgoing() (URNS.h) -
+    // defined later in this file's own #if HAS_ESPNOW block (ESPNOW.h),
+    // same reason/pattern as kiss_select_interface() above.
+    bool espnow_send(const uint8_t *data, uint16_t len);
   #endif
   #include "URNS.h"
   #if HAS_LXMF == true
@@ -2355,6 +2359,19 @@ void updateBitrate() {
 			lora_preamble_time_ms = (ceil)(lora_preamble_symbols * lora_symbol_time_ms);
 			lora_header_time_ms   = (ceil)(PHY_HEADER_LORA_SYMBOLS * lora_symbol_time_ms);
 		}
+	#endif
+	// Keeps UrnsLoRaInterface's own _bitrate current with the real radio
+	// config, single choke point since every SF/BW/CR/radio-start/stop
+	// change already funnels through here. Feeds Transport::
+	// prioritize_interfaces()'s bitrate-descending sort (Transport.cpp) and
+	// extra_link_proof_timeout()'s per-hop timeout math - both silently
+	// no-op at the InterfaceImpl default of 0, same class of gap as the
+	// _HW_MTU bug UrnsLoRaInterface/UrnsEspNowInterface already had (URNS.h).
+	// Guarded on urns_ready/urns_wants_lora() since the interface holds a
+	// null impl (bitrate() would assert) until urns_init() has actually
+	// registered it - i.e. never, in ESP-NOW-only URNS Interface mode.
+	#if HAS_URNS == true
+		if (urns_ready && urns_wants_lora()) { urns_lora_interface.bitrate(lora_bitrate); }
 	#endif
 }
 

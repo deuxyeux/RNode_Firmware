@@ -526,8 +526,34 @@ void LXMRouter::static_proof_callback(const PacketReceipt& receipt) {
 						break;
 					}
 				}
-				if (!already_notified && router && router->_delivered_callback) {
-					notified_routers[notified_count++] = router;
+				if (already_notified || !router) continue;
+				notified_routers[notified_count++] = router;
+
+				// FIXED (local patch, not upstream): OPPORTUNISTIC sends are
+				// now left queued (state()==SENT) instead of popped
+				// immediately - see process_outbound()'s own comment. If
+				// this proof resolves one of those, pop it here with its
+				// REAL content intact and hand that to _delivered_callback,
+				// instead of the hash-only placeholder below - this is what
+				// lets messenger_on_delivered() (Messenger.h) actually save
+				// the real message to the local store once delivery is
+				// confirmed, rather than at send time regardless of outcome.
+				// Falls through to the placeholder for anything not found
+				// queued here (e.g. DIRECT-via-link, which still pops
+				// immediately on transmit - untouched, out of scope for
+				// this fix) so existing behavior there is unchanged.
+				LXMessage* front = router->pending_outbound_front();
+				if (front && front->hash() == message_hash) {
+					front->state(Type::Message::DELIVERED);
+					if (router->_delivered_callback) {
+						router->_delivered_callback(*front);
+					}
+					LXMessage dummy;
+					router->pending_outbound_pop(dummy);
+					continue;
+				}
+
+				if (router->_delivered_callback) {
 					// Create a minimal message with just the hash for the callback
 					Bytes empty_hash;
 					LXMessage msg(empty_hash, empty_hash);
@@ -555,8 +581,51 @@ void LXMRouter::static_proof_timeout_callback(const PacketReceipt& receipt) {
 
 	PendingProofSlot* slot = find_pending_proof_slot(packet_hash);
 	if (slot) {
-		snprintf(buf, sizeof(buf), "Delivery proof timed out for message %.16s...", slot->message_hash_bytes().toHex().c_str());
+		Bytes message_hash = slot->message_hash_bytes();
+		snprintf(buf, sizeof(buf), "Delivery proof timed out for message %.16s...", message_hash.toHex().c_str());
 		DEBUG(buf);
+
+		// FIXED (local patch, not upstream): if this timeout is for a
+		// still-queued OPPORTUNISTIC message (state()==SENT, left queued by
+		// process_outbound() rather than popped immediately - see that
+		// function's own comment), actually act on _max_delivery_attempts/
+		// _outbound_retry_delay here instead of just forgetting about it -
+		// retry (reset to OUTBOUND, same backoff DIRECT/PROPAGATED already
+		// use for their own retries) while attempts remain, or pop as
+		// FAILED once they're exhausted, same shape as every other
+		// exhausted-attempts path in process_outbound(). Falls through
+		// (just clears the slot, unchanged) for anything not found queued
+		// here - e.g. DIRECT-via-link, which still pops immediately on
+		// transmit and is out of scope for this fix.
+		for (size_t i = 0; i < ROUTER_REGISTRY_SIZE; i++) {
+			if (!_router_registry_pool[i].in_use) continue;
+			LXMRouter* router = _router_registry_pool[i].router;
+			if (!router) continue;
+
+			LXMessage* front = router->pending_outbound_front();
+			if (front && front->hash() == message_hash) {
+				if (front->delivery_attempts() < router->_max_delivery_attempts) {
+					front->state(Type::Message::OUTBOUND);
+					router->_next_outbound_process_time = Utilities::OS::time() + router->_outbound_retry_delay;
+					snprintf(buf, sizeof(buf), "  Will retry OPPORTUNISTIC delivery in %d seconds (attempt %d/%d)",
+						(int)router->_outbound_retry_delay, front->delivery_attempts(), router->_max_delivery_attempts);
+					INFO(buf);
+				} else {
+					snprintf(buf, sizeof(buf), "Max delivery attempts reached for OPPORTUNISTIC message to %s",
+						front->destination_hash().toHex().c_str());
+					WARNING(buf);
+					front->state(Type::Message::FAILED);
+					if (router->_failed_callback) {
+						router->_failed_callback(*front);
+					}
+					router->failed_outbound_push(*front);
+					LXMessage dummy;
+					router->pending_outbound_pop(dummy);
+				}
+				break;
+			}
+		}
+
 		slot->clear();
 	}
 }
@@ -892,6 +961,27 @@ void LXMRouter::process_outbound() {
 	LXMessage& message = *message_ptr;
 	char buf[128];
 
+	// FIXED (local patch, not upstream): OPPORTUNISTIC delivery used to be
+	// popped from _pending_outbound the instant the packet was handed to
+	// the radio (see the OPPORTUNISTIC branch below), regardless of
+	// whether its delivery proof ever actually came back - so
+	// _max_delivery_attempts/_outbound_retry_delay (real settings, wired
+	// up and working for DIRECT/PROPAGATED below) silently never applied
+	// to OPPORTUNISTIC at all, the common case for anything under
+	// LORA_ENCRYPTED_PACKET_MDU. Fix: leave a successfully-transmitted
+	// OPPORTUNISTIC message queued (state()==SENT, set inside
+	// send_opportunistic()) instead of popping it, and let
+	// static_proof_callback()/static_proof_timeout_callback() (below)
+	// resolve it later - pop as DELIVERED on proof, retry (reset to
+	// OUTBOUND) or pop as FAILED on timeout, same shape as DIRECT/
+	// PROPAGATED's own retry loops already have. This early return keeps
+	// that waiting front-of-queue message from having its attempt
+	// counter incremented again below on every poll while it's just
+	// sitting there awaiting an async event, not actually being retried.
+	if (message.state() == Type::Message::SENT) {
+		return;
+	}
+
 	snprintf(buf, sizeof(buf), "Processing outbound message to %s", message.destination_hash().toHex().c_str());
 	DEBUG(buf);
 
@@ -974,9 +1064,13 @@ void LXMRouter::process_outbound() {
 					_sent_callback(message);
 				}
 
-				// Remove from pending queue
-				LXMessage dummy;
-				pending_outbound_pop(dummy);
+				// FIXED (local patch, not upstream): deliberately NOT popped
+				// here anymore - stays queued (state()==SENT already, set
+				// inside send_opportunistic()) so its delivery proof or
+				// timeout can still resolve it via static_proof_callback()/
+				// static_proof_timeout_callback() below. See the state()==
+				// SENT early-return above this function's own comment for
+				// the full reasoning.
 			} else {
 				ERROR("Failed to send OPPORTUNISTIC message");
 				message.state(Type::Message::FAILED);

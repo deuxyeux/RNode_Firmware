@@ -433,6 +433,30 @@ namespace LXMF {
 		void set_outbound_retry_delay(double seconds) { _outbound_retry_delay = seconds; }
 
 		/**
+		 * @brief Live delivery-attempt count for a still-in-flight outbound message
+		 *
+		 * FIXED (local patch, not upstream): added so a UI can show retry
+		 * progress ("attempt 2/5") for an OPPORTUNISTIC send while it's
+		 * still queued awaiting proof or retry-timeout (see
+		 * process_outbound()'s own comment on why it's left queued instead
+		 * of popped immediately) - pending_outbound_front() itself is
+		 * private. Only ever the front of the queue can match, since this
+		 * router only ever has one outbound message in flight at a time.
+		 *
+		 * @param message_hash Hash of the message to check
+		 * @return delivery_attempts() if message_hash matches the front of
+		 *   the outbound queue, otherwise -1 (not in flight - already
+		 *   resolved, or was never this router's message)
+		 */
+		int pending_outbound_attempts_for(const RNS::Bytes& message_hash) {
+			LXMessage* front = pending_outbound_front();
+			if (front && front->hash() == message_hash) {
+				return front->delivery_attempts();
+			}
+			return -1;
+		}
+
+		/**
 		 * @brief Get the current stamp cost requirement
 		 *
 		 * @return Required stamp cost

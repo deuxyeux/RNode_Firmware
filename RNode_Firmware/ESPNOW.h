@@ -69,6 +69,13 @@ void escaped_serial_write(uint8_t byte);
 // transmit()/setTXPower()/setBandwidth()/setFrequency() (RNode_Firmware.ino/
 // Utilities.h) touch an uninitialized LoRa driver object.
 bool espnow_ui_active() {
+  #if HAS_URNS == true
+    // URNS driving ESP-NOW directly (no host involved at all in ESP-NOW-only
+    // mode) counts as "active" too, or TX/RX NeoPixel flashes and Display.h's
+    // ESP-NOW status icon would never fire - espnow_vport_cfg.radio_state is
+    // host-vport-1-specific state that never gets set in that case.
+    if (urns_wants_espnow()) { return espnow_ready; }
+  #endif
   return espnow_enabled && espnow_ready && espnow_vport_cfg.radio_state == RADIO_STATE_ON;
 }
 
@@ -143,6 +150,24 @@ bool espnow_display_tx = false;
 #define ESPNOW_CHUNK_SIZE   (ESPNOW_RAW_MTU-1)
 #define ESPNOW_FRAG_MORE    0x01
 
+// Fixed PHY bitrates fed into UrnsEspNowInterface's _bitrate (URNS.h) -
+// there's no rate-adaptation knob anywhere in this file (no
+// esp_wifi_config_espnow_rate()/internal-rate override), so unlike LoRa's
+// bitrate this never needs live recalculation, only choosing which of these
+// two fixed constants applies once espnow_lr_enabled is known at boot.
+// ESPNOW_BITRATE_NORMAL_BPS: ESP-NOW frames are vendor-specific 802.11
+// action frames sent broadcast, which Espressif's driver transmits at the
+// lowest mandatory/basic rate for 802.11b/g/n compatibility and reliability
+// (1 Mbps, 802.11b DSSS) rather than any higher rate the 11n protocol bits
+// would otherwise allow for unicast data - this is the commonly documented
+// real-world ESP-NOW throughput ceiling, not a rate this firmware selects.
+#define ESPNOW_BITRATE_NORMAL_BPS 1000000
+// ESPNOW_BITRATE_LR_BPS: WIFI_PROTOCOL_LR ("802.11 LR", Espressif's
+// proprietary long-range PHY - unrelated to LoRa modulation despite the
+// name) is a single fixed rate, documented by Espressif as
+// WIFI_PHY_RATE_LORA_250K = 250 kbps, with no adaptation.
+#define ESPNOW_BITRATE_LR_BPS      250000
+
 // TX-side pacing. espnow_send() used to call esp_now_send() directly, back
 // to back, for every chunk of a fragmented packet - no backpressure, no
 // wait for the previous chunk to actually clear the WiFi driver's TX queue.
@@ -186,6 +211,29 @@ uint8_t  espnow_rx_seq = SEQ_UNSET;
 // mode (no reassembly, deliver immediately) and classic mode (deliver once
 // the last chunk of a sequence arrives) don't duplicate this.
 static void espnow_rx_deliver(const uint8_t *payload, uint16_t len, const esp_now_recv_info_t *info) {
+  #if HAS_URNS == true
+    // Independent of the espnow_packet_queue delivery below - the queue is
+    // single-consumer (xQueueReceive is destructive, drained exclusively by
+    // update_espnow() for host KISS forwarding), so the onboard URNS node is
+    // fed straight from here instead, mirroring how kiss_write_packet()
+    // feeds urns_stage_incoming() for the LoRa radio (URNS.h). No-op unless
+    // URNS actually wants ESP-NOW (urns_rx_pending_espnow can only be set
+    // here, so this is the single gate for that whole path).
+    if (urns_wants_espnow()) { urns_stage_incoming_espnow(payload, len); }
+  #endif
+
+  // Moved here from update_espnow() (host KISS forwarding only) so the RX
+  // NeoPixel flash/display flag fire on every actual over-the-air receive,
+  // not just when a host has vport 1 turned on - matches TX's own flash
+  // (espnow_send(), unconditional there for the same reason). Safe to call
+  // npset()/malloc() from this callback - it already does the latter
+  // unconditionally just below, confirming this isn't real ISR context
+  // (esp_now's recv callback runs in the WiFi driver's own task).
+  espnow_display_rx = true;
+  #if HAS_NP == true
+    if (espnow_ui_active()) espnow_flash_rx();
+  #endif
+
   espnow_packet_t *espnow_packet = (espnow_packet_t*)malloc(sizeof(espnow_packet_t) + len);
   if (!espnow_packet) { memory_low = true; return; }
 
@@ -630,10 +678,10 @@ void update_espnow() {
     kiss_indicate_v1_stat_rssi(espnow_packet->rssi);
     kiss_indicate_v1_stat_snr(espnow_packet->snr_raw);
     kiss_write_espnow_packet(espnow_packet->data, espnow_packet->len);
-    espnow_display_rx = true;
-    #if HAS_NP == true
-      if (espnow_ui_active()) espnow_flash_rx();
-    #endif
+    // espnow_display_rx/espnow_flash_rx() moved to espnow_rx_deliver() -
+    // this function is host-KISS-forwarding only and skipped entirely when
+    // espnow_enabled is off, which used to silently suppress the RX flash
+    // too even when URNS was actively receiving over this same link.
     free(espnow_packet);
     espnow_packet = NULL;
   }
