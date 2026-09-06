@@ -241,6 +241,49 @@ unsigned char fb[512];
 uint32_t last_disp_update = 0;
 uint32_t last_unblank_event = 0;
 uint32_t display_blanking_timeout = DISPLAY_BLANKING_TIMEOUT;
+
+// The raw byte behind "Display Timeout" (EEPROM ADDR_CONF_DBLK) used to be
+// a literal seconds count, capped at 255 (~4m15s) - too short a max, and
+// tedious to dial one second at a time. A single byte can't literally hold
+// a useful "30 minutes" value, so raw codes 0-180 keep their old, exact
+// meaning (seconds - full backward compat with anything a device could
+// plausibly already have saved), while the sparse tail above that (which
+// nobody would have hand-dialed to one exact old value) is repurposed for
+// the longer, curated stops the menu now offers.
+uint32_t display_timeout_decode_seconds(uint8_t raw) {
+  if (raw <= 180) return raw;
+  switch (raw) {
+    case 240: return 300;  // 5 min
+    case 245: return 600;  // 10 min
+    case 250: return 900;  // 15 min
+    default:  return 1800; // 30 min (also covers the old max, 255)
+  }
+}
+
+// The menu only ever steps through this curated list rather than the full
+// raw range above - same reasoning as the brightness pickers below. Also
+// used to bucket a pre-existing raw value (loaded from before this table
+// existed) into the nearest of these stops.
+static const uint8_t display_timeout_codes[] = { 0, 5, 10, 15, 30, 60, 120, 180, 240, 245, 250, 255 };
+#define DISPLAY_TIMEOUT_CODE_COUNT (sizeof(display_timeout_codes)/sizeof(display_timeout_codes[0]))
+
+uint8_t display_timeout_code_index(uint8_t raw) {
+  uint32_t target = display_timeout_decode_seconds(raw);
+  uint8_t best = 0;
+  uint32_t best_dist = 0xFFFFFFFF;
+  for (uint8_t i = 0; i < DISPLAY_TIMEOUT_CODE_COUNT; i++) {
+    uint32_t candidate = display_timeout_decode_seconds(display_timeout_codes[i]);
+    uint32_t dist = candidate > target ? candidate - target : target - candidate;
+    if (dist < best_dist) { best_dist = dist; best = i; }
+  }
+  return best;
+}
+
+// The raw code (EEPROM/staged value) currently behind display_blanking_timeout -
+// kept alongside it so the settings menu can stage edits from the actual
+// code rather than reverse-deriving it from the decoded seconds value,
+// which stops working once codes stop being their own seconds count.
+uint8_t display_blanking_code = 0;
 uint8_t display_unblank_intensity = display_intensity;
 bool display_blanked = false;
 bool display_tx = false;
@@ -794,21 +837,23 @@ bool display_init() {
     #if HAS_EEPROM
       if (EEPROM.read(eeprom_addr(ADDR_CONF_BSET)) == CONF_OK_BYTE) {
         uint8_t db_timeout = EEPROM.read(eeprom_addr(ADDR_CONF_DBLK));
+        display_blanking_code = db_timeout;
         if (db_timeout == 0x00) {
           display_blanking_enabled = false;
         } else {
           display_blanking_enabled = true;
-          display_blanking_timeout = db_timeout*1000;
+          display_blanking_timeout = display_timeout_decode_seconds(db_timeout)*1000;
         }
       }
     #elif MCU_VARIANT == MCU_NRF52
       if (eeprom_read(eeprom_addr(ADDR_CONF_BSET)) == CONF_OK_BYTE) {
         uint8_t db_timeout = eeprom_read(eeprom_addr(ADDR_CONF_DBLK));
+        display_blanking_code = db_timeout;
         if (db_timeout == 0x00) {
           display_blanking_enabled = false;
         } else {
           display_blanking_enabled = true;
-          display_blanking_timeout = db_timeout*1000;
+          display_blanking_timeout = display_timeout_decode_seconds(db_timeout)*1000;
         }
       }
     #endif

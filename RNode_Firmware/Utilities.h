@@ -3210,11 +3210,12 @@ void da_conf_save(uint8_t dadr) {
 
 void db_conf_save(uint8_t val) {
 	#if HAS_DISPLAY
+		display_blanking_code = val;
 		if (val == 0x00) {
 			display_blanking_enabled = false;
 		} else {
 			display_blanking_enabled = true;
-			display_blanking_timeout = val*1000;
+			display_blanking_timeout = display_timeout_decode_seconds(val)*1000;
 		}
 		eeprom_update(eeprom_addr(ADDR_CONF_BSET), CONF_OK_BYTE);
 		eeprom_update(eeprom_addr(ADDR_CONF_DBLK), val);

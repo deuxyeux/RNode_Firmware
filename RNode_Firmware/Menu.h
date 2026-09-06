@@ -50,22 +50,43 @@
     // Org_01's ascent is ~4px, so a 7px baseline offset centers it fine in
     // an 11px row - see MENU_LIST_BASELINE_OFF's use in draw_menu_list_disp().
     #define MENU_LIST_BASELINE_OFF 7
-    #define MENU_LIST_FOOTER_HLINE_Y (MENU_CANVAS_H - 10)
+    // Nudged 1px down from the original MENU_CANVAS_H-10 per user request on
+    // real hardware, alongside the footer text's own 1px nudge below.
+    #define MENU_LIST_FOOTER_HLINE_Y (MENU_CANVAS_H - 9)
     // Org_01's 'p' (the deepest descender in "tap:next hold:open"/"turn:move
     // press:open") has yOffset=-3, height=5, so its bottom row sits at
-    // baseline+1 - putting the baseline at MENU_CANVAS_H-2 lands that row
-    // exactly on the canvas's last physical pixel row, flush with the
-    // screen's bottom edge.
-    #define MENU_LIST_FOOTER_TEXT_Y (MENU_CANVAS_H - 2)
+    // baseline+1 - MENU_CANVAS_H-2 landed that row exactly on the canvas's
+    // last physical pixel row, flush with the screen's bottom edge. Nudged
+    // one more pixel down per user request on real hardware - the 'p'
+    // descender's very last row now falls past the canvas edge and is
+    // clipped, but every other row (including the rest of that descender)
+    // still renders fine.
+    #define MENU_LIST_FOOTER_TEXT_Y (MENU_CANVAS_H - 1)
     #define MENU_EDIT_VALUE_CX (MENU_CANVAS_W / 2)
-    #define MENU_EDIT_VALUE_Y 36
-    #define MENU_EDIT_ARROW_Y 34
+    // Matches the list screen's header hline (y=12, draw_menu_list_disp())
+    // per user request on real hardware - was its own hardcoded 15.
+    #define MENU_EDIT_HEADER_HLINE_Y 12
+    // Centered within the content region between the header hline
+    // (MENU_EDIT_HEADER_HLINE_Y, y=12) and the footer hline
+    // (MENU_EDIT_FOOTER_HLINE_Y, y=71) - same approach T114 uses above.
+    // That region's midpoint is 12+(71-12)/2=41.5. Org_01's digits/caps are
+    // yOffset=-4, height=5, so at size 2 a glyph spans
+    // [baseline-8, baseline+1] - visual center baseline-3.5 - giving
+    // baseline=41.5+3.5=45.
+    //
+    // Arrows are size 1, so the same glyphs span [baseline-4, baseline] -
+    // visual center baseline-2 - solving baseline-2=41.5 gives 43.5,
+    // rounded to 43; kept 2px above the value baseline like the original
+    // 34-vs-36 spacing, since that gap was already tuned to visually match
+    // the two different-sized glyph sets rather than their raw baselines.
+    #define MENU_EDIT_VALUE_Y 45
+    #define MENU_EDIT_ARROW_Y 43
     #define MENU_EDIT_ARROW_R_EDGE (MENU_CANVAS_W - 5)
-    // Matches the list screen's footer position above - same footer line
-    // height across every T096 menu screen, even though the edit screen's
-    // own content doesn't need the reclaimed space.
-    #define MENU_EDIT_FOOTER_HLINE_Y (MENU_CANVAS_H - 10)
-    #define MENU_EDIT_FOOTER_TEXT_Y (MENU_CANVAS_H - 6)
+    // Matches the list screen's footer position above - same footer line/
+    // text height across every T096 menu screen, even though the edit
+    // screen's own content doesn't need the reclaimed space.
+    #define MENU_EDIT_FOOTER_HLINE_Y MENU_LIST_FOOTER_HLINE_Y
+    #define MENU_EDIT_FOOTER_TEXT_Y MENU_LIST_FOOTER_TEXT_Y
   #elif BOARD_MODEL == BOARD_HELTEC_T114
     // Same off-screen-canvas reasoning as T096 above (Adafruit_ST7789 has
     // no framebuffer either) - menu_canvas here is portrait, 135x240
@@ -98,6 +119,7 @@
     // the footer text's own ascent pokes above MENU_LIST_FOOTER_HLINE_Y.
     #define MENU_LIST_FOOTER_TEXT_Y (MENU_CANVAS_H - 12)
     #define MENU_EDIT_VALUE_CX (MENU_CANVAS_W / 2)
+    #define MENU_EDIT_HEADER_HLINE_Y 15
     // Re-centered within the content region between the header hline (y=15)
     // and the footer hline (MENU_EDIT_FOOTER_HLINE_Y, y=219) - the original
     // 102/96 (T096's own starting values, just carried over) sat visibly
@@ -131,6 +153,7 @@
     #define MENU_LIST_FOOTER_HLINE_Y 59
     #define MENU_LIST_FOOTER_TEXT_Y 63
     #define MENU_EDIT_VALUE_CX 64
+    #define MENU_EDIT_HEADER_HLINE_Y 15
     #define MENU_EDIT_VALUE_Y 36
     #define MENU_EDIT_ARROW_Y 34
     #define MENU_EDIT_ARROW_R_EDGE 123
@@ -2072,14 +2095,65 @@
       staged_display_brightness = values[idx];
     }
   #else
+    // Backlight boards do have a real continuous range, but sweeping the
+    // full 0-255 scale one detent at a time is tedious. Present it as a
+    // 5-state OFF/LOW/MED/HIGH/MAX pick instead, evenly spaced across the
+    // range - same approach as the OLED 3-state picker above.
+    static const uint8_t backlight_brightness_values[] = { 0, 64, 128, 191, 255 };
+
+    // Buckets any historical continuous value (e.g. loaded from EEPROM
+    // before this board had the 5-state picker) into the nearest state.
+    uint8_t backlight_brightness_index(uint8_t val) {
+      uint8_t best = 0;
+      uint16_t best_dist = 256;
+      for (uint8_t i = 0; i < 5; i++) {
+        uint16_t dist = abs((int16_t)val - (int16_t)backlight_brightness_values[i]);
+        if (dist < best_dist) { best_dist = dist; best = i; }
+      }
+      return best;
+    }
+
     void format_brightness(uint8_t val, char *buf) {
-      sprintf(buf, "%u", val);
+      static const char *labels[] = { "OFF", "LOW", "MED", "HIGH", "MAX" };
+      sprintf(buf, "%s", labels[backlight_brightness_index(val)]);
     }
 
     void step_brightness(int8_t dir, bool wrap = false) {
-      menu_step_numeric(&staged_display_brightness, dir, wrap);
+      int8_t idx = (int8_t)backlight_brightness_index(staged_display_brightness) + (dir > 0 ? 1 : -1);
+      if (wrap) {
+        if (idx < 0) idx = 4;
+        if (idx > 4) idx = 0;
+      } else {
+        if (idx < 0) idx = 0;
+        if (idx > 4) idx = 4;
+      }
+      staged_display_brightness = backlight_brightness_values[idx];
     }
   #endif
+
+  // Display Timeout also only offers a curated set of stops rather than a
+  // raw seconds dial - same reasoning as the brightness pickers above. See
+  // display_timeout_decode_seconds()/display_timeout_codes() (Display.h)
+  // for how a single byte reaches durations past 255 seconds while staying
+  // backward-compatible with a pre-existing raw value.
+  static const char *display_timeout_labels[] = { "OFF", "5s", "10s", "15s", "30s", "1m", "2m", "3m", "5m", "10m", "15m", "30m" };
+
+  void format_timeout(uint8_t val, char *buf) {
+    sprintf(buf, "%s", display_timeout_labels[display_timeout_code_index(val)]);
+  }
+
+  void step_timeout(int8_t dir, bool wrap = false) {
+    int8_t max_idx = (int8_t)DISPLAY_TIMEOUT_CODE_COUNT - 1;
+    int8_t idx = (int8_t)display_timeout_code_index(staged_display_timeout) + (dir > 0 ? 1 : -1);
+    if (wrap) {
+      if (idx < 0) idx = max_idx;
+      if (idx > max_idx) idx = 0;
+    } else {
+      if (idx < 0) idx = 0;
+      if (idx > max_idx) idx = max_idx;
+    }
+    staged_display_timeout = display_timeout_codes[idx];
+  }
 
   void format_orientation(uint8_t val, char *buf) {
     if      (val == 1) sprintf(buf, "90");
@@ -2600,7 +2674,7 @@
   #endif
 
   void menu_stage_from_live() {
-    staged_display_timeout    = display_blanking_enabled ? (uint8_t)(display_blanking_timeout / 1000) : 0;
+    staged_display_timeout    = display_blanking_code;
     staged_display_brightness = display_intensity;
     live_display_brightness   = display_intensity;
     #if HAS_NP == true
@@ -2720,8 +2794,7 @@
       // vendored Link has no working timeout watchdog of its own.
       messenger_ping_cancel();
     #endif
-    uint8_t live_timeout = display_blanking_enabled ? (uint8_t)(display_blanking_timeout / 1000) : 0;
-    if (staged_display_timeout != live_timeout) {
+    if (staged_display_timeout != display_blanking_code) {
       db_conf_save(staged_display_timeout);
     }
     if (staged_display_brightness != live_display_brightness) {
@@ -3161,7 +3234,7 @@
     } else if (menu_state == MENU_STATE_EDIT) {
       buzzer_encoder_tick_melody();
       if (menu_edit_field == MENU_ITEM_DISPLAY_TIMEOUT) {
-        menu_step_numeric(&staged_display_timeout, dir, wrap);
+        step_timeout(dir, wrap);
       } else if (menu_edit_field == MENU_ITEM_DISPLAY_BRIGHTNESS) {
         step_brightness(dir, wrap);
       } else if (menu_edit_field == MENU_ITEM_ORIENTATION) {
@@ -5329,7 +5402,7 @@
     MENU_GFX.setTextColor(SSD1306_WHITE);
     MENU_GFX.setCursor(6, 9);
     MENU_GFX.print(title);
-    MENU_GFX.drawFastHLine(4, 15, MENU_CONTENT_W, SSD1306_WHITE);
+    MENU_GFX.drawFastHLine(4, MENU_EDIT_HEADER_HLINE_Y, MENU_CONTENT_W, SSD1306_WHITE);
 
     MENU_GFX.setTextSize(2);
     int16_t x1, y1; uint16_t w, h;
@@ -5630,8 +5703,7 @@
       int8_t icon_dx[MENU_ITEM_COUNT] = { 0 };
 
       labels[MENU_ITEM_DISPLAY_TIMEOUT] = "Display Timeout";
-      if (staged_display_timeout == 0) sprintf(valbufs[MENU_ITEM_DISPLAY_TIMEOUT], "OFF");
-      else                              sprintf(valbufs[MENU_ITEM_DISPLAY_TIMEOUT], "%us", staged_display_timeout);
+      format_timeout(staged_display_timeout, valbufs[MENU_ITEM_DISPLAY_TIMEOUT]);
       icons[MENU_ITEM_DISPLAY_TIMEOUT] = bm_menu_icon_display;
       icon_widths[MENU_ITEM_DISPLAY_TIMEOUT] = MENU_ICON_W_DISPLAY;
 
@@ -5771,8 +5843,7 @@
       const char *title = "";
       if (menu_edit_field == MENU_ITEM_DISPLAY_TIMEOUT) {
         title = "DISPLAY TIMEOUT";
-        if (staged_display_timeout == 0) sprintf(valbuf, "OFF");
-        else                              sprintf(valbuf, "%u", staged_display_timeout);
+        format_timeout(staged_display_timeout, valbuf);
       } else if (menu_edit_field == MENU_ITEM_DISPLAY_BRIGHTNESS) {
         title = "BRIGHTNESS";
         format_brightness(staged_display_brightness, valbuf);
