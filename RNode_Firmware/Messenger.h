@@ -197,6 +197,30 @@
   std::string msngr_msg_detail_cache_content;
   bool msngr_msg_detail_cache_incoming = false;
   bool msngr_msg_detail_cache_valid = false;
+  // Unix epoch seconds, straight from LXMessage's own _timestamp (set at
+  // pack time if never explicitly assigned - see LXMessage.cpp) - always
+  // populated for any real message, 0 only when meta.valid is false.
+  double msngr_msg_detail_cache_timestamp = 0;
+
+  // Howard Hinnant's civil-from-days algorithm (public domain) - same one
+  // RTC.h's own rtc_civil_from_days() uses, duplicated under a distinct
+  // name rather than called directly because RTC.h (and that function) only
+  // exists behind #if HAS_RTC, while Messenger is gated on HAS_LXMF - a
+  // message's timestamp comes from the message itself (the sender's clock
+  // at send time), not this board's own RTC, so formatting it as a date
+  // shouldn't depend on this board happening to have an RTC chip.
+  void msngr_civil_from_days(int32_t z, int32_t &y, uint32_t &m, uint32_t &d) {
+    z += 719468;
+    int32_t era = (z >= 0 ? z : z - 146096) / 146097;
+    uint32_t doe = (uint32_t)(z - era * 146097);
+    uint32_t yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    y = (int32_t)yoe + era * 400;
+    uint32_t doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    uint32_t mp = (5 * doy + 2) / 153;
+    d = doy - (153 * mp + 2) / 5 + 1;
+    m = mp + (mp < 10 ? 3 : -9);
+    y += (m <= 2);
+  }
 
   // Called once when MENU_STATE_MSNGR_PEER is (re-)entered - on first
   // opening it from Inbox/Bookmarks/Announces, and again right after a
@@ -253,6 +277,7 @@
     LXMF::MessageStore::MessageMetadata meta = urns_message_store->load_message_metadata(message_hash);
     msngr_msg_detail_cache_content = meta.valid ? meta.content : std::string("(unavailable)");
     msngr_msg_detail_cache_incoming = meta.valid && meta.incoming;
+    msngr_msg_detail_cache_timestamp = meta.valid ? meta.timestamp : 0;
     msngr_msg_detail_cache_valid = true;
   }
 

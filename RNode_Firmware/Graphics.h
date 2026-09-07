@@ -728,6 +728,7 @@ const unsigned char bm_hg_high [] PROGMEM = {
 #define MENU_ICON_W_MSNGR_MSG_INCOMING 9
 #define MENU_ICON_W_MSNGR_MSG_OUTGOING 9
 #define MENU_ICON_W_MSNGR_PING 10
+#define MENU_ICON_W_MSNGR_DELETE 11
 
 const unsigned char bm_menu_icon_bt_legacy_pairing [] PROGMEM = {
   0x00, 0x00,
@@ -1098,6 +1099,24 @@ const unsigned char bm_menu_icon_msngr_ping [] PROGMEM = {
   0x4c, 0x80,
   0x21, 0x00,
   0x12, 0x00,
+  0x00, 0x00,
+};
+
+// MENU_STATE_MSNGR_MSG_DETAIL's "Delete" row and MENU_STATE_MSNGR_PEER's
+// "Clear Conversation" row (Menu.h) - a trash-can glyph, from
+// ~/Downloads/Icons/rnode-settings-delete.c (11x10 Piskel export),
+// converted to this project's 1bpp/PROGMEM format the same way every other
+// icon here is (see bm_menu_icon_msngr_settings's comment above).
+const unsigned char bm_menu_icon_msngr_delete [] PROGMEM = {
+  0x00, 0x00,
+  0x1f, 0x00,
+  0x7f, 0x80,
+  0x60, 0xc0,
+  0x2a, 0x80,
+  0x2a, 0x80,
+  0x2a, 0x80,
+  0x20, 0x80,
+  0x1f, 0x00,
   0x00, 0x00,
 };
 

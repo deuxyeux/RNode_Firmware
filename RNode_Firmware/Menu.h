@@ -6942,6 +6942,8 @@
 
         labels[base + MSNGR_PEER_ACTION_CLEAR] = "Clear Conversation";
         valbufs[base + MSNGR_PEER_ACTION_CLEAR][0] = 0;
+        icons[base + MSNGR_PEER_ACTION_CLEAR] = bm_menu_icon_msngr_delete;
+        icon_widths[base + MSNGR_PEER_ACTION_CLEAR] = MENU_ICON_W_MSNGR_DELETE;
 
         labels[base + MSNGR_PEER_ACTION_BACK] = "BACK";
         valbufs[base + MSNGR_PEER_ACTION_BACK][0] = 0;
@@ -6958,6 +6960,8 @@
         const char *labels[MSNGR_MSG_DETAIL_MAX_LINES + 2];
         char label_bufs[MSNGR_MSG_DETAIL_MAX_LINES][MSNGR_MSG_DETAIL_CHARS_PER_LINE + 1];
         char valbufs[MSNGR_MSG_DETAIL_MAX_LINES + 2][24];
+        const uint8_t *icons[MSNGR_MSG_DETAIL_MAX_LINES + 2] = { nullptr };
+        uint8_t icon_widths[MSNGR_MSG_DETAIL_MAX_LINES + 2] = { 0 };
 
         // Reads msngr_msg_detail_cache_* (Messenger.h, populated once
         // when the message row was selected) - same "don't read flash
@@ -6978,10 +6982,39 @@
 
         labels[lines] = "Delete";
         valbufs[lines][0] = 0;
+        icons[lines] = bm_menu_icon_msngr_delete;
+        icon_widths[lines] = MENU_ICON_W_MSNGR_DELETE;
         labels[lines + 1] = "BACK";
         valbufs[lines + 1][0] = 0;
 
-        draw_menu_list_disp(msngr_msg_detail_cache_incoming ? "RECEIVED" : "SENT", labels, valbufs, row_count, msngr_msg_detail_cursor);
+        // Local (Timezone-shifted) time+date, same apply_tz_offset()
+        // convention as the RTC list's own Time/Date rows - time first,
+        // per user request, then "RCVD"/DD.MM.YY (not "RECEIVED"/YYYY-MM-DD)
+        // so "SENT 14:32:05 07.09.26" still fits this board's ~20-char
+        // title width. msngr_civil_from_days() above is the date math,
+        // shared with RTC.h's own rtc_civil_from_days() but not tied to
+        // this board having an RTC chip. msngr_msg_detail_cache_timestamp
+        // is 0 when the message metadata failed to load, so the caption
+        // falls back to the plain word rather than "00:00:00 01.01.70".
+        char title[24];
+        if (msngr_msg_detail_cache_timestamp > 0) {
+          uint32_t epoch = apply_tz_offset((uint32_t)msngr_msg_detail_cache_timestamp);
+          int32_t days = (int32_t)(epoch / 86400UL);
+          uint32_t rem = epoch % 86400UL;
+          uint8_t hh = (uint8_t)(rem / 3600); rem %= 3600;
+          uint8_t mi = (uint8_t)(rem / 60);
+          uint8_t ss = (uint8_t)(rem % 60);
+          int32_t yy; uint32_t mo, dd;
+          msngr_civil_from_days(days, yy, mo, dd);
+          snprintf(title, sizeof(title), "%s %02u:%02u:%02u %02u.%02u.%02u", msngr_msg_detail_cache_incoming ? "RCVD" : "SENT", hh, mi, ss, dd, mo, (unsigned)(yy % 100));
+        } else {
+          snprintf(title, sizeof(title), "%s", msngr_msg_detail_cache_incoming ? "RCVD" : "SENT");
+        }
+
+        // icon_col_shared=false - only the Delete row above opted into
+        // icons[], BACK keeps its own auto-icon path and the content lines
+        // stay at the plain x=8 they always used.
+        draw_menu_list_disp(title, labels, valbufs, row_count, msngr_msg_detail_cursor, icons, icon_widths, nullptr, false);
       } else if (menu_state == MENU_STATE_MSNGR_DELETE_CONFIRM) {
         // Plain 2-item list, same draw_menu_list_disp() as everywhere else -
         // same pattern as F/W Update's UPDATE/CANCEL (MENU_STATE_FWUPD_CONFIRM).
