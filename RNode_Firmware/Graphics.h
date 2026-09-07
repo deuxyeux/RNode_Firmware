@@ -723,6 +723,11 @@ const unsigned char bm_hg_high [] PROGMEM = {
 #define MENU_ICON_W_LED_BRIGHTNESS 9
 #define MENU_ICON_W_BT_LEGACY_PAIRING 9
 #define MENU_ICON_W_MSNGR_SETTINGS 10
+#define MENU_ICON_W_MSNGR_ANNOUNCES 10
+#define MENU_ICON_W_MSNGR_BOOKMARKS 11
+#define MENU_ICON_W_MSNGR_MSG_INCOMING 9
+#define MENU_ICON_W_MSNGR_MSG_OUTGOING 9
+#define MENU_ICON_W_MSNGR_PING 10
 
 const unsigned char bm_menu_icon_bt_legacy_pairing [] PROGMEM = {
   0x00, 0x00,
@@ -1005,6 +1010,94 @@ const unsigned char bm_menu_icon_back [] PROGMEM = {
   0x10, 0x00,
   0x08, 0x00,
   0x00, 0x00,
+  0x00, 0x00,
+};
+
+// Messenger's own "Announces" row (MSNGR_TOP_ITEM_ANNOUNCES, Menu.h) - an
+// announce glyph over two list lines, from
+// ~/Downloads/Icons/rnode-settings-announce-list.c (10x10 Piskel export),
+// converted to this project's 1bpp/PROGMEM format the same way every other
+// icon here is (see bm_menu_icon_msngr_settings's comment above).
+const unsigned char bm_menu_icon_msngr_announces [] PROGMEM = {
+  0x00, 0x00,
+  0x74, 0x80,
+  0x56, 0x80,
+  0x75, 0x80,
+  0x54, 0x80,
+  0x00, 0x00,
+  0x7f, 0x80,
+  0x00, 0x00,
+  0x7f, 0x80,
+  0x00, 0x00,
+};
+
+// Messenger's own "Bookmarks" row (MSNGR_TOP_ITEM_BOOKMARKS, Menu.h) - a
+// ribbon-bookmark glyph, from ~/Downloads/Icons/rnode-settings-bookmarks.c
+// (11x10 Piskel export), converted to this project's 1bpp/PROGMEM format
+// the same way every other icon here is (see bm_menu_icon_msngr_settings's
+// comment above).
+const unsigned char bm_menu_icon_msngr_bookmarks [] PROGMEM = {
+  0x00, 0x00,
+  0x7f, 0x80,
+  0x41, 0x40,
+  0x41, 0x40,
+  0x41, 0xc0,
+  0x41, 0x00,
+  0x49, 0x00,
+  0x55, 0x00,
+  0x63, 0x00,
+  0x00, 0x00,
+};
+
+// MENU_STATE_MSNGR_PEER's message-list rows (Menu.h) - a down-arrow-into-
+// tray glyph for incoming messages (drawn to the right of the right-
+// aligned value text) and an up-arrow-from-tray glyph for outgoing ones
+// (drawn to the left of the left-aligned label), from
+// ~/Downloads/Icons/rnode-settings-msg-incoming.c and
+// ~/Downloads/Icons/rnode-settings-msg-outgoing.c (9x10 Piskel exports),
+// converted to this project's 1bpp/PROGMEM format the same way every other
+// icon here is (see bm_menu_icon_msngr_settings's comment above).
+const unsigned char bm_menu_icon_msngr_msg_incoming [] PROGMEM = {
+  0x00, 0x00,
+  0x08, 0x00,
+  0x08, 0x00,
+  0x08, 0x00,
+  0x2a, 0x00,
+  0x1c, 0x00,
+  0x49, 0x00,
+  0x41, 0x00,
+  0x7f, 0x00,
+  0x00, 0x00,
+};
+
+const unsigned char bm_menu_icon_msngr_msg_outgoing [] PROGMEM = {
+  0x00, 0x00,
+  0x08, 0x00,
+  0x1c, 0x00,
+  0x2a, 0x00,
+  0x08, 0x00,
+  0x08, 0x00,
+  0x49, 0x00,
+  0x41, 0x00,
+  0x7f, 0x00,
+  0x00, 0x00,
+};
+
+// MENU_STATE_MSNGR_PEER's "Ping" action row (MSNGR_PEER_ACTION_PING,
+// Menu.h) - a radar-ring glyph, from ~/Downloads/Icons/rnode-settings-ping.c
+// (10x10 Piskel export), converted to this project's 1bpp/PROGMEM format
+// the same way every other icon here is (see bm_menu_icon_msngr_settings's
+// comment above).
+const unsigned char bm_menu_icon_msngr_ping [] PROGMEM = {
+  0x00, 0x00,
+  0x12, 0x00,
+  0x21, 0x00,
+  0x4c, 0x80,
+  0x5e, 0x80,
+  0x5e, 0x80,
+  0x4c, 0x80,
+  0x21, 0x00,
+  0x12, 0x00,
   0x00, 0x00,
 };
 

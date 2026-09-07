@@ -188,6 +188,11 @@
   };
   MessengerPeerMsgCacheRow msngr_peer_cache[MSNGR_PEER_MAX_MSG_ROWS];
   uint8_t msngr_peer_cache_count = 0;
+  // Conversation's total message_count at the moment msngr_peer_cache was
+  // last populated - lets messenger_refresh_peer_cache_if_stale() below
+  // detect a new message arriving while MENU_STATE_MSNGR_PEER is sitting
+  // open, without needing a flash read to do it.
+  size_t msngr_peer_cache_message_count = 0;
 
   std::string msngr_msg_detail_cache_content;
   bool msngr_msg_detail_cache_incoming = false;
@@ -207,6 +212,7 @@
     msngr_peer_cache_count = 0;
     if (!urns_message_store) return;
     std::vector<RNS::Bytes> hashes = urns_message_store->get_messages_for_conversation(peer_hash);
+    msngr_peer_cache_message_count = hashes.size();
     uint8_t n = (uint8_t)hashes.size();
     if (n > MSNGR_PEER_MAX_MSG_ROWS) n = MSNGR_PEER_MAX_MSG_ROWS;
     for (uint8_t i = 0; i < n; i++) {
@@ -221,6 +227,22 @@
       msngr_peer_cache[i].incoming = meta.valid && meta.incoming;
     }
     msngr_peer_cache_count = n;
+  }
+
+  // Safe to call every redraw while MENU_STATE_MSNGR_PEER is open (unlike
+  // messenger_refresh_peer_cache() itself) - get_conversation_info() only
+  // scans MessageStore's in-RAM _conversations_pool, no LittleFS read, so
+  // it doesn't carry the DIO0-ISR-vs-flash-I/O risk described above. A
+  // message arriving for this peer updates that in-RAM message_count
+  // immediately, so comparing against the cache's own snapshot detects a
+  // live new message; the actual (flash-reading) cache refresh still only
+  // runs once per change, not once per redraw.
+  void messenger_refresh_peer_cache_if_stale(const RNS::Bytes &peer_hash) {
+    if (!urns_message_store) return;
+    LXMF::MessageStore::ConversationInfo info = urns_message_store->get_conversation_info(peer_hash);
+    if (info.message_count != msngr_peer_cache_message_count) {
+      messenger_refresh_peer_cache(peer_hash);
+    }
   }
 
   // Called once when a message row is selected from MENU_STATE_MSNGR_PEER,

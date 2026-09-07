@@ -151,12 +151,19 @@
       }
     }
 
-    // Menu-closed only - this hold threshold only opens Settings from
-    // closed (menu_encoder_button()'s own duration>700 check, Menu.h); an
-    // already-open menu commits and exits on the same threshold instead,
-    // which isn't what this tick is meant to announce.
+    // Same threshold logic as menu_encoder_button() (Menu.h) - announces
+    // "release now" whether that release is about to open Settings from
+    // closed, commit-and-exit an already-open menu/submenu, or (composing
+    // a message) leave text entry. Skipped for MENU_STATE_STATUS_POPUP,
+    // which has no long-press-specific meaning of its own - any release
+    // there just dismisses the popup, short or long alike.
+    unsigned long hold_beep_threshold = 700;
+    #if HAS_LXMF == true
+      if (menu_state == MENU_STATE_MSNGR_TEXT_ENTRY) hold_beep_threshold = 3000;
+    #endif
     if (encoder_enabled && enc_btn_state == ENC_PRESSED && !enc_btn_hold_beeped &&
-        !menu_is_open() && (millis() - enc_btn_down_last) > 700) {
+        menu_state != MENU_STATE_STATUS_POPUP &&
+        (millis() - enc_btn_down_last) > hold_beep_threshold) {
       buzzer_encoder_tick_melody();
       enc_btn_hold_beeped = true;
     }

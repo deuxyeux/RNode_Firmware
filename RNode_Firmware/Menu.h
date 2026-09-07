@@ -50,6 +50,12 @@
     // Org_01's ascent is ~4px, so a 7px baseline offset centers it fine in
     // an 11px row - see MENU_LIST_BASELINE_OFF's use in draw_menu_list_disp().
     #define MENU_LIST_BASELINE_OFF 7
+    // Pre-remodel value (was the shared function's own hardcoded
+    // setCursor(6, 8)/drawFastHLine(4, 12, ...) before every screen's
+    // title/divider got pulled onto these two macros) - this board isn't
+    // part of the current UI remodel (128x64 only), so kept as-is.
+    #define MENU_HEADER_TEXT_Y 8
+    #define MENU_HEADER_HLINE_Y 12
     // Nudged 1px down from the original MENU_CANVAS_H-10 per user request on
     // real hardware, alongside the footer text's own 1px nudge below.
     #define MENU_LIST_FOOTER_HLINE_Y (MENU_CANVAS_H - 9)
@@ -114,6 +120,12 @@
     // Centering 12px-tall glyphs in a 20px row wants ~4px of margin above
     // and below, so baseline = 4 (margin) + 9 (ascent) = 13.
     #define MENU_LIST_BASELINE_OFF 13
+    // Pre-remodel value (was the shared function's own hardcoded
+    // setCursor(6, 8)/drawFastHLine(4, 12, ...) before every screen's
+    // title/divider got pulled onto these two macros) - this board isn't
+    // part of the current UI remodel (128x64 only), so kept as-is.
+    #define MENU_HEADER_TEXT_Y 8
+    #define MENU_HEADER_HLINE_Y 12
     #define MENU_LIST_FOOTER_HLINE_Y (MENU_CANVAS_H - 21)
     // +3 past the plain "same margin as the row baseline" value - otherwise
     // the footer text's own ascent pokes above MENU_LIST_FOOTER_HLINE_Y.
@@ -148,17 +160,52 @@
     #define MENU_CONTENT_W 120
     #define MENU_LIST_ROW_H 11
     #define MENU_LIST_VISIBLE_ROWS 4
-    #define MENU_LIST_TOP_Y 15
+    // 5px up from the original 15 - tracks MENU_HEADER_HLINE_Y below 1:1
+    // (both nudged 1px lower than their tightest-fit values), per user
+    // request on real hardware.
+    #define MENU_LIST_TOP_Y 10
     #define MENU_LIST_BASELINE_OFF 7
-    #define MENU_LIST_FOOTER_HLINE_Y 59
-    #define MENU_LIST_FOOTER_TEXT_Y 63
+    // Same Org_01 ~4px-ascent title/caption baseline as the T096 group above.
+    #define MENU_HEADER_TEXT_Y 4
+    // Header divider, shared by every screen (list, edit, and the bespoke
+    // address/datetime/text-wheel editors below). Org_01 glyphs at
+    // MENU_HEADER_TEXT_Y=4 bottom out at baseline+1 (its ~1px descent), so 6
+    // would be the tightest the line could sit without touching a glyph's
+    // own pixels - nudged 1px lower than that per user request on real
+    // hardware.
+    #define MENU_HEADER_HLINE_Y 7
+    // Zero-clip max: same 'p'-descender geometry as the T096 group's own
+    // MENU_LIST_FOOTER_TEXT_Y comment - MENU_CANVAS_H isn't defined for this
+    // (unbuffered-display) branch, so this is the literal 64px SSD1306
+    // height's own -2.
+    #define MENU_LIST_FOOTER_TEXT_Y 62
+    // 1px above the footer caption's own top row (MENU_LIST_FOOTER_TEXT_Y
+    // minus its ~4px ascent) would be the tightest fit, same "hug the
+    // caption" rule the header line above uses - nudged 2px higher than
+    // that per user request on real hardware.
+    #define MENU_LIST_FOOTER_HLINE_Y (MENU_LIST_FOOTER_TEXT_Y - 4 - 1 - 2)
     #define MENU_EDIT_VALUE_CX 64
-    #define MENU_EDIT_HEADER_HLINE_Y 15
+    // Same header line as every other screen on this board (including the
+    // bespoke address/datetime/text-wheel editors below, which used to
+    // duplicate this as their own hardcoded 15) - no more a separately-
+    // tracked value that has to be kept in sync by hand.
+    #define MENU_EDIT_HEADER_HLINE_Y MENU_HEADER_HLINE_Y
+    // Centered on the physical 128x64 canvas (64/2=32), not on the header/
+    // footer hline region like the T096/T114 groups above - unlike those
+    // boards' much larger off-screen canvases, this one was tuned directly
+    // against the fixed display height, so moving the hlines above doesn't
+    // change these: 32+3.5=35.5 rounds to 36 (size-2 digits/caps, same
+    // formula as T096/T114's own MENU_EDIT_VALUE_Y derivation), 32+2=34
+    // (size-1 arrows, kept 2px above the value baseline).
     #define MENU_EDIT_VALUE_Y 36
     #define MENU_EDIT_ARROW_Y 34
     #define MENU_EDIT_ARROW_R_EDGE 123
-    #define MENU_EDIT_FOOTER_HLINE_Y 50
-    #define MENU_EDIT_FOOTER_TEXT_Y 59
+    // Same footer line as the list screen (and the bespoke editors below,
+    // which used to duplicate this as their own hardcoded 50/59) - also
+    // pushes this board's edit-screen footer caption all the way to the
+    // bottom, which it wasn't before.
+    #define MENU_EDIT_FOOTER_HLINE_Y MENU_LIST_FOOTER_HLINE_Y
+    #define MENU_EDIT_FOOTER_TEXT_Y MENU_LIST_FOOTER_TEXT_Y
   #endif
 
   // Optional leading icon column for draw_menu_list_disp() rows - board-
@@ -3630,6 +3677,16 @@
         menu_last_activity_ms = millis();
       }
     }
+
+    // Encoder-only double-click-to-Messenger: two short clicks landing
+    // within this window while the menu is closed reach the same
+    // destination as the main button's dedicated BUTTON_HOLD_TIER_MESSENGER
+    // hold, just via click-count instead of hold-duration - the encoder's
+    // own long-press-from-closed is already spoken for (opens Settings).
+    // See menu_encoder_button()'s own "no-op (reserved)" comment for why a
+    // single short click while closed was free to build this on.
+    const unsigned long ENC_DOUBLE_CLICK_WINDOW_MS = 400;
+    unsigned long enc_last_short_click_ms = 0;
   #endif
 
   void menu_encoder_button(unsigned long duration) {
@@ -3665,6 +3722,18 @@
       // attempt doesn't also risk throwing away a half-typed message via
       // the long-press-leave path below.
       if (menu_state == MENU_STATE_MSNGR_TEXT_ENTRY) long_press_threshold = 3000;
+    #endif
+
+    #if HAS_LXMF == true
+      if (menu_state == MENU_STATE_CLOSED && duration <= long_press_threshold) {
+        unsigned long now = millis();
+        if (now - enc_last_short_click_ms <= ENC_DOUBLE_CLICK_WINDOW_MS) {
+          enc_last_short_click_ms = 0;
+          messenger_open_from_closed();
+          return;
+        }
+        enc_last_short_click_ms = now;
+      }
     #endif
 
     if (duration > long_press_threshold) {
@@ -5016,13 +5085,13 @@
   // list too - e.g. MESSENGER's Inbox row, whose bm_menu_icon_inbox glyph
   // (Graphics.h) reads visually wider than MENU_ICON_W_INBOX gives it
   // credit for. Default nullptr/0, same opt-in pattern as icon_dx.
-  void draw_menu_list_disp(const char *title, const char **labels, char valbufs[][24], uint8_t count, uint8_t cursor, const uint8_t **icons = nullptr, const uint8_t *icon_widths = nullptr, const int8_t *icon_dx = nullptr, bool icon_col_shared = true, const int8_t *text_dx = nullptr) {
+  void draw_menu_list_disp(const char *title, const char **labels, char valbufs[][24], uint8_t count, uint8_t cursor, const uint8_t **icons = nullptr, const uint8_t *icon_widths = nullptr, const int8_t *icon_dx = nullptr, bool icon_col_shared = true, const int8_t *text_dx = nullptr, const uint8_t **right_icons = nullptr, const uint8_t *right_icon_widths = nullptr) {
     MENU_GFX.setFont(MENU_FONT);
     MENU_GFX.setTextSize(1);
     MENU_GFX.setTextColor(SSD1306_WHITE);
-    MENU_GFX.setCursor(6, 8);
+    MENU_GFX.setCursor(6, MENU_HEADER_TEXT_Y);
     MENU_GFX.print(title);
-    MENU_GFX.drawFastHLine(4, 12, MENU_CONTENT_W, SSD1306_WHITE);
+    MENU_GFX.drawFastHLine(4, MENU_HEADER_HLINE_Y, MENU_CONTENT_W, SSD1306_WHITE);
 
     const uint8_t row_h = MENU_LIST_ROW_H;
     const uint8_t visible_rows = MENU_LIST_VISIBLE_ROWS;
@@ -5099,8 +5168,20 @@
       if (valbufs[i][0] != 0) {
         int16_t x1, y1; uint16_t w, h;
         MENU_GFX.getTextBounds(valbufs[i], 0, 0, &x1, &y1, &w, &h);
-        MENU_GFX.setCursor(4 + MENU_CONTENT_W - 2 - w, y);
+        uint8_t val_right = 4 + MENU_CONTENT_W - 2;
+        // MENU_STATE_MSNGR_PEER's incoming messages (Menu.h) - reserve room
+        // for a trailing direction icon by pulling the value's right edge
+        // in first, same "shrink the text side, not the icon" idiom the
+        // left-hand icon column above uses.
+        if (right_icons && right_icons[i]) val_right -= (right_icon_widths[i] + MENU_ROW_ICON_GAP);
+        MENU_GFX.setCursor(val_right - w, y);
         MENU_GFX.print(valbufs[i]);
+        if (right_icons && right_icons[i]) {
+          int16_t icon_y = row_top + (row_h - MENU_ICON_H) / 2 + MENU_ICON_Y_NUDGE;
+          uint16_t fg = selected ? SSD1306_BLACK : SSD1306_WHITE;
+          uint16_t bg = selected ? SSD1306_WHITE : SSD1306_BLACK;
+          MENU_GFX.drawBitmap(4 + MENU_CONTENT_W - 2 - right_icon_widths[i], icon_y, right_icons[i], right_icon_widths[i], MENU_ICON_H, fg, bg);
+        }
       }
     }
 
@@ -5160,7 +5241,7 @@
       MENU_GFX.setFont(MENU_FONT);
       MENU_GFX.setTextSize(1);
       MENU_GFX.setTextColor(SSD1306_WHITE);
-      MENU_GFX.setCursor(6, 8);
+      MENU_GFX.setCursor(6, MENU_HEADER_TEXT_Y);
       MENU_GFX.print(msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME ? "Name" : "Send Message");
 
       // Char count, right-aligned on the same title line - "(used/max)",
@@ -5175,17 +5256,18 @@
         snprintf(count_buf, sizeof(count_buf), "(%u/%u)", (unsigned)strlen(msngr_text_entry_buf), (unsigned)max_len);
         int16_t x1, y1; uint16_t cw, ch;
         MENU_GFX.getTextBounds(count_buf, 0, 0, &x1, &y1, &cw, &ch);
-        MENU_GFX.setCursor(4 + MENU_CONTENT_W - (int16_t)cw, 8);
+        MENU_GFX.setCursor(4 + MENU_CONTENT_W - (int16_t)cw, MENU_HEADER_TEXT_Y);
         MENU_GFX.print(count_buf);
       }
 
-      MENU_GFX.drawFastHLine(4, 12, MENU_CONTENT_W, SSD1306_WHITE);
+      MENU_GFX.drawFastHLine(4, MENU_HEADER_HLINE_Y, MENU_CONTENT_W, SSD1306_WHITE);
 
       // Input preview - tail of what's typed so far (leading "..." if it
       // doesn't all fit), with a caret after the last character. Same
       // "show the tail, not the head" idea as MSNGR_MSG_DETAIL's word-wrap,
       // just single-line since there's no vertical room to spare here.
-      const int16_t box_x = 4, box_y = 13, box_w = MENU_CONTENT_W, box_h = 9;
+      // box_y tracks MENU_HEADER_HLINE_Y (1px below it, same as before it moved).
+      const int16_t box_x = 4, box_y = MENU_HEADER_HLINE_Y + 1, box_w = MENU_CONTENT_W, box_h = 9;
       MENU_GFX.drawRect(box_x, box_y, box_w, box_h, SSD1306_WHITE);
       {
         std::string shown(msngr_text_entry_buf);
@@ -5212,7 +5294,7 @@
       // first few columns - same approach meshtastic's own
       // VirtualKeyboard::draw() uses, just against Adafruit_GFX instead of
       // OLEDDisplay.
-      const int16_t grid_top = 23;
+      const int16_t grid_top = box_y + box_h + 1;
       const int16_t grid_bottom = MENU_LIST_FOOTER_HLINE_Y;
       const uint8_t row_h = (uint8_t)((grid_bottom - grid_top) / MSNGR_KB_ROWS);
 
@@ -5314,9 +5396,9 @@
       MENU_GFX.setFont(MENU_FONT);
       MENU_GFX.setTextSize(1);
       MENU_GFX.setTextColor(SSD1306_WHITE);
-      MENU_GFX.setCursor(6, 8);
+      MENU_GFX.setCursor(6, MENU_HEADER_TEXT_Y);
       MENU_GFX.print("MEMORY");
-      MENU_GFX.drawFastHLine(4, 12, MENU_CONTENT_W, SSD1306_WHITE);
+      MENU_GFX.drawFastHLine(4, MENU_HEADER_HLINE_Y, MENU_CONTENT_W, SSD1306_WHITE);
 
       const uint8_t row_h = MENU_LIST_ROW_H;
       const int16_t bar_x = 46;
@@ -5400,7 +5482,7 @@
     MENU_GFX.setFont(MENU_FONT);
     MENU_GFX.setTextSize(1);
     MENU_GFX.setTextColor(SSD1306_WHITE);
-    MENU_GFX.setCursor(6, 9);
+    MENU_GFX.setCursor(6, MENU_HEADER_TEXT_Y);
     MENU_GFX.print(title);
     MENU_GFX.drawFastHLine(4, MENU_EDIT_HEADER_HLINE_Y, MENU_CONTENT_W, SSD1306_WHITE);
 
@@ -5453,9 +5535,9 @@
       MENU_GFX.setFont(MENU_FONT);
       MENU_GFX.setTextSize(1);
       MENU_GFX.setTextColor(SSD1306_WHITE);
-      MENU_GFX.setCursor(6, 9);
+      MENU_GFX.setCursor(6, MENU_HEADER_TEXT_Y);
       MENU_GFX.print(title);
-      MENU_GFX.drawFastHLine(4, 15, 120, SSD1306_WHITE);
+      MENU_GFX.drawFastHLine(4, MENU_EDIT_HEADER_HLINE_Y, 120, SSD1306_WHITE);
 
       // Same font as the SSID/PSK screen's typed content (TEXT_ENTRY_FONT,
       // Tamsyn6x12 - see draw_menu_text_edit_disp()) - title/divider/footer
@@ -5502,8 +5584,8 @@
       MENU_GFX.setFont(MENU_FONT);
       MENU_GFX.setTextSize(1);
       MENU_GFX.setTextColor(SSD1306_WHITE);
-      MENU_GFX.drawFastHLine(4, 50, 120, SSD1306_WHITE);
-      MENU_GFX.setCursor(6, 59);
+      MENU_GFX.drawFastHLine(4, MENU_EDIT_FOOTER_HLINE_Y, 120, SSD1306_WHITE);
+      MENU_GFX.setCursor(6, MENU_EDIT_FOOTER_TEXT_Y);
       #if HAS_ENCODER == true
         if (encoder_enabled) MENU_GFX.print("turn:adjust press:ok");
         else                 MENU_GFX.print("tap:adjust hold:ok");
@@ -5526,14 +5608,14 @@
       MENU_GFX.setFont(MENU_FONT);
       MENU_GFX.setTextSize(1);
       MENU_GFX.setTextColor(SSD1306_WHITE);
-      MENU_GFX.setCursor(6, 9);
+      MENU_GFX.setCursor(6, MENU_HEADER_TEXT_Y);
       // "UTC" suffix - the RTC list's own Time/Date rows show local
       // (Timezone-shifted) time, but this editor always reads/writes the
       // RTC in UTC, same as CMD_TIME/rtc_sync_ntp() - worth being explicit
       // about here since it'd otherwise be the one screen on this page
       // that doesn't match what's shown everywhere else.
       MENU_GFX.print("SET TIME/DATE UTC");
-      MENU_GFX.drawFastHLine(4, 15, 120, SSD1306_WHITE);
+      MENU_GFX.drawFastHLine(4, MENU_EDIT_HEADER_HLINE_Y, 120, SSD1306_WHITE);
 
       MENU_GFX.setFont(TEXT_ENTRY_FONT);
       MENU_GFX.setTextSize(1);
@@ -5586,8 +5668,8 @@
       MENU_GFX.setFont(MENU_FONT);
       MENU_GFX.setTextSize(1);
       MENU_GFX.setTextColor(SSD1306_WHITE);
-      MENU_GFX.drawFastHLine(4, 50, 120, SSD1306_WHITE);
-      MENU_GFX.setCursor(6, 59);
+      MENU_GFX.drawFastHLine(4, MENU_EDIT_FOOTER_HLINE_Y, 120, SSD1306_WHITE);
+      MENU_GFX.setCursor(6, MENU_EDIT_FOOTER_TEXT_Y);
       #if HAS_ENCODER == true
         if (encoder_enabled) MENU_GFX.print("turn:adjust press:ok");
         else                 MENU_GFX.print("tap:adjust hold:ok");
@@ -5606,9 +5688,9 @@
       MENU_GFX.setFont(MENU_FONT);
       MENU_GFX.setTextSize(1);
       MENU_GFX.setTextColor(SSD1306_WHITE);
-      MENU_GFX.setCursor(6, 9);
+      MENU_GFX.setCursor(6, MENU_HEADER_TEXT_Y);
       MENU_GFX.print(title);
-      MENU_GFX.drawFastHLine(4, 15, 120, SSD1306_WHITE);
+      MENU_GFX.drawFastHLine(4, MENU_EDIT_HEADER_HLINE_Y, 120, SSD1306_WHITE);
 
       char candidate[6];
       if (wheel_is_del(wheel_idx))       sprintf(candidate, "DEL");
@@ -5659,8 +5741,8 @@
       MENU_GFX.setFont(MENU_FONT);
       MENU_GFX.setTextSize(1);
       MENU_GFX.setTextColor(SSD1306_WHITE);
-      MENU_GFX.drawFastHLine(4, 50, 120, SSD1306_WHITE);
-      MENU_GFX.setCursor(6, 59);
+      MENU_GFX.drawFastHLine(4, MENU_EDIT_FOOTER_HLINE_Y, 120, SSD1306_WHITE);
+      MENU_GFX.setCursor(6, MENU_EDIT_FOOTER_TEXT_Y);
       // Same encoder_enabled branch as every other footer hint in this
       // file (e.g. the main list's "turn:move press:open" vs "tap:next
       // hold:open") - this one just never had it, leaving button-only
@@ -6681,6 +6763,8 @@
 
         labels[MSNGR_TOP_ITEM_BOOKMARKS] = "Bookmarks";
         sprintf(valbufs[MSNGR_TOP_ITEM_BOOKMARKS], "%u", (unsigned)msngr_bookmark_count);
+        icons[MSNGR_TOP_ITEM_BOOKMARKS] = bm_menu_icon_msngr_bookmarks;
+        icon_widths[MSNGR_TOP_ITEM_BOOKMARKS] = MENU_ICON_W_MSNGR_BOOKMARKS;
 
         labels[MSNGR_TOP_ITEM_ANNOUNCES] = "Announces";
         {
@@ -6688,6 +6772,8 @@
           for (uint8_t i = 0; i < MSNGR_MAX_ANNOUNCES; i++) if (msngr_announces[i].in_use) n++;
           sprintf(valbufs[MSNGR_TOP_ITEM_ANNOUNCES], "%u", (unsigned)n);
         }
+        icons[MSNGR_TOP_ITEM_ANNOUNCES] = bm_menu_icon_msngr_announces;
+        icon_widths[MSNGR_TOP_ITEM_ANNOUNCES] = MENU_ICON_W_MSNGR_ANNOUNCES;
 
         labels[MSNGR_TOP_ITEM_ANNOUNCE_NODE] = "Announce Node";
         valbufs[MSNGR_TOP_ITEM_ANNOUNCE_NODE][0] = 0;
@@ -6709,10 +6795,10 @@
         icons[MSNGR_TOP_ITEM_BACK] = bm_menu_icon_back;
         icon_widths[MSNGR_TOP_ITEM_BACK] = MENU_ICON_W_BACK;
 
-        // icon_col_shared=false - only Inbox/Announce Node/Settings (the
-        // rows with icons) get the wider indent; Bookmarks/Announces/BACK
-        // stay at the plain x=8 (BACK via its own auto-icon path, same as
-        // BT_LIST's own call).
+        // icon_col_shared=false - only Inbox/Bookmarks/Announces/Announce
+        // Node/Settings (the rows with icons) get the wider indent; BACK
+        // stays at the plain x=8 via its own auto-icon path, same as
+        // BT_LIST's own call.
         draw_menu_list_disp("MESSENGER", labels, valbufs, MSNGR_TOP_ITEM_COUNT, msngr_menu_cursor, icons, icon_widths, nullptr, false, text_dx);
       } else if (menu_state == MENU_STATE_MSNGR_INBOX) {
         uint8_t row_count = msngr_inbox_row_count();
@@ -6795,11 +6881,21 @@
 
         draw_menu_list_disp("ANNOUNCES", labels, valbufs, row_count, msngr_announces_cursor);
       } else if (menu_state == MENU_STATE_MSNGR_PEER) {
+        // Picks up a message that arrived for this peer while the screen
+        // is sitting open - see that function's own comment for why this
+        // is safe to call every redraw when messenger_refresh_peer_cache()
+        // itself is not.
+        messenger_refresh_peer_cache_if_stale(msngr_active_peer_hash);
+
         uint8_t msg_rows = msngr_peer_msg_row_count();
         uint8_t row_count = msngr_peer_row_count();
         const char *labels[MSNGR_PEER_MAX_MSG_ROWS + MSNGR_PEER_ACTION_COUNT];
         char label_bufs[MSNGR_PEER_MAX_MSG_ROWS][24];
         char valbufs[MSNGR_PEER_MAX_MSG_ROWS + MSNGR_PEER_ACTION_COUNT][24];
+        const uint8_t *icons[MSNGR_PEER_MAX_MSG_ROWS + MSNGR_PEER_ACTION_COUNT] = { nullptr };
+        uint8_t icon_widths[MSNGR_PEER_MAX_MSG_ROWS + MSNGR_PEER_ACTION_COUNT] = { 0 };
+        const uint8_t *right_icons[MSNGR_PEER_MAX_MSG_ROWS + MSNGR_PEER_ACTION_COUNT] = { nullptr };
+        uint8_t right_icon_widths[MSNGR_PEER_MAX_MSG_ROWS + MSNGR_PEER_ACTION_COUNT] = { 0 };
 
         // Reads msngr_peer_cache (Messenger.h, populated once on screen
         // entry/after a send), not MessageStore directly - see that
@@ -6812,15 +6908,22 @@
         // valbufs[] - reused here (instead of a real bubble layout) to
         // put outgoing messages on the left and incoming ones on the
         // right, so direction reads at a glance without needing the old
-        // "<"/">" text prefix.
+        // "<"/">" text prefix. bm_menu_icon_msngr_msg_outgoing sits left of
+        // the label (the plain left-icon column) and
+        // bm_menu_icon_msngr_msg_incoming sits right of the value (the new
+        // right_icons column draw_menu_list_disp() grew for this).
         for (uint8_t i = 0; i < msg_rows; i++) {
           if (msngr_peer_cache[i].incoming) {
             labels[i] = "";
             snprintf(valbufs[i], 24, "%s", msngr_peer_cache[i].snippet);
+            right_icons[i] = bm_menu_icon_msngr_msg_incoming;
+            right_icon_widths[i] = MENU_ICON_W_MSNGR_MSG_INCOMING;
           } else {
             snprintf(label_bufs[i], sizeof(label_bufs[i]), "%s", msngr_peer_cache[i].snippet);
             labels[i] = label_bufs[i];
             valbufs[i][0] = 0;
+            icons[i] = bm_menu_icon_msngr_msg_outgoing;
+            icon_widths[i] = MENU_ICON_W_MSNGR_MSG_OUTGOING;
           }
         }
 
@@ -6830,6 +6933,8 @@
         labels[base + MSNGR_PEER_ACTION_SEND_SOS] = "Send: SOS"; valbufs[base + MSNGR_PEER_ACTION_SEND_SOS][0] = 0;
         labels[base + MSNGR_PEER_ACTION_SEND_CUSTOM] = "Send: Custom"; valbufs[base + MSNGR_PEER_ACTION_SEND_CUSTOM][0] = 0;
         labels[base + MSNGR_PEER_ACTION_PING] = "Ping"; valbufs[base + MSNGR_PEER_ACTION_PING][0] = 0;
+        icons[base + MSNGR_PEER_ACTION_PING] = bm_menu_icon_msngr_ping;
+        icon_widths[base + MSNGR_PEER_ACTION_PING] = MENU_ICON_W_MSNGR_PING;
 
         bool is_bookmarked = messenger_bookmark_find(msngr_active_peer_hash) >= 0;
         labels[base + MSNGR_PEER_ACTION_BOOKMARK] = is_bookmarked ? "Remove Bookmark" : "Add Bookmark";
@@ -6843,7 +6948,10 @@
 
         char title[24];
         snprintf(title, sizeof(title), "%s", messenger_peer_display_name(msngr_active_peer_hash).c_str());
-        draw_menu_list_disp(title, labels, valbufs, row_count, msngr_peer_cursor);
+        // icon_col_shared=false - only the message rows and the Ping
+        // action row above opted into icons[]/right_icons[], the remaining
+        // action rows stay at the plain x=8 they always used.
+        draw_menu_list_disp(title, labels, valbufs, row_count, msngr_peer_cursor, icons, icon_widths, nullptr, false, nullptr, right_icons, right_icon_widths);
       } else if (menu_state == MENU_STATE_MSNGR_MSG_DETAIL) {
         uint8_t row_count = msngr_msg_detail_row_count();
         // +2, not +1 - content lines plus the trailing Delete and BACK rows.
