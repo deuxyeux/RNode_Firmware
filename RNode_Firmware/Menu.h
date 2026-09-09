@@ -5000,7 +5000,13 @@
           // pattern as Sync NTP/rtc_sync_ntp()). Success reboots from
           // inside ota_reboot() and never returns.
           const esp_partition_t *target = ota_do_pull_download(menu_draw_popup);
-          if (target && ota_verify_and_set_boot(target)) {
+          // See OTA.h's ota_handle_install() comment - ota_verify_and_set_
+          // boot() itself isn't masked (shared with the pre-radio-init
+          // recovery path), so this caller masks around it.
+          LoRa->maskDio0();
+          bool verified = target && ota_verify_and_set_boot(target);
+          LoRa->unmaskDio0();
+          if (verified) {
             menu_draw_popup("INSTALLING...");
             ota_reboot(menu_draw_popup);
           } else {
