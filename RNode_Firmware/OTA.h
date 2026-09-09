@@ -606,6 +606,20 @@ const esp_partition_t* ota_do_pull_download(ota_status_cb_t status_cb = nullptr)
   ota_dbg("Pulling update from "+String(OTA_BIN_URL));
   if (status_cb) status_cb("CONNECTING...");
 
+  // Web-triggered installs (menu closed) only got this pushed to the
+  // screen once the download loop's own update_display() calls started -
+  // esp_https_ota_begin() below (DNS + TCP connect + TLS handshake, all
+  // one blocking call, see its own comment further down) can itself run
+  // for several seconds first, during which the screen was left showing
+  // whatever it had before, making the "updating" graphic appear late or
+  // not at all for a short/failed attempt. Push it immediately instead,
+  // right when firmware_update_mode actually flips true.
+  #if HAS_MENU == true
+    if (!menu_is_open() && disp_ready) { update_display(); }
+  #else
+    if (disp_ready) update_display();
+  #endif
+
   esp_http_client_config_t http_config = {};
   http_config.url = OTA_BIN_URL;
   http_config.crt_bundle_attach = esp_crt_bundle_attach;
@@ -626,6 +640,14 @@ const esp_partition_t* ota_do_pull_download(ota_status_cb_t status_cb = nullptr)
   // told the user to expect exactly that, so a clean radio pause for the
   // duration is the intended tradeoff, not a new regression.
   LoRa->maskDio0();
+  // Confirmed live: esp_https_ota_begin() (DNS + TCP connect + TLS
+  // handshake to flasher.rns.moscow, all one blocking call) can itself
+  // take longer than the 5s task watchdog budget on a slower connection -
+  // the do-while loop's own reset below only helps once inside it, and
+  // this call happens before that. Same fix, just one call earlier.
+  #if MCU_VARIANT == MCU_ESP32
+    esp_task_wdt_reset();
+  #endif
   esp_https_ota_handle_t ota_handle = NULL;
   esp_err_t err = esp_https_ota_begin(&ota_config, &ota_handle);
   if (err != ESP_OK) {
@@ -692,6 +714,13 @@ const esp_partition_t* ota_do_pull_download(ota_status_cb_t status_cb = nullptr)
     #endif
   } while (err == ESP_ERR_HTTPS_OTA_IN_PROGRESS);
 
+  // Same reasoning as the reset before esp_https_ota_begin() above -
+  // esp_https_ota_finish() below still does its own blocking I/O (final
+  // read + image validation), after the loop's own per-chunk resets have
+  // already stopped running for this call.
+  #if MCU_VARIANT == MCU_ESP32
+    esp_task_wdt_reset();
+  #endif
   bool ok = false;
   if (err == ESP_OK && esp_https_ota_is_complete_data_received(ota_handle)) {
     ok = (esp_https_ota_finish(ota_handle) == ESP_OK);
@@ -760,6 +789,11 @@ void ota_handle_upload_chunk() {
     ota_in_progress = true;
     firmware_update_mode = true;
     ota_upload_ok = false;
+    // Same reasoning as ota_do_pull_download()'s own comment - push the
+    // "updating" graphic the moment firmware_update_mode flips true,
+    // rather than waiting for the first UPLOAD_FILE_WRITE chunk's own
+    // update_display() call below.
+    if (disp_ready) update_display();
     // Masked for the whole START..END/ABORTED session, same reasoning as
     // ota_do_pull_download()'s own comment - esp_ota_write() below is real
     // flash I/O, called once per chunk across the whole upload, and a DIO0
