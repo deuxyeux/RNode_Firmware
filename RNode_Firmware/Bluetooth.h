@@ -81,6 +81,21 @@ char bt_da[BT_DEV_ADDR_LEN];
   // value is always >= 0).
   volatile int8_t bt_pending_rns_link_state = -1;
 
+  // kiss_indicate_btpin() (Utilities.h) ends in a chain of serial_write()/
+  // Serial.write() calls, one byte at a time, with no locking against
+  // loopTask's own concurrent KISS output (periodic stat/telemetry frames,
+  // radio replies, etc.) - the Arduino core's Serial object isn't
+  // synchronized for multi-task access. Called directly from these BLE
+  // stacks' own callback context (BTC task for SPP, NimBLE's host task -
+  // see this file's own comment above, neither is loopTask) it can
+  // interleave byte-for-byte with whatever loopTask is mid-writing,
+  // corrupting both frames - the CMD_BT_PIN frame most visibly, since a
+  // host reading KISS never resyncs mid-frame and just silently drops the
+  // torn bytes. Deferred through this flag instead, same pattern as
+  // bt_pending_rns_link_state just above, so the actual indicate always
+  // happens from update_bt() on loopTask instead.
+  volatile bool bt_pending_pin_indicate = false;
+
   #if HAS_BLUETOOTH == true
 
     // How long the passkey has to stay on screen before it's auto-accepted
@@ -92,7 +107,7 @@ char bt_da[BT_DEV_ADDR_LEN];
 
     void bt_confirm_pairing(uint32_t numVal) {
       bt_ssp_pin = numVal;
-      kiss_indicate_btpin();
+      bt_pending_pin_indicate = true;
       if (!bt_allow_pairing) {
         // Peer-initiated pairing (e.g. a phone/PC's own Bluetooth stack
         // starting SSP on its own, before the on-device button-hold gesture
@@ -237,6 +252,10 @@ char bt_da[BT_DEV_ADDR_LEN];
         set_rns_link_state((uint8_t)bt_pending_rns_link_state);
         bt_pending_rns_link_state = -1;
       }
+      if (bt_pending_pin_indicate) {
+        bt_pending_pin_indicate = false;
+        kiss_indicate_btpin();
+      }
       if (bt_confirm_pending && millis()-bt_confirm_pending_since >= BT_CONFIRM_DISPLAY_MS) {
         bt_confirm_pending = false;
         // bt_allow_pairing may have gone false since the request came in
@@ -252,10 +271,18 @@ char bt_da[BT_DEV_ADDR_LEN];
     }
 
   #elif HAS_BLE == true
-    bool bt_setup_hw(); void bt_security_setup();
+    bool bt_setup_hw(); void bt_security_setup(); void bt_update_passkey();
     BLESecurity *ble_security = new BLESecurity();
     bool ble_authenticated = false;
     uint32_t pairing_pin = 0;
+    // Whether pairing_pin already carries a properly-entropic value - false
+    // until the first time it's rerolled with the BT radio actually up (see
+    // bt_connect_callback()'s and bt_enable_pairing()'s own comments on the
+    // boot-time weak-entropy bug this guards against). Sticky for the rest
+    // of the runtime once true: rerolling again after that point would just
+    // invalidate a pairing_pin some host/display has already committed to
+    // showing, for no entropy benefit.
+    bool bt_passkey_entropy_ok = false;
 
     // The live connection handle for BLESerial::flush() (BLESerial.cpp) to
     // call ble_gatts_notify_custom() directly with, bypassing
@@ -476,11 +503,34 @@ char bt_da[BT_DEV_ADDR_LEN];
       // authentication challenge for this pairing window - see that
       // function's own comment on setForceAuthentication().
       bt_allow_pairing = true;
+      // Fix the boot-time weak-entropy pairing_pin (see
+      // bt_passkey_entropy_ok's own comment) right here, before committing
+      // to and announcing a value below - the BT radio has been up for a
+      // while by the time anything explicitly arms pairing, so entropy is
+      // fine now. Once this call (or bt_connect_callback()'s own, for a
+      // peer-initiated pairing that arrives before this was ever called)
+      // has done it once, pairing_pin is never rerolled again - manually
+      // arming pairing always shows and keeps the same code, rather than a
+      // peer connecting later silently swapping it for a different one.
+      if (!bt_passkey_entropy_ok) { bt_update_passkey(); bt_passkey_entropy_ok = true; }
       bt_security_setup();
 
       bt_pairing_started = millis();
       bt_state = BT_STATE_PAIRING;
       bt_ssp_pin = pairing_pin;
+      // Unlike the classic-Bluetooth SPP/SSP flow (bt_confirm_pairing,
+      // above) and Bluefruit's own passkey callback (nRF52, below), this
+      // ESP_IO_CAP_OUT/setPassKey() setup (bt_security_setup() above) is a
+      // static passkey configured entirely up front - the NimBLE-Arduino
+      // wrapper never calls back into app code with it at pairing time
+      // (bt_passkey_callback() below is dead code for this reason, despite
+      // looking like the right hook). The passkey is already fully known
+      // the moment pairing mode is armed here, so indicate it immediately
+      // instead of waiting for a callback that will never come - this is
+      // also the only KISS notification a peer ever gets for this flow,
+      // since a peer that already knows the code (typed from the OLED)
+      // never triggers any further app-level callback either.
+      bt_pending_pin_indicate = true;
     }
 
     void bt_disable_pairing() {
@@ -516,7 +566,7 @@ char bt_da[BT_DEV_ADDR_LEN];
       }
       bt_ssp_pin = passkey;
       bt_pairing_started = millis();
-      kiss_indicate_btpin();
+      bt_pending_pin_indicate = true;
     }
 
     bool bt_confirm_pin_callback(uint32_t pin) {
@@ -559,7 +609,7 @@ char bt_da[BT_DEV_ADDR_LEN];
       // above (the "host displays, we confirm" case), which already did this.
       // Without it there was no way to read the passkey except physically
       // looking at the OLED.
-      kiss_indicate_btpin();
+      bt_pending_pin_indicate = true;
       return pairing_pin;
     }
 
@@ -713,22 +763,28 @@ char bt_da[BT_DEV_ADDR_LEN];
       display_unblank();
       ble_authenticated = false;
       if (bt_state != BT_STATE_PAIRING) { bt_state = BT_STATE_CONNECTED; }
-      // Roll a fresh passkey before any pairing handshake on this connection
-      // can start - BLE_GAP_EVENT_PASSKEY_ACTION (BLEServer.cpp) reads
-      // BLESecurity::getPassKey() and locks in that value before our own
+      // Only if pairing_pin's boot-time weak entropy was never already
+      // fixed (bt_passkey_entropy_ok) - covers a peer-initiated pairing
+      // that arrives before bt_enable_pairing() was ever explicitly called
+      // (nobody's shown/committed to a value yet, so this is the first safe
+      // opportunity - BLE_GAP_EVENT_PASSKEY_ACTION, BLEServer.cpp, reads
+      // BLESecurity::getPassKey() and locks it in before our own
       // bt_passkey_notify_callback() ever runs, so it can only be changed
-      // here, ahead of time, not reactively once displayed. This also fixes
-      // a real entropy bug: the very first pairing_pin (bt_setup_hw() ->
-      // bt_security_setup(), called before the BT radio ever starts - see
-      // bt_init()'s own comment on why bt_start() is deferred) was generated
-      // from esp_random(), which per Espressif's own docs only produces true
-      // entropy once the RF subsystem (WiFi or BT) has been active for a
-      // while - calling it that early produced the exact same "random" value
-      // on every boot, confirmed live (identical passkey across repeated
-      // reboots). By the time a peer has connected, BT radio has been
-      // running long enough for this call to get real entropy.
-      bt_update_passkey();
-      BLESecurity::setPassKey(true, pairing_pin);
+      // here, ahead of time, not reactively once displayed). Once fixed
+      // once (here or in bt_enable_pairing()), never rerolls again -
+      // manually arming pairing (bt_enable_pairing()) always shows and
+      // keeps that same code, rather than every connection after it
+      // (including an ordinary reconnect from an already-bonded peer, which
+      // lands here too and would never go through an interactive passkey
+      // exchange at all) silently swapping it for a different one.
+      if (!bt_passkey_entropy_ok) {
+        bt_update_passkey();
+        bt_passkey_entropy_ok = true;
+        BLESecurity::setPassKey(true, pairing_pin);
+        // Indicate over KISS too - this is the only such notification a
+        // peer-initiated pairing (bt_enable_pairing() never called) gets.
+        bt_pending_pin_indicate = true;
+      }
       // See bt_pending_rns_link_state's own comment (above) for why this is
       // deferred instead of a direct call - this callback runs on NimBLE's
       // own host task, not loopTask.
@@ -832,6 +888,10 @@ char bt_da[BT_DEV_ADDR_LEN];
         set_rns_link_state((uint8_t)bt_pending_rns_link_state);
         bt_pending_rns_link_state = -1;
       }
+      if (bt_pending_pin_indicate) {
+        bt_pending_pin_indicate = false;
+        kiss_indicate_btpin();
+      }
       if (bt_pending_pairing_disconnect && (int32_t)(millis()-bt_pairing_disconnect_at) >= 0) {
         bt_pending_pairing_disconnect = false;
         SerialBT.disconnect();
@@ -895,6 +955,13 @@ char bt_da[BT_DEV_ADDR_LEN];
   // matching fix, added once this nRF52 history made the hazard shape
   // obvious there too, even though it had never been observed to crash.
   volatile int8_t bt_pending_rns_link_state = -1;
+
+  // See the MCU_ESP32 branch's own bt_pending_pin_indicate for why -
+  // Bluefruit's passkey/security callbacks run on their own SoftDevice
+  // event-handling task, not loopTask, and kiss_indicate_btpin() ending in
+  // unsynchronized Serial.write() calls can interleave with loopTask's own
+  // concurrent KISS output otherwise.
+  volatile bool bt_pending_pin_indicate = false;
 
   uint8_t eeprom_read(uint32_t mapped_addr);
 
@@ -985,7 +1052,7 @@ char bt_da[BT_DEV_ADDR_LEN];
     uint32_t numeric_passkey = 0;
     for (int i = 0; i < 6; i++) { numeric_passkey = numeric_passkey * 10 + (passkey[i] - '0'); }
     bt_ssp_pin = numeric_passkey;
-    kiss_indicate_btpin();
+    bt_pending_pin_indicate = true;
     if (!bt_allow_pairing) {
       // Peer-initiated pairing (e.g. a phone/PC's BLE stack bonding on its
       // own) before the on-device button-hold gesture (bt_enable_pairing())
@@ -1174,7 +1241,7 @@ char bt_da[BT_DEV_ADDR_LEN];
     bt_allow_pairing = true;
     bt_pairing_started = millis();
     bt_state = BT_STATE_PAIRING;
-    kiss_indicate_btpin();
+    bt_pending_pin_indicate = true;
   }
 
   void bt_debond_all() {
@@ -1186,9 +1253,32 @@ char bt_da[BT_DEV_ADDR_LEN];
     Bluefruit.Periph.clearBonds();
   }
 
+  int bt_bond_count() {
+    // Bluefruit stores each bonded peripheral-role peer as its own file
+    // under InternalFS, one directory per role (bonding.cpp,
+    // BOND_DIR_PRPH="/adafruit/bond_prph") - created by bond_init() inside
+    // Bluefruit.begin() (bt_setup_hw() above), so it exists once bt_ready
+    // is true regardless of the BLE stack's current on/off state. Counted
+    // directly via the public Adafruit_LittleFS API rather than pulling in
+    // Bluefruit52Lib's own non-public utility/bonding.h.
+    int count = 0;
+    File bond_dir("/adafruit/bond_prph", FILE_O_READ, InternalFS);
+    File bond_file(InternalFS);
+    while ((bond_file = bond_dir.openNextFile(FILE_O_READ))) {
+      if (!bond_file.isDirectory()) count++;
+      bond_file.close();
+    }
+    bond_dir.close();
+    return count;
+  }
+
   void update_bt() {
     // Apply any RNS link-state transition a BLE callback deferred (see
     // bt_pending_rns_link_state's own comment above).
+    if (bt_pending_pin_indicate) {
+      bt_pending_pin_indicate = false;
+      kiss_indicate_btpin();
+    }
     if (bt_pending_rns_link_state != -1) {
       set_rns_link_state((uint8_t)bt_pending_rns_link_state);
       bt_pending_rns_link_state = -1;

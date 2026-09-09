@@ -124,6 +124,16 @@ String ota_current_version() {
   return String((int)MAJ_VERS) + "." + String((int)MIN_VERS);
 }
 
+// Single-line "1.86.1041" form used elsewhere (Makefile's version.txt,
+// `$(PROTO_VERSION).$(git rev-list --count HEAD)`) instead of the web page's
+// old two-line version/build display. Safe to always append BUILD_NUMBER
+// here (no BUILD_NUMBER==0 guard needed like Display.h's) because Boards.h's
+// global fallback already force-disables HAS_OTA - and this file with it -
+// whenever BUILD_NUMBER is 0.
+String ota_full_version_string() {
+  return ota_current_version() + "." + String(BUILD_NUMBER);
+}
+
 // Reused by both the pull and push flows once a new image has been written
 // successfully - mirrors the existing serial-triggered CMD_FW_HASH handler
 // (RNode_Firmware.ino) so the "Firmware Corrupt" check (Device.h) is
@@ -212,40 +222,160 @@ bool ota_do_check(long *current_out, long *latest_out, bool *newer_out) {
   return true;
 }
 
+// Device ID matches the "RNode XXXX" convention used everywhere else (BLE
+// name/bt_devname, boot splash, Menu.h's settings_title) - same bt_dh[14]/
+// bt_dh[15] MD5-of-MAC bytes, populated at boot (Bluetooth.h) regardless of
+// whether Bluetooth itself is enabled, well before OTA.h's include point.
 void ota_handle_root() {
-  String page = "<!doctype html><html><head><title>RNode Firmware Update</title>";
-  page += "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"></head><body>";
-  page += "<h1>RNode Firmware Update</h1>";
-  // BUILD_NUMBER==0 means this build didn't come through the Makefile/
-  // platformio.ini's git-commit-count injection at all (see BUILD_NUMBER's
-  // own fallback, Boards.h) - unknown, not a real build 0, so the line is
-  // omitted rather than showing a misleading "Build: 0".
-  page += "<p>RNode Firmware version: " + ota_current_version();
-  if (BUILD_NUMBER != 0) page += "<br>Build: " + String(BUILD_NUMBER);
-  page += "</p>";
-  page += "<h2>Check server for an update</h2>";
-  page += "<button onclick=\"check()\">Check for Update</button> ";
-  page += "<button onclick=\"install()\">Install Latest</button>";
-  page += "<pre id=\"status\"></pre>";
-  page += "<h2>Or upload a .bin directly</h2>";
-  page += "<form method=\"POST\" action=\"/upload\" enctype=\"multipart/form-data\">";
-  page += "<input type=\"file\" name=\"firmware\"> <input type=\"submit\" value=\"Upload &amp; Install\"></form>";
-  page += "<script>";
-  page += "var proto='"+ota_current_version()+"';";
-  page += "function setStatus(t){document.getElementById('status').innerText=t;}";
-  page += "function check(){return fetch('/check').then(r=>r.json()).then(d=>{"
-          "if(d.error){setStatus(d.error);return d;}"
-          "setStatus('Current: '+proto+'.'+d.current+'\\nLatest:  '+proto+'.'+d.latest+'\\n'+(d.newer?'Update available.':'Already up to date.'));"
-          "return d;});}";
-  page += "function doInstall(){setStatus('Installing...');fetch('/install',{method:'POST'}).then(r=>r.text()).then(setStatus);}";
-  page += "function install(){check().then(d=>{"
-          "if(!d||d.error)return;"
-          "if(!d.newer){"
-          "if(!confirm('Server build ('+proto+'.'+d.latest+') is not newer than current build ('+proto+'.'+d.current+'). Install anyway?')){setStatus('Cancelled.');return;}"
-          "}"
-          "doInstall();});}";
+  char id_buf[5];
+  sprintf(id_buf, "%02X%02X", (uint8_t)bt_dh[14], (uint8_t)bt_dh[15]);
+
+  // rns_link_state (Config.h) is the same host-connected flag Display.h's
+  // cable icon reads - it's fed by whichever transport (USB/BT/WS) is
+  // actually active, so this doesn't need to know which one.
+  bool radio_on = radio_online;
+  bool host_connected = (rns_link_state == RNS_LINK_STATE_CONNECTED);
+  bool show_caution = radio_on || host_connected;
+  String caution = "";
+  if (radio_on) caution += "The radio is currently active. ";
+  if (host_connected) caution += "A KISS host interface is connected. ";
+
+  String page = "<!doctype html><html><head><meta charset=\"utf-8\">";
+  page += "<title>RNode " + String(id_buf) + " Firmware Update</title>";
+  page += "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">";
+  page += "<style>"
+    ":root{--bg:#0a0e0a;--card:#0c130c;--accent:#00cc44;--accent-bright:#39ff14;"
+    "--accent-dim:rgba(0,204,68,.55);--accent-ghost:rgba(0,204,68,.08);"
+    "--amber:#f5a623;--amber-dim:rgba(245,166,35,.15);--red:#ff6666;"
+    "--text:#b8d4b8;--text-bright:#d4edd4;--text-dim:#506650;--text-muted:#3a4e3a;"
+    "--border:rgba(0,204,68,.18);"
+    "--font:ui-monospace,'SFMono-Regular',Menlo,Consolas,'Liberation Mono',monospace}"
+    "*{box-sizing:border-box}"
+    "body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font);"
+    "font-size:14px;line-height:1.6;padding:24px 16px}"
+    ".card{max-width:480px;margin:0 auto;background:var(--card);border:1px solid var(--border);"
+    "border-radius:6px;padding:20px}"
+    "h1{font-size:1.1rem;color:var(--text-bright);margin:0 0 4px;letter-spacing:.02em;font-weight:700}"
+    "h1 .id{color:var(--accent-bright)}"
+    ".ver{font-size:.78rem;color:var(--text-dim);margin-bottom:16px}"
+    ".status-row{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}"
+    ".badge{font-size:.68rem;letter-spacing:.06em;text-transform:uppercase;padding:4px 9px;"
+    "border-radius:4px;border:1px solid var(--border);color:var(--text-dim)}"
+    ".badge.ok{color:var(--accent);border-color:var(--accent-dim);background:var(--accent-ghost)}"
+    ".badge.warn{color:var(--amber);border-color:rgba(245,166,35,.35);background:var(--amber-dim)}"
+    ".caution{font-size:.8rem;color:var(--amber);background:var(--amber-dim);"
+    "border:1px solid rgba(245,166,35,.35);border-radius:4px;padding:10px 12px;"
+    "margin-bottom:16px;line-height:1.5}"
+    ".section{border-top:1px solid var(--border);padding-top:14px;margin-top:14px}"
+    ".section-title{font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;"
+    "color:var(--text-dim);margin-bottom:8px}"
+    ".row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}"
+    ".btn{font-family:var(--font);font-size:.8rem;padding:9px 14px;background:transparent;"
+    "color:var(--text);border:1px solid var(--border);border-radius:4px;cursor:pointer}"
+    ".btn:hover:not(:disabled){border-color:var(--accent-dim);color:var(--accent)}"
+    ".btn:disabled{opacity:.4;cursor:not-allowed}"
+    ".btn-primary{background:var(--accent);color:#050c05;border-color:var(--accent);font-weight:700}"
+    ".btn-primary:hover:not(:disabled){background:var(--accent-bright);border-color:var(--accent-bright)}"
+    ".btn-primary:disabled{background:rgba(0,204,68,.12);color:var(--text-muted);border-color:var(--border)}"
+    "input[type=file]{font-family:var(--font);font-size:.76rem;color:var(--text-dim);flex:1;min-width:0}"
+    ".status-line{font-size:.78rem;margin-top:10px;color:var(--text-dim)}"
+    ".status-line.ok{color:var(--accent)}"
+    ".status-line.warn{color:var(--amber)}"
+    ".status-line.err{color:var(--red)}"
+    ".progress-wrap{display:flex;align-items:center;gap:10px;margin-top:10px}"
+    ".progress-bar{flex:1;height:5px;background:rgba(0,204,68,.1);border-radius:3px;overflow:hidden}"
+    ".progress-fill{height:100%;width:0;background:var(--accent);transition:width .2s}"
+    ".progress-text{font-size:.7rem;color:var(--text-dim);min-width:34px;text-align:right}"
+    "</style></head><body><div class=\"card\">";
+
+  page += "<h1>RNode <span class=\"id\">" + String(id_buf) + "</span> Firmware Update</h1>";
+  page += "<div class=\"ver\">v" + ota_full_version_string() + "</div>";
+
+  page += "<div class=\"status-row\">";
+  page += "<span class=\"badge "; page += radio_on ? "warn" : "ok";
+  page += "\">RADIO "; page += radio_on ? "ON" : "OFF"; page += "</span>";
+  page += "<span class=\"badge "; page += host_connected ? "warn" : "ok";
+  page += "\">HOST "; page += host_connected ? "CONNECTED" : "IDLE"; page += "</span>";
+  page += "</div>";
+
+  if (show_caution) {
+    page += "<div class=\"caution\">&#9888; " + caution + "Installing now will interrupt operation.</div>";
+  }
+
+  page += "<div class=\"section\"><div class=\"section-title\">Check for Update</div>"
+    "<div class=\"row\">"
+    "<button id=\"btnCheck\" class=\"btn\" onclick=\"doCheck()\">Check for Update</button>"
+    "<button id=\"btnInstall\" class=\"btn btn-primary\" disabled onclick=\"doInstall()\">Install Latest</button>"
+    "</div><div id=\"checkStatus\" class=\"status-line\"></div></div>"
+
+    "<div class=\"section\"><div class=\"section-title\">Upload Firmware</div>"
+    "<div class=\"row\">"
+    "<input type=\"file\" id=\"fwFile\" accept=\".bin\">"
+    "<button id=\"btnUpload\" class=\"btn\" onclick=\"doUpload()\">Upload &amp; Install</button>"
+    "</div>"
+    "<div class=\"progress-wrap\" id=\"progressWrap\" style=\"display:none\">"
+    "<div class=\"progress-bar\"><div class=\"progress-fill\" id=\"progressFill\"></div></div>"
+    "<span class=\"progress-text\" id=\"progressText\">0%</span></div>"
+    "<div id=\"uploadStatus\" class=\"status-line\"></div></div>"
+
+    "</div><script>";
+
+  page += "var proto='" + ota_current_version() + "';";
+  page += "var showCaution=" + String(show_caution ? "true" : "false") + ";";
+  page += "var cautionMsg='" + caution + "';";
+
+  page += "var btnCheck=document.getElementById('btnCheck');"
+    "var btnInstall=document.getElementById('btnInstall');"
+    "var btnUpload=document.getElementById('btnUpload');"
+    "var checkStatus=document.getElementById('checkStatus');"
+    "var uploadStatus=document.getElementById('uploadStatus');"
+    "var progressWrap=document.getElementById('progressWrap');"
+    "var progressFill=document.getElementById('progressFill');"
+    "var progressText=document.getElementById('progressText');"
+    "function setStatus(el,text,cls){el.textContent=text;el.className='status-line'+(cls?' '+cls:'');}"
+    "function doCheck(){"
+      "btnCheck.disabled=true;btnInstall.disabled=true;"
+      "setStatus(checkStatus,'Checking...','');"
+      "fetch('/check').then(function(r){return r.json();}).then(function(d){"
+        "btnCheck.disabled=false;"
+        "if(d.error){setStatus(checkStatus,d.error,'err');return;}"
+        "var curV=proto+'.'+d.current,latV=proto+'.'+d.latest;"
+        "if(d.newer){setStatus(checkStatus,'Update available: '+latV+' (current '+curV+')','warn');btnInstall.disabled=false;}"
+        "else{setStatus(checkStatus,'Already up to date ('+curV+')','ok');btnInstall.disabled=true;}"
+      "}).catch(function(){btnCheck.disabled=false;setStatus(checkStatus,'Request failed','err');});"
+    "}"
+    "function doInstall(){"
+      "if(showCaution&&!confirm(cautionMsg+'\\n\\nInstall the update now anyway?'))return;"
+      "btnInstall.disabled=true;btnCheck.disabled=true;"
+      "setStatus(checkStatus,'Installing...','');"
+      "fetch('/install',{method:'POST'}).then(function(r){return r.text().then(function(t){setStatus(checkStatus,t,r.ok?'ok':'err');});})"
+      ".catch(function(){setStatus(checkStatus,'Connection lost - device is likely rebooting...','warn');});"
+    "}"
+    "function doUpload(){"
+      "var f=fwFile.files[0];"
+      "if(!f){setStatus(uploadStatus,'Choose a .bin file first','err');return;}"
+      "if(showCaution&&!confirm(cautionMsg+'\\n\\nUpload and install now anyway?'))return;"
+      "var fd=new FormData();fd.append('firmware',f);"
+      "var xhr=new XMLHttpRequest();"
+      "progressWrap.style.display='flex';progressFill.style.width='0%';progressText.textContent='0%';"
+      "btnUpload.disabled=true;"
+      "setStatus(uploadStatus,'Uploading...','');"
+      "xhr.upload.onprogress=function(e){"
+        "if(e.lengthComputable){"
+          "var pct=Math.round(e.loaded/e.total*100);"
+          "progressFill.style.width=pct+'%';progressText.textContent=pct+'%';"
+        "}"
+      "};"
+      "xhr.onload=function(){"
+        "setStatus(uploadStatus,xhr.responseText,xhr.status===200?'ok':'err');"
+        "if(xhr.status!==200)btnUpload.disabled=false;"
+      "};"
+      "xhr.onerror=function(){setStatus(uploadStatus,'Connection lost - device is likely rebooting...','warn');};"
+      "xhr.open('POST','/upload');xhr.send(fd);"
+    "}";
+
   page += "</script></body></html>";
-  ota_server.send(200, "text/html", page);
+  ota_server.send(200, "text/html; charset=utf-8", page);
 }
 
 // JSON so the page's install() can decide whether to confirm before

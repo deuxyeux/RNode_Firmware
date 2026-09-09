@@ -464,6 +464,11 @@ int p_as_y = 0;
   // bitmap rows back to stat-canvas rows
   bool push_is_stat = false;
   int16_t push_stat_dy = 0;
+  // Set around menu-canvas pushes so the colourizer in drawBitmap can map
+  // bitmap columns back to menu-canvas columns - push_menu_canvas() (below)
+  // splits the 160-wide canvas into two 80-wide drawBitmap() calls (side by
+  // side, not stacked), so unlike push_stat_dy this offsets X, not Y.
+  int16_t push_menu_dx = 0;
 #elif BOARD_MODEL == BOARD_HELTEC_T114
   // Unlike T096, the same stat_area content is drawn regardless of
   // orientation - both STAT_AREA_H (130) and DISP_AREA_H (110) fit within
@@ -491,6 +496,11 @@ int p_as_y = 0;
   const int16_t wf_y = WF_POS_Y; // waterfall content top
   bool push_is_stat = false;
   int16_t push_stat_dy = 0;
+  // Set around menu-canvas pushes so the colourizer in drawBitmap can map
+  // bitmap rows back to menu-canvas rows - this board's own push_menu_canvas()
+  // (below) splits the tall 240-row canvas into stacked 80-row bands, so
+  // unlike T096's push_menu_dx this offsets Y, not X.
+  int16_t push_menu_dy = 0;
 #endif
 
 GFXcanvas1 stat_area(STAT_AREA_W, STAT_AREA_H);
@@ -1040,12 +1050,20 @@ void fillRect(int16_t x, int16_t y, int16_t width, int16_t height, uint16_t colo
     #define COLOR_LAMP_RX COLOR565(0x3E, 0xD8, 0x60)
     #define COLOR_LAMP_TX COLOR565(0x48, 0x96, 0xFF)
     #define COLOR_BAT_LOW COLOR565(0xEB, 0x4C, 0x42)
+    #define COLOR_BAT_MED COLOR565(0xE8, 0xC0, 0x10)       // yellow battery bars - 34-72%
+    #define COLOR_BAT_GOOD COLOR565(0x30, 0xC8, 0x40)      // green battery bars - >72%
     #define COLOR_BANNER_OK COLOR565(0x28, 0x90, 0x40)    // darker green for status banners
     #define COLOR_BANNER_ALERT COLOR565(0xFF, 0xA0, 0x20)  // amber for warning banners
     #define COLOR_BT_ON COLOR565(0x28, 0x60, 0xC0)         // darker blue bluetooth box fill
     #define COLOR_INTERFERENCE COLOR565(0xE8, 0x50, 0xE8)  // magenta waterfall rows (WF_M_NTFR)
     #define COLOR_GPS_NOFIX COLOR565(0xE8, 0xC0, 0x10)     // yellow GPS box fill - enabled, no fix yet
     #define COLOR_GPS_FIX COLOR565(0x30, 0xC8, 0x40)       // green GPS box fill - has a valid fix
+    #define COLOR_BARS_LOW COLOR565(0xEB, 0x4C, 0x42)      // red Q/S bars - 1-2 bars lit
+    #define COLOR_BARS_MED COLOR565(0xE8, 0xC0, 0x10)      // yellow Q/S bars - 3-5 bars lit
+    #define COLOR_BARS_GOOD COLOR565(0x30, 0xC8, 0x40)     // green Q/S bars - 6-7 bars lit
+    #define COLOR_MEM_LOW COLOR565(0xEB, 0x4C, 0x42)       // red heap bar - low free memory
+    #define COLOR_MEM_MED COLOR565(0xE8, 0xC0, 0x10)       // yellow heap bar - medium free memory
+    #define COLOR_MEM_GOOD COLOR565(0x30, 0xC8, 0x40)      // green heap bar - plenty free memory
   #endif
   // Background tint of the currently displayed status banner, 0 = none
   uint16_t disp_banner_fg = 0;
@@ -1057,13 +1075,35 @@ void fillRect(int16_t x, int16_t y, int16_t width, int16_t height, uint16_t colo
   #define BAT_V_ALERT 3.30
   bool lamp_rx_lit = false;
   bool lamp_tx_lit = false;
-  bool battery_low_lit = false;
+  // 0 = no tint (charging/plugged/no battery), 1 = red (<=33%), 2 = yellow
+  // (34-72%), 3 = green (>72%) - set in draw_battery_bars(), read by the
+  // colourizer. Same tier shape/breakpoints as quality_bars_lit/
+  // signal_bars_lit (Display.h) - 33/72 are the same percent breakpoints
+  // the bar-segment drawing itself already uses, so a tier change always
+  // coincides with a bar-segment appearing/disappearing.
+  uint8_t battery_bars_lit = 0;
   bool battery_volt_low_lit = false;
   bool bt_enabled_lit = false;
   uint8_t bt_icon_i = 0; // icon variant shown in the bluetooth box
+  // Heap bar meter (RNode Settings > Hardware > Memory, Menu.h): 0 = no
+  // tint (N/A reading), 1 = red (low free memory), 2 = yellow (medium),
+  // 3 = green (plenty free) - set in draw_menu_memory_disp(), read by the
+  // colourizer. heap_bar_x/y/w/h are that bar's on-canvas geometry (menu_
+  // canvas-relative, same coordinate space quality_bars_lit's checks use
+  // for stat_area) - stored rather than duplicated in the colourizer
+  // because bar_w depends on a runtime getTextBounds() call Display.h has
+  // no access to (Menu.h's MENU_GFX/MENU_FONT aren't defined yet at this
+  // point in the translation unit - Menu.h is #included after Display.h).
+  uint8_t heap_bar_lit = 0;
+  int16_t heap_bar_x = 0, heap_bar_y = 0, heap_bar_w = 0, heap_bar_h = 0;
   // 0 = GPS box unlit (GNSS off), 1 = lit yellow (on, no fix), 2 = lit
   // green (has a fix) - set in draw_gps_icon(), read by the colourizer
   uint8_t gps_status_lit = 0;
+  // 0 = no bars lit (radio offline), 1 = red (1-2 bars), 2 = yellow
+  // (3-5 bars), 3 = green (6-7 bars) - set in draw_quality_bars()/
+  // draw_signal_bars(), read by the colourizer
+  uint8_t quality_bars_lit = 0;
+  uint8_t signal_bars_lit = 0;
   uint32_t lamp_rx_until = 0;
   uint32_t lamp_tx_until = 0;
   struct RegionCache {
@@ -1164,6 +1204,11 @@ void fillRect(int16_t x, int16_t y, int16_t width, int16_t height, uint16_t colo
     #define COLOR_LAMP_RX COLOR565(0x3E, 0xD8, 0x60)
     #define COLOR_LAMP_TX COLOR565(0x48, 0x96, 0xFF)
     #define COLOR_BAT_LOW COLOR565(0xEB, 0x4C, 0x42)
+    #define COLOR_BAT_MED COLOR565(0xE8, 0xC0, 0x10)       // yellow battery bars - 34-72%
+    #define COLOR_BAT_GOOD COLOR565(0x30, 0xC8, 0x40)      // green battery bars - >72%
+    #define COLOR_MEM_LOW COLOR565(0xEB, 0x4C, 0x42)       // red heap bar - low free memory
+    #define COLOR_MEM_MED COLOR565(0xE8, 0xC0, 0x10)       // yellow heap bar - medium free memory
+    #define COLOR_MEM_GOOD COLOR565(0x30, 0xC8, 0x40)      // green heap bar - plenty free memory
     #define COLOR_BANNER_OK COLOR565(0x28, 0x90, 0x40)    // darker green for status banners
     #define COLOR_BANNER_ALERT COLOR565(0xFF, 0xA0, 0x20)  // amber for warning banners
     #define COLOR_BT_ON COLOR565(0x28, 0x60, 0xC0)         // darker blue bluetooth box fill
@@ -1242,10 +1287,27 @@ void fillRect(int16_t x, int16_t y, int16_t width, int16_t height, uint16_t colo
   #define BAT_V_ALERT 3.30
   bool lamp_rx_lit = false;
   bool lamp_tx_lit = false;
-  bool battery_low_lit = false;
+  // 0 = no tint (charging/plugged/no battery), 1 = red (<=33%), 2 = yellow
+  // (34-72%), 3 = green (>72%) - set in draw_battery_bars(), read by the
+  // colourizer. Same tier shape/breakpoints as quality_bars_lit/
+  // signal_bars_lit (Display.h) - 33/72 are the same percent breakpoints
+  // the bar-segment drawing itself already uses, so a tier change always
+  // coincides with a bar-segment appearing/disappearing.
+  uint8_t battery_bars_lit = 0;
   bool battery_volt_low_lit = false;
   bool bt_enabled_lit = false;
   uint8_t bt_icon_i = 0; // icon variant shown in the bluetooth box
+  // Heap bar meter (RNode Settings > Hardware > Memory, Menu.h): 0 = no
+  // tint (N/A reading), 1 = red (low free memory), 2 = yellow (medium),
+  // 3 = green (plenty free) - set in draw_menu_memory_disp(), read by the
+  // colourizer. heap_bar_x/y/w/h are that bar's on-canvas geometry (menu_
+  // canvas-relative, same coordinate space quality_bars_lit's checks use
+  // for stat_area) - stored rather than duplicated in the colourizer
+  // because bar_w depends on a runtime getTextBounds() call Display.h has
+  // no access to (Menu.h's MENU_GFX/MENU_FONT aren't defined yet at this
+  // point in the translation unit - Menu.h is #included after Display.h).
+  uint8_t heap_bar_lit = 0;
+  int16_t heap_bar_x = 0, heap_bar_y = 0, heap_bar_w = 0, heap_bar_h = 0;
   // 0 = GPS box unlit (GNSS off), 1 = lit yellow (on, no fix), 2 = lit
   // green (has a fix) - set in draw_gps_icon(), read by the colourizer
   uint8_t gps_status_lit = 0;
@@ -1441,7 +1503,9 @@ void drawBitmap(int16_t startX, int16_t startY, const uint8_t* bitmap, int16_t b
                 int16_t sx = col;
                 if      (lamp_rx_lit && sx >= 3 && sx <= 18 && sy >= st_box_y2 && sy <= st_box_y2+15)  { fg = COLOR_LAMP_RX; }
                 else if (lamp_tx_lit && sx >= 61 && sx <= 76 && sy >= st_box_y2 && sy <= st_box_y2+15) { fg = COLOR_LAMP_TX; }
-                else if (battery_low_lit && sx >= 2 && sx <= 19 && sy >= 88 && sy <= 94)       { fg = COLOR_BAT_LOW; }
+                else if (battery_bars_lit && sx >= 2 && sx <= 19 && sy >= 88 && sy <= 94) {
+                  fg = (battery_bars_lit == 3) ? COLOR_BAT_GOOD : (battery_bars_lit == 2) ? COLOR_BAT_MED : COLOR_BAT_LOW;
+                }
                 else if (battery_volt_low_lit && sx >= 20 && sx <= 38 && sy >= 87 && sy <= 94) { fg = COLOR_BAT_LOW; }
                 else if (bt_enabled_lit && sx >= 3 && sx <= 18 && sy >= st_box_y1 && sy <= st_box_y1+15) {
                   // icon pixels stay light, the rest of the box fills dark blue
@@ -1458,6 +1522,19 @@ void drawBitmap(int16_t startX, int16_t startY, const uint8_t* bitmap, int16_t b
                 else if (gps_status_lit && sx >= 61 && sx <= 76 && sy >= st_box_y1 && sy <= st_box_y1+15) {
                   fg = (gps_status_lit == 2) ? COLOR_GPS_FIX : COLOR_GPS_NOFIX;
                 }
+                // Quality (Q)/Signal (S) bars: draw_quality_bars(44,88)/
+                // draw_signal_bars(60,88), both a 13x7 fillRect - literal
+                // bounds, same style as the battery_bars_lit check above
+                // (these bars aren't inside one of the icon boxes so there's
+                // no st_box_y* to anchor to). 1=red (1-2 bars), 2=yellow
+                // (3-5), 3=green (6-7) - set in draw_quality_bars()/
+                // draw_signal_bars() (Display.h).
+                else if (quality_bars_lit && sx >= 44 && sx <= 56 && sy >= 88 && sy <= 94) {
+                  fg = (quality_bars_lit == 3) ? COLOR_BARS_GOOD : (quality_bars_lit == 2) ? COLOR_BARS_MED : COLOR_BARS_LOW;
+                }
+                else if (signal_bars_lit && sx >= 60 && sx <= 72 && sy >= 88 && sy <= 94) {
+                  fg = (signal_bars_lit == 3) ? COLOR_BARS_GOOD : (signal_bars_lit == 2) ? COLOR_BARS_MED : COLOR_BARS_LOW;
+                }
                 else if (sx >= WF_POS_X && sx < WF_POS_X+WF_PIXEL_WIDTH &&
                          sy >= wf_y && sy < wf_y+WATERFALL_SIZE) {
                   int wf_m = waterfall_meta[(waterfall_head + (sy-wf_y)) % WATERFALL_SIZE];
@@ -1465,11 +1542,29 @@ void drawBitmap(int16_t startX, int16_t startY, const uint8_t* bitmap, int16_t b
                   else if (wf_m == WF_M_TX)     { fg = COLOR_LAMP_TX; }
                   else if (wf_m == WF_M_NTFR)   { fg = COLOR_INTERFERENCE; }
                 }
-              } else if (!push_is_menu && disp_banner_fg != 0) {
+              } else if (push_is_menu) {
+                // Heap bar meter (RNode Settings > Hardware > Memory) -
+                // geometry/tier set by draw_menu_memory_disp() (Menu.h) into
+                // heap_bar_x/y/w/h/heap_bar_lit, since that runtime bar
+                // width depends on a getTextBounds() call this file has no
+                // access to (Menu.h isn't #included yet at this point in
+                // the translation unit). push_menu_canvas() splits the
+                // 160-wide canvas into two 80-wide side-by-side pushes, so
+                // (unlike push_is_stat's sy above) it's the column that
+                // needs the offset - push_menu_dx is 0 for the left half,
+                // 80 for the right half. Interior only (+1/-2 each side) so
+                // the bar's own 1px outline (drawRect, drawn with the plain
+                // foregroundColour) stays white regardless of tier.
+                int16_t sxm = col + push_menu_dx;
+                if (heap_bar_lit && sxm >= heap_bar_x+1 && sxm <= heap_bar_x+heap_bar_w-2 &&
+                    row >= heap_bar_y+1 && row <= heap_bar_y+heap_bar_h-2) {
+                  fg = (heap_bar_lit == 3) ? COLOR_MEM_GOOD : (heap_bar_lit == 2) ? COLOR_MEM_MED : COLOR_MEM_LOW;
+                }
+              } else if (disp_banner_fg != 0) {
                 // status banner fill (checks passed / hw ok / fw corrupt).
-                // push_is_menu excludes this - the menu occupies the same
-                // panel footprint disp_area does, but menu content is
-                // never banner-tinted.
+                // push_is_menu (handled above) excludes this - the menu
+                // occupies the same panel footprint disp_area does, but
+                // menu content is never banner-tinted.
                 int16_t bx = (startX+col) - p_ad_x;
                 int16_t by = (startY+row) - p_ad_y;
                 if (bx >= 0 && bx < DISP_AREA_W && by >= 37 && by <= 63) { fg = disp_banner_fg; }
@@ -1583,7 +1678,9 @@ void drawBitmap(int16_t startX, int16_t startY, const uint8_t* bitmap, int16_t b
                 int16_t sx = col;
                 if      (lamp_rx_lit && sx >= 1 && sx <= 16 && sy >= st_box_y2 && sy <= st_box_y2+15)   { fg = COLOR_LAMP_RX; }
                 else if (lamp_tx_lit && sx >= 21 && sx <= 36 && sy >= st_box_y2 && sy <= st_box_y2+15)  { fg = COLOR_LAMP_TX; }
-                else if (battery_low_lit && sx >= 2 && sx <= 19 && sy >= 123 && sy <= 129)       { fg = COLOR_BAT_LOW; }
+                else if (battery_bars_lit && sx >= 2 && sx <= 19 && sy >= 123 && sy <= 129) {
+                  fg = (battery_bars_lit == 3) ? COLOR_BAT_GOOD : (battery_bars_lit == 2) ? COLOR_BAT_MED : COLOR_BAT_LOW;
+                }
                 else if (battery_volt_low_lit && sx >= 22 && sx <= 40 && sy >= 122 && sy <= 129)  { fg = COLOR_BAT_LOW; }
                 // GPS box: fill tints yellow/green, "GPS"/status text drawn in
                 // SSD1306_BLACK straight into stat_area (draw_gps_icon()) always
@@ -1627,7 +1724,20 @@ void drawBitmap(int16_t startX, int16_t startY, const uint8_t* bitmap, int16_t b
                   else if (wf_m == WF_M_TX)     { fg = COLOR_LAMP_TX; }
                   else if (wf_m == WF_M_NTFR)   { fg = COLOR_INTERFERENCE; }
                 }
-              } else if (!push_is_menu && disp_banner_fg != 0) {
+              } else if (push_is_menu) {
+                // Heap bar meter (RNode Settings > Hardware > Memory) - see
+                // the T096-family colourizer's own comment on this same
+                // check for the full reasoning. This board's own
+                // push_menu_canvas() splits the tall 240-row canvas into
+                // stacked 80-row bands instead of side-by-side 80-col
+                // halves, so it's the row that needs the offset here, not
+                // the column - push_menu_dy is 0/80/160 depending on band.
+                int16_t sym = row + push_menu_dy;
+                if (heap_bar_lit && col >= heap_bar_x+1 && col <= heap_bar_x+heap_bar_w-2 &&
+                    sym >= heap_bar_y+1 && sym <= heap_bar_y+heap_bar_h-2) {
+                  fg = (heap_bar_lit == 3) ? COLOR_MEM_GOOD : (heap_bar_lit == 2) ? COLOR_MEM_MED : COLOR_MEM_LOW;
+                }
+              } else if (disp_banner_fg != 0) {
                 int16_t bx = (startX+col) - p_ad_x;
                 int16_t by = (startY+row) - p_ad_y;
                 if (bx >= 0 && bx < DISP_AREA_W && by >= 37 && by <= 63) { fg = disp_banner_fg; }
@@ -1690,7 +1800,9 @@ void push_menu_canvas() {
 
   int16_t canvas_row_bytes = (MENU_CANVAS_W+7)/8; // 20 - the real row stride
   push_is_menu = true;
+  push_menu_dx = 0;
   drawBitmap(0,  0, buf,     80, MENU_CANVAS_H, SSD1306_WHITE, SSD1306_BLACK, canvas_row_bytes);
+  push_menu_dx = 80;
   drawBitmap(80, 0, buf + 10, 80, MENU_CANVAS_H, SSD1306_WHITE, SSD1306_BLACK, canvas_row_bytes);
   push_is_menu = false;
 }
@@ -1735,6 +1847,7 @@ void push_menu_canvas() {
   int16_t canvas_row_bytes = (MENU_CANVAS_W+7)/8;
   push_is_menu = true;
   for (int16_t band = 0; band < 3; band++) {
+    push_menu_dy = band*80;
     drawBitmap(0, band*80, buf + band*80*canvas_row_bytes, MENU_CANVAS_W, 80, SSD1306_WHITE, SSD1306_BLACK);
   }
   push_is_menu = false;
@@ -2061,7 +2174,7 @@ void draw_eth_icon(int px, int py) {
 uint8_t charge_tick = 0;
 void draw_battery_bars(int px, int py, Adafruit_GFX &gfx = stat_area) {
   #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1 || BOARD_MODEL == BOARD_HELTEC_T114
-    battery_low_lit = false;
+    battery_bars_lit = 0;
   #endif
   if (pmu_ready) {
     if (battery_ready) {
@@ -2095,8 +2208,14 @@ void draw_battery_bars(int px, int py, Adafruit_GFX &gfx = stat_area) {
           } else {
             // gfx.fillRect(px, py, 14, 3, SSD1306_BLACK);
             #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1 || BOARD_MODEL == BOARD_HELTEC_T114
-              // 2 sticks or fewer render the icon red
-              battery_low_lit = battery_value <= 33;
+              // Red at <=33% (2 sticks or fewer), yellow at 34-72%, green
+              // above 72% - same breakpoints the bar-segment drawing below
+              // already uses, so a tier change always coincides with a
+              // segment appearing/disappearing (no extra dirty-marking
+              // needed beyond the existing battery_bars_prev handling).
+              if      (battery_value <= 33) battery_bars_lit = 1;
+              else if (battery_value <= 72) battery_bars_lit = 2;
+              else                          battery_bars_lit = 3;
             #endif
             gfx.fillRect(px-2, py-2, 18, 7, SSD1306_BLACK);
             gfx.drawRect(px-2, py-2, 17, 7, SSD1306_WHITE);
@@ -2165,13 +2284,27 @@ void draw_quality_bars(int px, int py) {
     if (quality < 0.0) quality = 0.0;
 
     // Serial.printf("Last SNR: %.2f\n, quality: %.2f\n", snr, quality);
-    if (quality > 0)  stat_area.drawLine(px+0*2, py+7, px+0*2, py+6, SSD1306_WHITE);
-    if (quality > 15) stat_area.drawLine(px+1*2, py+7, px+1*2, py+5, SSD1306_WHITE);
-    if (quality > 30) stat_area.drawLine(px+2*2, py+7, px+2*2, py+4, SSD1306_WHITE);
-    if (quality > 45) stat_area.drawLine(px+3*2, py+7, px+3*2, py+3, SSD1306_WHITE);
-    if (quality > 60) stat_area.drawLine(px+4*2, py+7, px+4*2, py+2, SSD1306_WHITE);
-    if (quality > 75) stat_area.drawLine(px+5*2, py+7, px+5*2, py+1, SSD1306_WHITE);
-    if (quality > 90) stat_area.drawLine(px+6*2, py+7, px+6*2, py+0, SSD1306_WHITE);
+    uint8_t bars = 0;
+    if (quality > 0)  { stat_area.drawLine(px+0*2, py+7, px+0*2, py+6, SSD1306_WHITE); bars++; }
+    if (quality > 15) { stat_area.drawLine(px+1*2, py+7, px+1*2, py+5, SSD1306_WHITE); bars++; }
+    if (quality > 30) { stat_area.drawLine(px+2*2, py+7, px+2*2, py+4, SSD1306_WHITE); bars++; }
+    if (quality > 45) { stat_area.drawLine(px+3*2, py+7, px+3*2, py+3, SSD1306_WHITE); bars++; }
+    if (quality > 60) { stat_area.drawLine(px+4*2, py+7, px+4*2, py+2, SSD1306_WHITE); bars++; }
+    if (quality > 75) { stat_area.drawLine(px+5*2, py+7, px+5*2, py+1, SSD1306_WHITE); bars++; }
+    if (quality > 90) { stat_area.drawLine(px+6*2, py+7, px+6*2, py+0, SSD1306_WHITE); bars++; }
+
+    #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1
+      // Red at 1-2 bars, yellow at 3-5, green at 6-7 - read by the
+      // push-time colourizer in drawBitmap (COLOR_BARS_LOW/MED/GOOD).
+      if      (bars == 0) quality_bars_lit = 0;
+      else if (bars <= 2) quality_bars_lit = 1;
+      else if (bars <= 5) quality_bars_lit = 2;
+      else                quality_bars_lit = 3;
+    #endif
+  } else {
+    #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1
+      quality_bars_lit = 0;
+    #endif
   }
 }
 
@@ -2196,13 +2329,30 @@ void draw_signal_bars(int px, int py) {
     if (signal < 0.0) signal = 0.0;
 
     // Serial.printf("Last SNR: %.2f\n, quality: %.2f\n", snr, quality);
-    if (signal > 85) stat_area.drawLine(px+0*2, py+7, px+0*2, py+0, SSD1306_WHITE);
-    if (signal > 72) stat_area.drawLine(px+1*2, py+7, px+1*2, py+1, SSD1306_WHITE);
-    if (signal > 59) stat_area.drawLine(px+2*2, py+7, px+2*2, py+2, SSD1306_WHITE);
-    if (signal > 46) stat_area.drawLine(px+3*2, py+7, px+3*2, py+3, SSD1306_WHITE);
-    if (signal > 33) stat_area.drawLine(px+4*2, py+7, px+4*2, py+4, SSD1306_WHITE);
-    if (signal > 20) stat_area.drawLine(px+5*2, py+7, px+5*2, py+5, SSD1306_WHITE);
-    if (signal > 7)  stat_area.drawLine(px+6*2, py+7, px+6*2, py+6, SSD1306_WHITE);
+    // Counts total lit segments regardless of evaluation order (thresholds
+    // run high-to-low here, unlike draw_quality_bars' low-to-high) - every
+    // true condition increments once, so bars ends up the actual count.
+    uint8_t bars = 0;
+    if (signal > 85) { stat_area.drawLine(px+0*2, py+7, px+0*2, py+0, SSD1306_WHITE); bars++; }
+    if (signal > 72) { stat_area.drawLine(px+1*2, py+7, px+1*2, py+1, SSD1306_WHITE); bars++; }
+    if (signal > 59) { stat_area.drawLine(px+2*2, py+7, px+2*2, py+2, SSD1306_WHITE); bars++; }
+    if (signal > 46) { stat_area.drawLine(px+3*2, py+7, px+3*2, py+3, SSD1306_WHITE); bars++; }
+    if (signal > 33) { stat_area.drawLine(px+4*2, py+7, px+4*2, py+4, SSD1306_WHITE); bars++; }
+    if (signal > 20) { stat_area.drawLine(px+5*2, py+7, px+5*2, py+5, SSD1306_WHITE); bars++; }
+    if (signal > 7)  { stat_area.drawLine(px+6*2, py+7, px+6*2, py+6, SSD1306_WHITE); bars++; }
+
+    #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1
+      // Red at 1-2 bars, yellow at 3-5, green at 6-7 - read by the
+      // push-time colourizer in drawBitmap (COLOR_BARS_LOW/MED/GOOD).
+      if      (bars == 0) signal_bars_lit = 0;
+      else if (bars <= 2) signal_bars_lit = 1;
+      else if (bars <= 5) signal_bars_lit = 2;
+      else                signal_bars_lit = 3;
+    #endif
+  } else {
+    #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1
+      signal_bars_lit = 0;
+    #endif
   }
 }
 
@@ -2483,12 +2633,13 @@ void draw_stat_area() {
         draw_mw_icon(61, st_box_y1);
       #endif
       draw_battery_bars(4, 90);
-      // The low-battery tint is colour-only: flipping it doesn't change
-      // the mono canvas (the outline pixels stay identical), so force a
-      // repaint when it transitions
-      static bool battery_low_prev = false;
-      if (battery_low_lit != battery_low_prev) {
-        battery_low_prev = battery_low_lit;
+      // The battery-tier tint is colour-only where it lands on the fixed
+      // outline: flipping it doesn't change the mono canvas there (the
+      // outline pixels stay identical), so force a repaint on any tier
+      // change - not just battery_bars_lit going nonzero/zero.
+      static uint8_t battery_bars_prev = 0;
+      if (battery_bars_lit != battery_bars_prev) {
+        battery_bars_prev = battery_bars_lit;
         stat_mark_dirty(2, 88, 18, 7);
       }
       draw_battery_voltage(20, 93);
@@ -2645,9 +2796,9 @@ void draw_stat_area() {
         }
 
         draw_battery_bars(4, 125, stat_area_land);
-        static bool battery_low_prev_land = false;
-        if (battery_low_lit != battery_low_prev_land) {
-          battery_low_prev_land = battery_low_lit;
+        static uint8_t battery_bars_prev_land = 0;
+        if (battery_bars_lit != battery_bars_prev_land) {
+          battery_bars_prev_land = battery_bars_lit;
           stat_mark_dirty(2, 123, 18, 7);
         }
         draw_battery_voltage(22, 128, stat_area_land);
@@ -2828,9 +2979,9 @@ void draw_stat_area() {
       // low as it can go without its box (7 rows, py-2..py+4) clipping the
       // canvas's bottom edge (max row index STAT_AREA_H-1 = 129).
       draw_battery_bars(4, 125);
-      static bool battery_low_prev = false;
-      if (battery_low_lit != battery_low_prev) {
-        battery_low_prev = battery_low_lit;
+      static uint8_t battery_bars_prev = 0;
+      if (battery_bars_lit != battery_bars_prev) {
+        battery_bars_prev = battery_bars_lit;
         stat_mark_dirty(2, 123, 18, 7);
       }
       draw_battery_voltage(22, 128);
@@ -3420,10 +3571,35 @@ void draw_disp_area() {
         #if (BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1 || BOARD_MODEL == BOARD_HELTEC_T114) && USE_COLOR_DISPLAY == true
           disp_banner_fg = COLOR_BT_ON;
         #endif
+        // bm_pin_digits: dedicated bold 10x16 digit set (Graphics.h),
+        // separate from the small bm_n_uh font used for the version-number
+        // readout elsewhere on this same canvas - much more readable than
+        // the original 8x5 glyphs. bm_pairing's own baked art (just drawn
+        // above) is lit (bit=1) across essentially this whole 64x27 canvas
+        // - only the "PAIRING" text itself (rows 4-8) punches dark holes in
+        // it - and on colour boards that lit area is what disp_banner_fg
+        // tints blue below. 6 digits at a 10px pitch (no inter-digit gap
+        // needed at this width) = 60px, centered in the 64px-wide canvas
+        // (2px margin each side), starting 2px below the label.
+        //
+        // Single-argument drawBitmap() (not the (fg,bg) two-colour
+        // overload used elsewhere) is required here: the two-colour form
+        // writes every pixel in the 10x16 box, including the "off" ones,
+        // which would clear bm_pairing's own lit background back to black
+        // everywhere the glyph itself isn't - a visible black rectangle
+        // punched out around each digit (confirmed on hardware). The
+        // single-colour form only ever writes pixels where the source
+        // bitmap bit is 1 (Adafruit_GFX::drawBitmap(x,y,bitmap,w,h,color),
+        // GFXcanvas1::drawPixel() clears when color==0) - so passing
+        // SSD1306_BLACK here clears exactly the digit strokes and leaves
+        // every other pixel in the box untouched, i.e. still whatever
+        // bm_pairing already painted there. Net effect: black digits
+        // directly on the (blue-tinted, on colour boards) lit background,
+        // no box.
         for (int i = 0; i < DISP_PIN_SIZE; i++) {
           uint8_t numeric = pin_str[i]-48;
-          uint8_t offset = numeric*5;
-          disp_area.drawBitmap(DISP_BM_X+7+9*i, 37+16, bm_n_uh+offset, 8, 5, SSD1306_WHITE, SSD1306_BLACK);
+          uint16_t offset = (uint16_t)numeric*32; // 2 bytes/row * 16 rows
+          disp_area.drawBitmap(DISP_BM_X+2+10*i, 47, bm_pin_digits+offset, 10, 16, SSD1306_BLACK);
         }
         free(pin_str);
       } else {

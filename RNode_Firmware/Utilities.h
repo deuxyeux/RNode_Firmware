@@ -2092,6 +2092,10 @@ void kiss_indicate_temperature() {
 
 void kiss_indicate_btpin() {
 	#if HAS_BLUETOOTH || HAS_BLE == true
+		// TEMPORARY DIAGNOSTIC over the debug UART (HAS_DEBUG_UART), to find
+		// out why this frame isn't reaching the USB-connected host.
+		DEBUG_LOG("[BT] kiss_indicate_btpin: bt_state=%u wifi_host=%d ws_host=%d pin=%lu\r\n",
+			bt_state, (int)wifi_host_is_connected(), (int)ws_host_is_connected(), (unsigned long)bt_ssp_pin);
 		serial_write(FEND);
 		serial_write(CMD_BT_PIN);
 		escaped_serial_write(bt_ssp_pin>>24);
@@ -2731,8 +2735,15 @@ void eeprom_update(int mapped_addr, uint8_t byte) {
 			EEPROM.commit();
 		}
   #elif !HAS_EEPROM && MCU_VARIANT == MCU_NRF52
-    // todo: clean up this implementation, writing one byte and syncing
-    // each time is really slow, but this is also suboptimal
+    // Only touch the underlying LittleFS file (eeprom_flush() closes and
+    // reopens it, with a retry loop) when a byte actually changes. This
+    // filesystem (InternalFS) is the same 24KB region Bluefruit uses to
+    // persist BLE bond keys (bonding.cpp) - previously every eeprom_update()
+    // call flushed unconditionally, so re-applying already-current config
+    // (e.g. a client reconnecting and resending the same radio settings)
+    // still generated a full close/reopen cycle per byte for no reason,
+    // adding avoidable write pressure to the same region a bond-wiping
+    // mount failure would erase.
     uint8_t read_byte;
     void* read_byte_ptr = &read_byte;
     file.seek(mapped_addr);
@@ -2740,9 +2751,9 @@ void eeprom_update(int mapped_addr, uint8_t byte) {
     file.seek(mapped_addr);
     if (read_byte != byte) {
       file.write(byte);
+      written_bytes++;
+      eeprom_flush();
     }
-    written_bytes++;
-    eeprom_flush();
 	#endif
 }
 
@@ -2974,7 +2985,14 @@ void bt_auto_start_conf_save(bool is_enabled) {
   // No live effect here (unlike Legacy Pairing/Just Works) - this only
   // governs what happens at the NEXT boot's one-shot check
   // (RNode_Firmware.ino loop()), not current session behavior. Turning
-  // it on doesn't start BLE right now if it isn't already running.
+  // it on doesn't start BLE right now if it isn't already running. MCU_
+  // ESP32-only: bt_init() (Bluetooth.h) deliberately defers bt_start() at
+  // boot on ESP32 to save ~82KB RAM (BLE+ESP-NOW heap-exhaustion fix), so
+  // the persisted bt_enabled flag alone doesn't bring BLE up there - this
+  // flag is what does. nRF52's own bt_init() has no such deferral: it
+  // already calls bt_start() unconditionally at boot whenever bt_enabled
+  // is set, so a separate Auto Start flag would be a no-op there and was
+  // deliberately not added.
 }
 #endif
 

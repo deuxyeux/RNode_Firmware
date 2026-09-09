@@ -1519,6 +1519,11 @@
       #define HAS_CONSOLE true
       #define HAS_EEPROM true
       #define HAS_PMU true
+      // Missing here despite battery_voltage being computed via the exact
+      // same resistor-divider measure_battery() branch (Power.h) as its
+      // T096/T114/T1/ProMicro siblings - see BOARD_HELTEC_T096's own
+      // comment on this same gap for the full reasoning.
+      #define HAS_BATTERY_DIVIDER true
       #define HAS_NP false
       #define HAS_SD false
       #define HAS_TCXO true
@@ -2006,6 +2011,14 @@
       // (Display.h, BOARD_HELTEC_T096-only block) instead of drawing
       // straight to the unbuffered display - see MENU_GFX in Menu.h.
       #define HAS_MENU true
+
+      // Missing on this board (unlike its T114/T1/ProMicro siblings, which
+      // all share the exact same resistor-divider measure_battery() branch,
+      // Power.h) despite battery_voltage being computed identically here -
+      // left the RNode Settings > Hardware > "Battery Voltage" row hidden
+      // (that item's own guard is HAS_BATTERY_DIVIDER only, unlike Battery
+      // Level's broader HAS_BATTERY_DIVIDER||HAS_PMU).
+      #define HAS_BATTERY_DIVIDER true
 
       #define DIO2_AS_RF_SWITCH true
       #define CONFIG_UART_BUFFER_SIZE 6144

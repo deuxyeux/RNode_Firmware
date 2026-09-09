@@ -270,8 +270,8 @@
   #define MENU_STATE_SENSORS_LIST   21  // Sensors submenu list (HAS_SENSORS boards) - read-only, no edit state
   #define MENU_STATE_FWUPD_LIST     22  // F/W Update submenu list (HAS_OTA boards) - Current/Latest/Update/Back
   #define MENU_STATE_FWUPD_CONFIRM  23  // UPDATE/CANCEL list before Update actually runs - same pattern as MENU_STATE_WIFI_TEXT_CONFIRM
-  #define MENU_STATE_MEM_LIST       24  // Hardware > Memory submenu (MCU_ESP32 boards) - Heap/PSRAM bar graphs, read-only
-  #define MENU_STATE_MEM_DETAIL     25  // Memory > Heap or PSRAM detail readout (Total/Used/Free/Min Free), read-only
+  #define MENU_STATE_MEM_LIST       24  // Hardware > Memory submenu - Heap (MCU_ESP32 also gets PSRAM) bar graphs, read-only
+  #define MENU_STATE_MEM_DETAIL     25  // Memory > Heap or PSRAM detail readout (Total/Used/Free, MCU_ESP32 also gets Min Free), read-only
   #define MENU_STATE_ESPNOW_LIST    26  // ESP-NOW submenu list (HAS_ESPNOW boards) - Enabled/Mode/Back
   #define MENU_STATE_ESPNOW_EDIT    27  // editing whichever of Enabled/Mode/LR was selected
   #define MENU_STATE_ESPNOW_LR_CONFIRM 28 // info row + ENABLE/CANCEL list, shown only when LR is being turned on - same pattern as MENU_STATE_FWUPD_CONFIRM
@@ -304,10 +304,10 @@
   // reassigned - Legacy Pairing/Just Works moved to MENU_STATE_BT_SETTINGS/
   // _EDIT below; renumbering every constant after it wasn't worth it for a
   // single freed slot.
-  #define MENU_STATE_BT_UNPAIR_CONFIRM 53 // FORGET/CANCEL list before bt_debond_all() actually runs (MCU_ESP32 only) - same pattern as MENU_STATE_FWUPD_CONFIRM
+  #define MENU_STATE_BT_UNPAIR_CONFIRM 53 // FORGET/CANCEL list before bt_debond_all() actually runs (HAS_BLE boards) - same pattern as MENU_STATE_FWUPD_CONFIRM
   #define MENU_STATE_MSNGR_SETTINGS 54 // Messenger's own Settings submenu (HAS_URNS boards) - Retries/Back, opened from MENU_STATE_MSNGR_LIST
   #define MENU_STATE_MSNGR_SETTINGS_EDIT 55 // editing the Retries field (the only editable row in MENU_STATE_MSNGR_SETTINGS today)
-  #define MENU_STATE_BT_SETTINGS 56 // Bluetooth's own Settings submenu (HAS_BLE only) - Legacy Pairing/Just Works (moved from MENU_STATE_BT_LIST)/Auto Start (all MCU_ESP32 only)/Battery Service (every HAS_BLE board)/Back, opened from MENU_STATE_BT_LIST
+  #define MENU_STATE_BT_SETTINGS 56 // Bluetooth's own Settings submenu (HAS_BLE only) - Legacy Pairing/Just Works (moved from MENU_STATE_BT_LIST, MCU_ESP32 only)/Auto Start (every HAS_BLE board)/Battery Service (every HAS_BLE board)/Back, opened from MENU_STATE_BT_LIST
   #define MENU_STATE_BT_SETTINGS_EDIT 57 // editing whichever of Legacy Pairing/Just Works/Auto Start/Battery Service was selected
 
   // The Hardware page used to only exist when there was board-level info
@@ -426,8 +426,7 @@
   #if HAS_BLUETOOTH == true || HAS_BLE == true
     // Opens the Bluetooth submenu (Legacy Pairing [MCU_ESP32 && HAS_BLE
     // only] + MAC, BT_ITEM_*, MENU_STATE_BT_LIST/EDIT) - sits right under
-    // WiFi per user request. Same gate as the Hardware page's own BT MAC
-    // row (HW_ITEM_BT_MAC below).
+    // WiFi per user request.
     #define MENU_ITEM_BLUETOOTH MENU_NEXT_IDX_A
     #define MENU_NEXT_IDX_A1    (MENU_NEXT_IDX_A + 1)
   #else
@@ -715,31 +714,30 @@
   #endif
 
   #if HAS_BLUETOOTH == true || HAS_BLE == true
-    // Read-only - same MAC already shown on the Hardware page (HW_ITEM_BT_MAC
-    // above), reads the live value directly, not staged/committed through
-    // this submenu at all - same convention as ESP-NOW's own Channel row.
+    // Read-only - reads the live value directly, not staged/committed
+    // through this submenu at all - same convention as ESP-NOW's own
+    // Channel row. Used to be duplicated on the Hardware page too
+    // (HW_ITEM_BT_MAC) - removed from there per user request, this is now
+    // the only place the BT MAC shows.
     #define BT_ITEM_MAC 0
     #if HAS_BLE == true
-      // Opens MENU_STATE_BT_SETTINGS (Battery Service on every HAS_BLE
-      // board; Legacy Pairing/Just Works/Auto Start added on MCU_ESP32
+      // Opens MENU_STATE_BT_SETTINGS (Battery Service and Auto Start on
+      // every HAS_BLE board; Legacy Pairing/Just Works added on MCU_ESP32
       // only) - below MAC, not above it. Widened from MCU_ESP32-only to
       // every HAS_BLE board (this used to be ESP32/NimBLE-only, since
       // Bluefruit already forces Legacy Pairing unconditionally and had no
       // auto-start toggle) so MCU_NRF52 gets a place to host the new
       // Battery Service toggle - see BT_SETTINGS_ITEM_* below.
       #define BT_ITEM_SETTINGS (BT_ITEM_MAC + 1)
-      #if MCU_VARIANT == MCU_ESP32
-        // Bonds is read-only (bt_bond_count(), Bluetooth.h). Forget Bonds opens
-        // MENU_STATE_BT_UNPAIR_CONFIRM and calls bt_debond_all() - nRF52
-        // (Bluefruit) isn't wired up yet, and classic HAS_BLUETOOTH (Bluedroid
-        // SPP, e.g. MeshAdventurer/DIY-V1) has no bond-list API either, only
-        // the HAS_BLE (NimBLE) path defines bt_bond_count()/bt_debond_all().
-        #define BT_ITEM_BONDS (BT_ITEM_SETTINGS + 1)
-        #define BT_ITEM_UNPAIR (BT_ITEM_BONDS + 1)
-        #define BT_ITEM_BACK (BT_ITEM_UNPAIR + 1)
-      #else
-        #define BT_ITEM_BACK (BT_ITEM_SETTINGS + 1)
-      #endif
+      // Bonds is read-only (bt_bond_count(), Bluetooth.h). Forget Bonds opens
+      // MENU_STATE_BT_UNPAIR_CONFIRM and calls bt_debond_all() - both are now
+      // defined on every HAS_BLE board (MCU_ESP32/NimBLE and MCU_NRF52/
+      // Bluefruit). Classic HAS_BLUETOOTH (Bluedroid SPP, e.g. MeshAdventurer/
+      // DIY-V1) has no bond-list API and never reaches this branch - it takes
+      // the #else at BT_ITEM_MAC's own HAS_BLE check above instead.
+      #define BT_ITEM_BONDS (BT_ITEM_SETTINGS + 1)
+      #define BT_ITEM_UNPAIR (BT_ITEM_BONDS + 1)
+      #define BT_ITEM_BACK (BT_ITEM_UNPAIR + 1)
     #else
       #define BT_ITEM_BACK (BT_ITEM_MAC + 1)
     #endif
@@ -761,7 +759,11 @@
         // full reasoning, including the historical bt_init() comment
         // (Bluetooth.h) confirming this exact behavior existed once before
         // and was deliberately removed over a BLE+ESP-NOW heap-exhaustion
-        // crash - default OFF here for the same reason.
+        // crash - default OFF here for the same reason. MCU_ESP32-only:
+        // nRF52's own bt_init() has no such deferral to override - it
+        // already calls bt_start() unconditionally at boot whenever the
+        // persisted bt_enabled flag is set, so an Auto Start toggle would
+        // be a no-op there and is deliberately not offered.
         #define BT_SETTINGS_ITEM_AUTO_START     2
         #define BT_SETTINGS_ITEM_BATTERY_SERVICE 3
         #define BT_SETTINGS_ITEM_BACK           4
@@ -1022,22 +1024,24 @@
       #define HW_NEXT_A HW_NEXT_0
     #endif
 
-    #if HAS_BATTERY_DIVIDER == true
-      #define HW_ITEM_BATTERY HW_NEXT_A
-      #define HW_NEXT_A2      (HW_NEXT_A + 1)
-    #else
-      #define HW_NEXT_A2 HW_NEXT_A
-    #endif
-
     // Read-only percentage, same battery_percent/battery_ready (Config.h,
-    // Power.h::measure_battery()) as HW_ITEM_BATTERY above, but broader -
+    // Power.h::measure_battery()) as HW_ITEM_BATTERY below, but broader -
     // HAS_BATTERY_DIVIDER only covers resistor-divider boards, while PMU
     // boards (T-Beam family etc) compute battery_percent too, just via a
     // fuel gauge instead. No drilldown/edit state, same "plain display row"
     // shape as HW_ITEM_UPTIME below, not HW_ITEM_BATTERY's MENU_STATE_HW_EDIT.
+    // Ordered ahead of Battery Voltage (percentage read first, raw voltage
+    // as the detail right after it) per user request.
     #if HAS_BATTERY_DIVIDER == true || HAS_PMU == true
-      #define HW_ITEM_BATTERY_LEVEL HW_NEXT_A2
-      #define HW_NEXT_A2B           (HW_NEXT_A2 + 1)
+      #define HW_ITEM_BATTERY_LEVEL HW_NEXT_A
+      #define HW_NEXT_A2            (HW_NEXT_A + 1)
+    #else
+      #define HW_NEXT_A2 HW_NEXT_A
+    #endif
+
+    #if HAS_BATTERY_DIVIDER == true
+      #define HW_ITEM_BATTERY HW_NEXT_A2
+      #define HW_NEXT_A2B     (HW_NEXT_A2 + 1)
     #else
       #define HW_NEXT_A2B HW_NEXT_A2
     #endif
@@ -1057,12 +1061,9 @@
       #define HW_NEXT_B HW_NEXT_A3
     #endif
 
-    #if HAS_BLUETOOTH == true || HAS_BLE == true
-      #define HW_ITEM_BT_MAC HW_NEXT_B
-      #define HW_NEXT_C      (HW_NEXT_B + 1)
-    #else
-      #define HW_NEXT_C HW_NEXT_B
-    #endif
+    // No BT MAC row here (removed per user request) - it duplicated the
+    // Bluetooth submenu's own read-only MAC row (BT_ITEM_MAC, below).
+    #define HW_NEXT_C HW_NEXT_B
 
     #if HAS_ETHERNET == true
       #define HW_ITEM_ETH_MAC HW_NEXT_C
@@ -1078,16 +1079,17 @@
       #define HW_NEXT_D HW_NEXT_C2
     #endif
 
-    // Heap/PSRAM diagnostics - ESP.getFreeHeap()/getPsramSize()/etc are
-    // Arduino-ESP32-specific, so this row (and the submenu it opens) is
-    // gated on the MCU, not on anything board-specific - unlike most other
-    // HW_ITEM_* rows it isn't tied to a particular board's wiring, so it
-    // shows on every MCU_ESP32 board that reaches the Hardware page at all
-    // (T096/T114/MeshPoE-S3/MeshAdventurer-S3/Heltec32_v4). psramFound() is
-    // checked at runtime (not a compile-time PSRAM-enabled guard) so boards
+    // Heap (MCU_ESP32 also gets PSRAM) diagnostics - not tied to any
+    // particular board's wiring, so it shows on every board that reaches
+    // the Hardware page at all, on both MCU families: ESP.getFreeHeap()/
+    // getPsramSize()/etc (Arduino-ESP32) or dbgHeapTotal()/dbgHeapFree()
+    // (Adafruit/Heltec nRF52 core, cores/nRF5/utility/debug.h - always
+    // linked, no separate include needed). psramFound() is checked at
+    // runtime (not a compile-time PSRAM-enabled guard) so MCU_ESP32 boards
     // without PSRAM wired/enabled just show "N/A" instead of needing their
-    // own #if branch here.
-    #if MCU_VARIANT == MCU_ESP32
+    // own #if branch here; MCU_NRF52 has no PSRAM concept at all, so its
+    // own Memory submenu (MEM_ITEM_*, below) only ever has a Heap row.
+    #if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
       #define HW_ITEM_MEMORY HW_NEXT_D
       #define HW_NEXT_E      (HW_NEXT_D + 1)
     #else
@@ -1120,27 +1122,40 @@
       #define GPIO_ITEM_COUNT (GPIO_ITEM_BACK + 1)
     #endif
 
-    #if MCU_VARIANT == MCU_ESP32
-      // Both rows are drawn as bar graphs, not text - selecting either one
-      // (not BACK) drops into MENU_STATE_MEM_DETAIL, a plain text readout
-      // of that metric, same "list row opens a submenu" pattern as
-      // HW_ITEM_GPIO -> MENU_STATE_GPIO_LIST.
+    #if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
+      // Every row is drawn as a bar graph, not text - selecting one (not
+      // BACK) drops into MENU_STATE_MEM_DETAIL, a plain text readout of
+      // that metric, same "list row opens a submenu" pattern as
+      // HW_ITEM_GPIO -> MENU_STATE_GPIO_LIST. MCU_NRF52 has no PSRAM
+      // concept at all, so it only ever gets Heap.
       #define MEM_ITEM_HEAP  0
-      #define MEM_ITEM_PSRAM 1
-      #define MEM_ITEM_BACK  2
-      #define MEM_ITEM_COUNT 3
+      #if MCU_VARIANT == MCU_ESP32
+        #define MEM_ITEM_PSRAM 1
+        #define MEM_ITEM_BACK  2
+      #else
+        #define MEM_ITEM_BACK  1
+      #endif
+      #define MEM_ITEM_COUNT (MEM_ITEM_BACK + 1)
 
       // Detail screen - fully read-only, only BACK does anything on
       // confirm. Which metric (Heap vs PSRAM) it's showing is tracked by
       // mem_menu_cursor staying at MEM_ITEM_HEAP/MEM_ITEM_PSRAM while this
       // state is active, same reuse-the-parent-cursor pattern HW_EDIT uses
-      // for hw_menu_cursor (HW_ITEM_VOLTAGE vs HW_ITEM_BATTERY).
+      // for hw_menu_cursor (HW_ITEM_VOLTAGE vs HW_ITEM_BATTERY). No Min
+      // Free row on MCU_NRF52 - newlib's mallinfo() (what dbgHeapUsed(),
+      // Adafruit/Heltec core, is built on) has no historical low-water-mark
+      // equivalent to ESP.getMinFreeHeap(), and this doesn't track its own
+      // running minimum rather than fabricate a number.
       #define MEM_DETAIL_ITEM_TOTAL   0
       #define MEM_DETAIL_ITEM_USED    1
       #define MEM_DETAIL_ITEM_FREE    2
-      #define MEM_DETAIL_ITEM_MINFREE 3
-      #define MEM_DETAIL_ITEM_BACK    4
-      #define MEM_DETAIL_ITEM_COUNT   5
+      #if MCU_VARIANT == MCU_ESP32
+        #define MEM_DETAIL_ITEM_MINFREE 3
+        #define MEM_DETAIL_ITEM_BACK    4
+      #else
+        #define MEM_DETAIL_ITEM_BACK    3
+      #endif
+      #define MEM_DETAIL_ITEM_COUNT (MEM_DETAIL_ITEM_BACK + 1)
     #endif
   #endif
 
@@ -1860,10 +1875,12 @@
   #endif
   #if HAS_BLUETOOTH == true || HAS_BLE == true
     uint8_t bt_menu_cursor = 0;
-    #if MCU_VARIANT == MCU_ESP32
+    #if HAS_BLE == true
       // 0 = FORGET, 1 = CANCEL - same pattern as fwupd_confirm_cursor,
       // defaulting to CANCEL since this wipes every stored bond, not just
-      // the least-recently-used one.
+      // the least-recently-used one. HAS_BLE-gated (not MCU_VARIANT) since
+      // that's what actually has bt_bond_count()/bt_debond_all() - classic
+      // HAS_BLUETOOTH (Bluedroid SPP) boards never reach BT_ITEM_UNPAIR.
       uint8_t bt_unpair_confirm_cursor = 1;
     #endif
   #endif
@@ -2011,7 +2028,7 @@
 
   #if MENU_HAS_HW_PAGE == true
     uint8_t hw_menu_cursor = 0;
-    #if MCU_VARIANT == MCU_ESP32
+    #if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
       uint8_t mem_menu_cursor = 0;
       uint8_t mem_detail_cursor = 0;
     #endif
@@ -3356,7 +3373,7 @@
           #endif
         }
       #endif
-      #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
+      #if HAS_BLE == true
         else if (menu_state == MENU_STATE_BT_UNPAIR_CONFIRM) {
           buzzer_encoder_tick_melody();
           bt_unpair_confirm_cursor = menu_clamp_cursor(bt_unpair_confirm_cursor, dir, 2, wrap);
@@ -3574,7 +3591,7 @@
           step_gpio_pin_idx(dir, wrap);
         }
       #endif
-      #if MCU_VARIANT == MCU_ESP32
+      #if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
         else if (menu_state == MENU_STATE_MEM_LIST) {
           buzzer_encoder_tick_melody();
           mem_menu_cursor = menu_clamp_cursor(mem_menu_cursor, dir, MEM_ITEM_COUNT, wrap);
@@ -4017,7 +4034,7 @@
             bt_settings_cursor = 0;
           }
         #endif
-        #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
+        #if HAS_BLE == true
           else if (bt_menu_cursor == BT_ITEM_UNPAIR) {
             bt_unpair_confirm_cursor = 1; // default CANCEL - see its own declaration
             menu_state = MENU_STATE_BT_UNPAIR_CONFIRM;
@@ -4042,7 +4059,7 @@
           menu_state = MENU_STATE_BT_SETTINGS; // confirms staged value, no write yet
         }
       #endif
-      #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
+      #if HAS_BLE == true
         else if (menu_state == MENU_STATE_BT_UNPAIR_CONFIRM) {
           if (bt_unpair_confirm_cursor == 0) { // FORGET
             bt_debond_all();
@@ -4888,7 +4905,7 @@
             gpio_menu_cursor = 0;
           }
         #endif
-        #if MCU_VARIANT == MCU_ESP32
+        #if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
           else if (hw_menu_cursor == HW_ITEM_MEMORY) {
             menu_state = MENU_STATE_MEM_LIST;
             mem_menu_cursor = MEM_ITEM_BACK; // read-only info screen - default to BACK, not the first graph row
@@ -4942,7 +4959,7 @@
           menu_state = MENU_STATE_GPIO_LIST;
         }
       #endif
-      #if MCU_VARIANT == MCU_ESP32
+      #if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
         else if (menu_state == MENU_STATE_MEM_LIST) {
           // Selecting Heap or PSRAM drops into its detail readout - same
           // "list row opens a submenu" pattern as HW_ITEM_GPIO. mem_menu_cursor
@@ -5378,7 +5395,7 @@
   #endif
   #endif
 
-  #if MCU_VARIANT == MCU_ESP32
+  #if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
     // Compact horizontal bar meter, sized to fit inside one MENU_LIST_ROW_H
     // row (outlined rect + a filled portion proportional to `frac`, no
     // embedded number) - the user asked for graphs "the same size as
@@ -5431,22 +5448,29 @@
         }
 
         int16_t bar_y = row_top + (row_h - bar_h) / 2;
-        bool has_psram = psramFound();
         uint32_t total = 0, free_b = 0;
         bool have_reading = true;
         if (i == MEM_ITEM_HEAP) {
           MENU_GFX.print("Heap");
-          total = ESP.getHeapSize();
-          free_b = ESP.getFreeHeap();
-        } else { // MEM_ITEM_PSRAM
-          MENU_GFX.print("PSRAM");
-          if (has_psram) {
-            total = ESP.getPsramSize();
-            free_b = ESP.getFreePsram();
-          } else {
-            have_reading = false;
-          }
+          #if MCU_VARIANT == MCU_ESP32
+            total = ESP.getHeapSize();
+            free_b = ESP.getFreeHeap();
+          #else // MCU_NRF52 - cores/nRF5/utility/debug.h, always linked
+            total = dbgHeapTotal();
+            free_b = dbgHeapFree();
+          #endif
         }
+        #if MCU_VARIANT == MCU_ESP32
+          else { // MEM_ITEM_PSRAM
+            MENU_GFX.print("PSRAM");
+            if (psramFound()) {
+              total = ESP.getPsramSize();
+              free_b = ESP.getFreePsram();
+            } else {
+              have_reading = false;
+            }
+          }
+        #endif
 
         if (have_reading) {
           float used_frac = total ? (float)(total - free_b) / total : 0;
@@ -5464,6 +5488,31 @@
           MENU_GFX.setCursor(row_right - w, y);
           MENU_GFX.print("N/A");
         }
+
+        #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1 || BOARD_MODEL == BOARD_HELTEC_T114
+          // Heap bar geometry/tier for the push-time colourizer (drawBitmap,
+          // Display.h) to pick up - see heap_bar_lit's own declaration
+          // comment for why this can't just be computed there instead.
+          // Border stays plain white regardless of tier (colourizer only
+          // recolours the fillRect'd interior, not the drawRect outline) -
+          // per user request. Selected-row highlight (fg==BLACK above)
+          // naturally overrides this with no extra code: draw_menu_bar_meter
+          // then draws the whole bar with cleared (0) bits against the
+          // filled-white row background, and the colourizer only ever
+          // recolours set (1) bits, so a selected Heap row shows the normal
+          // inverted look instead of a colour clash.
+          if (i == MEM_ITEM_HEAP) {
+            heap_bar_x = bar_x; heap_bar_y = bar_y; heap_bar_w = bar_w; heap_bar_h = bar_h;
+            if (!have_reading) {
+              heap_bar_lit = 0;
+            } else {
+              float free_pct = total ? (float)free_b / total * 100.0f : 0;
+              if      (free_pct > 40) heap_bar_lit = 3; // green - plenty free
+              else if (free_pct > 15) heap_bar_lit = 2; // yellow - medium
+              else                    heap_bar_lit = 1; // red - low free memory
+            }
+          }
+        #endif
       }
 
       MENU_GFX.setTextColor(SSD1306_WHITE);
@@ -5770,6 +5819,16 @@
       // since fillRect/print only ever touch the specific pixels the
       // new content needs, never the ones it doesn't.
       menu_canvas.fillScreen(SSD1306_BLACK);
+      // Same staleness hazard as the canvas pixels above, but for the
+      // colourizer's stored Heap-bar geometry/tier (heap_bar_lit,
+      // Display.h): it's a plain global that persists across screens, not
+      // something the mono-pixel diff can catch. Left set after navigating
+      // away from MENU_STATE_MEM_LIST, any other screen's first content row
+      // happening to draw "on" pixels in that same rectangle (bar_x+1.. at
+      // MENU_LIST_TOP_Y+1..) would get spuriously tinted. Reset unconditionally
+      // every cycle; draw_menu_memory_disp() below re-sets it to the current
+      // value only when actually showing that screen.
+      heap_bar_lit = 0;
     #endif
     MENU_GFX.setTextWrap(false);
 
@@ -6052,8 +6111,10 @@
               mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
           }
         #elif MCU_VARIANT == MCU_NRF52
-          // Same bt_ready gate as the Hardware page's own BT MAC row
-          // (HW_ITEM_BT_MAC) - see that row's own comment.
+          // Bluefruit.getAddr() only returns a real address once the BLE
+          // stack has actually started (bt_start()/bt_ready, Bluetooth.h) -
+          // unlike ESP32's esp_read_mac(), there's no hardware-burned MAC
+          // readable before that.
           if (bt_ready) {
             ble_gap_addr_t gap_addr = Bluefruit.getAddr();
             sprintf(valbufs[BT_ITEM_MAC], "%02X:%02X:%02X:%02X:%02X:%02X",
@@ -6064,20 +6125,58 @@
           }
         #endif
 
-        #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
+        #if HAS_BLE == true
           labels[BT_ITEM_BONDS] = "Bonds";
-          // bt_bond_count() -> ble_store_util_count() -> ble_hs_lock() derefs
-          // NimBLE host state that only exists once the host has actually
-          // started (see bt_security_setup()'s own comment on this exact
-          // crash). menu_confirm_select()'s bt_start() call on entering this
-          // list can silently no-op (BT_START_MIN_UPTIME_MS window, or
-          // SerialBT.begin() itself failing) and still land here with
-          // bt_state unchanged, so this can't assume the stack is up.
-          if (bt_state != BT_STATE_OFF) {
-            sprintf(valbufs[BT_ITEM_BONDS], "%d", bt_bond_count());
-          } else {
-            sprintf(valbufs[BT_ITEM_BONDS], "N/A");
-          }
+          #if MCU_VARIANT == MCU_ESP32
+            // bt_bond_count() -> ble_store_util_count() -> ble_hs_lock() derefs
+            // NimBLE host state that only exists once the host has actually
+            // started (see bt_security_setup()'s own comment on this exact
+            // crash). menu_confirm_select()'s bt_start() call on entering this
+            // list can silently no-op (BT_START_MIN_UPTIME_MS window, or
+            // SerialBT.begin() itself failing) and still land here with
+            // bt_state unchanged, so this can't assume the stack is up.
+            if (bt_state != BT_STATE_OFF) {
+              sprintf(valbufs[BT_ITEM_BONDS], "%d", bt_bond_count());
+            } else {
+              sprintf(valbufs[BT_ITEM_BONDS], "N/A");
+            }
+          #else
+            // MCU_NRF52 - Bluefruit's bond directory lives on InternalFS,
+            // populated by bond_init() inside Bluefruit.begin() (bt_setup_hw())
+            // regardless of the BLE stack's current on/off state, so
+            // bt_bond_count() is safe to call any time the stack has been
+            // set up at all (bt_ready), not just while bt_state != OFF.
+            //
+            // Unlike NimBLE's ble_store_util_count() above, this walks real
+            // LittleFS directory entries on InternalFS - the same 24KB
+            // filesystem/mutex Bluefruit's own SEC_INFO_REQUEST handler
+            // (bonding.cpp, invoked from the SoftDevice's task on every real
+            // reconnect) needs to load that bond's keys. update_display()
+            // (RNode_Firmware.ino) redraws this screen on every single
+            // loop() iteration while it's open, not just on change - calling
+            // bt_bond_count() unthrottled there means hundreds of
+            // Adafruit_LittleFS mutex acquisitions per second for as long as
+            // this screen stays open, which can starve a concurrent
+            // reconnect's own bond lookup long enough to blow the central's
+            // connection supervision timeout - observed live as BLE
+            // connect/disconnect flapping until the central gave up, while
+            // this exact screen happened to be open. Same class of bug as
+            // URNS_ITEM_FREE's own LittleFS.usedBytes()/totalBytes() hazard
+            // (project_urns_partition_growth memory) - cache and refresh at
+            // most once a second.
+            static int cached_bond_count = 0;
+            static unsigned long bt_bond_count_last_ms = 0;
+            unsigned long bt_bond_count_now_ms = millis();
+            if (bt_ready) {
+              if (bt_bond_count_now_ms - bt_bond_count_last_ms >= 1000 || bt_bond_count_last_ms == 0) {
+                cached_bond_count = bt_bond_count();
+                bt_bond_count_last_ms = bt_bond_count_now_ms;
+              }
+              sprintf(valbufs[BT_ITEM_BONDS], "%d", cached_bond_count);
+            } else {
+              sprintf(valbufs[BT_ITEM_BONDS], "N/A");
+            }
+          #endif
 
           labels[BT_ITEM_UNPAIR] = "Forget Bonds";
           sprintf(valbufs[BT_ITEM_UNPAIR], ">"); // opens a confirm dialog, not an inline value
@@ -6138,7 +6237,7 @@
           #endif
         }
       #endif
-      #if MCU_VARIANT == MCU_ESP32 && HAS_BLE == true
+      #if HAS_BLE == true
         else if (menu_state == MENU_STATE_BT_UNPAIR_CONFIRM) {
           // Plain 2-item list, same pattern as F/W Update's UPDATE/CANCEL
           // (MENU_STATE_FWUPD_CONFIRM).
@@ -7300,16 +7399,16 @@
           sprintf(valbufs[HW_ITEM_VOLTAGE], "%.2fV", vsense_voltage);
         #endif
 
-        #if HAS_BATTERY_DIVIDER == true
-          labels[HW_ITEM_BATTERY] = "Battery Voltage";
-          if (battery_ready) sprintf(valbufs[HW_ITEM_BATTERY], "%.2fV", battery_voltage);
-          else                sprintf(valbufs[HW_ITEM_BATTERY], "N/A");
-        #endif
-
         #if HAS_BATTERY_DIVIDER == true || HAS_PMU == true
           labels[HW_ITEM_BATTERY_LEVEL] = "Battery Level";
           if (battery_ready) sprintf(valbufs[HW_ITEM_BATTERY_LEVEL], "%.0f%%", battery_percent);
           else                sprintf(valbufs[HW_ITEM_BATTERY_LEVEL], "N/A");
+        #endif
+
+        #if HAS_BATTERY_DIVIDER == true
+          labels[HW_ITEM_BATTERY] = "Battery Voltage";
+          if (battery_ready) sprintf(valbufs[HW_ITEM_BATTERY], "%.2fV", battery_voltage);
+          else                sprintf(valbufs[HW_ITEM_BATTERY], "N/A");
         #endif
 
         // No GNSS Chip row here anymore - redundant with GNSS chip
@@ -7347,31 +7446,6 @@
           }
         #endif
 
-        #if HAS_BLUETOOTH == true || HAS_BLE == true
-          labels[HW_ITEM_BT_MAC] = "BT";
-          #if MCU_VARIANT == MCU_ESP32
-            {
-              uint8_t mac[6];
-              esp_read_mac(mac, ESP_MAC_BT);
-              sprintf(valbufs[HW_ITEM_BT_MAC], "%02X:%02X:%02X:%02X:%02X:%02X",
-                mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-            }
-          #elif MCU_VARIANT == MCU_NRF52
-            // Bluefruit.getAddr() only returns a real address once the BLE
-            // stack has actually started (bt_start()/bt_ready, Bluetooth.h) -
-            // unlike ESP32's esp_read_mac(), there's no hardware-burned MAC
-            // readable before that.
-            if (bt_ready) {
-              ble_gap_addr_t gap_addr = Bluefruit.getAddr();
-              sprintf(valbufs[HW_ITEM_BT_MAC], "%02X:%02X:%02X:%02X:%02X:%02X",
-                gap_addr.addr[5], gap_addr.addr[4], gap_addr.addr[3],
-                gap_addr.addr[2], gap_addr.addr[1], gap_addr.addr[0]);
-            } else {
-              sprintf(valbufs[HW_ITEM_BT_MAC], "N/A");
-            }
-          #endif
-        #endif
-
         #if HAS_ETHERNET == true
           // Unlike WiFi/BT's hardware-burned MAC (readable via esp_read_mac()
           // at any time), the W5500's MAC is a locally-administered address
@@ -7396,7 +7470,7 @@
           sprintf(valbufs[HW_ITEM_GPIO], ">"); // opens a submenu, not an inline value
         #endif
 
-        #if MCU_VARIANT == MCU_ESP32
+        #if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
           labels[HW_ITEM_MEMORY] = "Memory";
           sprintf(valbufs[HW_ITEM_MEMORY], ">"); // opens a submenu, not an inline value
         #endif
@@ -7473,43 +7547,60 @@
           draw_menu_edit_disp(title, valbuf);
         }
       #endif
-      #if MCU_VARIANT == MCU_ESP32
+      #if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
         else if (menu_state == MENU_STATE_MEM_LIST) {
           draw_menu_memory_disp();
         } else if (menu_state == MENU_STATE_MEM_DETAIL) {
           const char *labels[MEM_DETAIL_ITEM_COUNT];
           char valbufs[MEM_DETAIL_ITEM_COUNT][24];
 
-          uint32_t total = 0, free_b = 0, min_free = 0;
+          #if MCU_VARIANT == MCU_ESP32
+            uint32_t min_free = 0;
+          #endif
+          uint32_t total = 0, free_b = 0;
           bool have_reading = true;
           if (mem_menu_cursor == MEM_ITEM_HEAP) {
-            total    = ESP.getHeapSize();
-            free_b   = ESP.getFreeHeap();
-            min_free = ESP.getMinFreeHeap();
-          } else { // MEM_ITEM_PSRAM
-            if (psramFound()) {
-              total    = ESP.getPsramSize();
-              free_b   = ESP.getFreePsram();
-              min_free = ESP.getMinFreePsram();
-            } else {
-              have_reading = false;
-            }
+            #if MCU_VARIANT == MCU_ESP32
+              total    = ESP.getHeapSize();
+              free_b   = ESP.getFreeHeap();
+              min_free = ESP.getMinFreeHeap();
+            #else // MCU_NRF52 - cores/nRF5/utility/debug.h, always linked
+              total  = dbgHeapTotal();
+              free_b = dbgHeapFree();
+            #endif
           }
+          #if MCU_VARIANT == MCU_ESP32
+            else { // MEM_ITEM_PSRAM
+              if (psramFound()) {
+                total    = ESP.getPsramSize();
+                free_b   = ESP.getFreePsram();
+                min_free = ESP.getMinFreePsram();
+              } else {
+                have_reading = false;
+              }
+            }
+          #endif
 
           labels[MEM_DETAIL_ITEM_TOTAL]   = "Total";
           labels[MEM_DETAIL_ITEM_USED]    = "Used";
           labels[MEM_DETAIL_ITEM_FREE]    = "Free";
-          labels[MEM_DETAIL_ITEM_MINFREE] = "Min Free";
+          #if MCU_VARIANT == MCU_ESP32
+            labels[MEM_DETAIL_ITEM_MINFREE] = "Min Free";
+          #endif
           if (have_reading) {
             sprintf(valbufs[MEM_DETAIL_ITEM_TOTAL],   "%.1fKB", total / 1024.0);
             sprintf(valbufs[MEM_DETAIL_ITEM_USED],    "%.1fKB", (total - free_b) / 1024.0);
             sprintf(valbufs[MEM_DETAIL_ITEM_FREE],    "%.1fKB", free_b / 1024.0);
-            sprintf(valbufs[MEM_DETAIL_ITEM_MINFREE], "%.1fKB", min_free / 1024.0);
+            #if MCU_VARIANT == MCU_ESP32
+              sprintf(valbufs[MEM_DETAIL_ITEM_MINFREE], "%.1fKB", min_free / 1024.0);
+            #endif
           } else {
             sprintf(valbufs[MEM_DETAIL_ITEM_TOTAL],   "N/A");
             sprintf(valbufs[MEM_DETAIL_ITEM_USED],    "N/A");
             sprintf(valbufs[MEM_DETAIL_ITEM_FREE],    "N/A");
-            sprintf(valbufs[MEM_DETAIL_ITEM_MINFREE], "N/A");
+            #if MCU_VARIANT == MCU_ESP32
+              sprintf(valbufs[MEM_DETAIL_ITEM_MINFREE], "N/A");
+            #endif
           }
 
           labels[MEM_DETAIL_ITEM_BACK] = "BACK";

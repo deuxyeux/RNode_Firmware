@@ -363,6 +363,24 @@ void measure_battery() {
             }
           }
         }
+
+        // bat_voltage_dropping is a sticky latch - once set, only a genuine
+        // >10mV rise above bat_state_change_v (above) clears it. At a
+        // topped-off plateau (charged and held there by the charge IC's own
+        // regulation, e.g. observed live: T096 sitting at 4.2V, plugged in,
+        // battery_percent clamped to 100) the voltage doesn't trend upward
+        // by design - it just holds flat under a few mV of ADC/regulation
+        // ripple - so a single noisy window can latch dropping=true and it
+        // then never sees the rise needed to clear itself, permanently
+        // parking battery_state at DISCHARGING (no plug icon) despite the
+        // board being genuinely charged and on external power. BAT_V_MAX is
+        // this board's own "fully charged" reference voltage - being at or
+        // above it is sufficient evidence on its own that we are not
+        // discharging, regardless of the latch's recent history. Applies to
+        // every board sharing this code path; unconditional, so it also
+        // self-heals a stuck latch instead of just gating future entry.
+        if (battery_voltage >= BAT_V_MAX) { bat_voltage_dropping = false; }
+
         bat_samples_count = 0;
         bat_delay_v = battery_voltage;
       }
