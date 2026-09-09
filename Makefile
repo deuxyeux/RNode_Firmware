@@ -475,7 +475,8 @@ release-tbeam: check_bt_buffers
 	cp build/esp32.esp32.t-beam/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_tbeam.bootloader
 	cp build/esp32.esp32.t-beam/RNode_Firmware.ino.partitions.bin build/rnode_firmware_tbeam.partitions
 	echo "$(PROTO_VERSION).$(shell git rev-list --count HEAD)" > build/version.txt
-	zip --junk-paths ./Release/rnode_firmware_tbeam.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_tbeam.boot_app0 build/rnode_firmware_tbeam.bin build/rnode_firmware_tbeam.bootloader build/rnode_firmware_tbeam.partitions build/version.txt
+	python3 scripts/gen_manifest.py tbeam rnode_firmware_tbeam build/manifest/tbeam/manifest.json
+	zip --junk-paths ./Release/rnode_firmware_tbeam.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_tbeam.boot_app0 build/rnode_firmware_tbeam.bin build/rnode_firmware_tbeam.bootloader build/rnode_firmware_tbeam.partitions build/version.txt build/manifest/tbeam/manifest.json
 	rm -r build
 
 release-tbeam_sx1262: check_bt_buffers
@@ -485,7 +486,8 @@ release-tbeam_sx1262: check_bt_buffers
 	cp build/esp32.esp32.t-beam/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_tbeam_sx1262.bootloader
 	cp build/esp32.esp32.t-beam/RNode_Firmware.ino.partitions.bin build/rnode_firmware_tbeam_sx1262.partitions
 	echo "$(PROTO_VERSION).$(shell git rev-list --count HEAD)" > build/version.txt
-	zip --junk-paths ./Release/rnode_firmware_tbeam_sx1262.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_tbeam_sx1262.boot_app0 build/rnode_firmware_tbeam_sx1262.bin build/rnode_firmware_tbeam_sx1262.bootloader build/rnode_firmware_tbeam_sx1262.partitions build/version.txt
+	python3 scripts/gen_manifest.py tbeam_sx1262 rnode_firmware_tbeam_sx1262 build/manifest/tbeam_sx1262/manifest.json
+	zip --junk-paths ./Release/rnode_firmware_tbeam_sx1262.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_tbeam_sx1262.boot_app0 build/rnode_firmware_tbeam_sx1262.bin build/rnode_firmware_tbeam_sx1262.bootloader build/rnode_firmware_tbeam_sx1262.partitions build/version.txt build/manifest/tbeam_sx1262/manifest.json
 	rm -r build
 
 release-lora32_v10: check_bt_buffers
@@ -495,7 +497,8 @@ release-lora32_v10: check_bt_buffers
 	cp build/esp32.esp32.ttgo-lora32/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_lora32v10.bootloader
 	cp build/esp32.esp32.ttgo-lora32/RNode_Firmware.ino.partitions.bin build/rnode_firmware_lora32v10.partitions
 	echo "$(PROTO_VERSION).$(shell git rev-list --count HEAD)" > build/version.txt
-	zip --junk-paths ./Release/rnode_firmware_lora32v10.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_lora32v10.boot_app0 build/rnode_firmware_lora32v10.bin build/rnode_firmware_lora32v10.bootloader build/rnode_firmware_lora32v10.partitions build/version.txt
+	python3 scripts/gen_manifest.py lora32v10 rnode_firmware_lora32v10 build/manifest/lora32v10/manifest.json
+	zip --junk-paths ./Release/rnode_firmware_lora32v10.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_lora32v10.boot_app0 build/rnode_firmware_lora32v10.bin build/rnode_firmware_lora32v10.bootloader build/rnode_firmware_lora32v10.partitions build/version.txt build/manifest/lora32v10/manifest.json
 	rm -r build
 
 release-lora32_v20: check_bt_buffers
@@ -505,7 +508,8 @@ release-lora32_v20: check_bt_buffers
 	cp build/esp32.esp32.ttgo-lora32/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_lora32v20.bootloader
 	cp build/esp32.esp32.ttgo-lora32/RNode_Firmware.ino.partitions.bin build/rnode_firmware_lora32v20.partitions
 	echo "$(PROTO_VERSION).$(shell git rev-list --count HEAD)" > build/version.txt
-	zip --junk-paths ./Release/rnode_firmware_lora32v20.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_lora32v20.boot_app0 build/rnode_firmware_lora32v20.bin build/rnode_firmware_lora32v20.bootloader build/rnode_firmware_lora32v20.partitions build/version.txt
+	python3 scripts/gen_manifest.py lora32v20 rnode_firmware_lora32v20 build/manifest/lora32v20/manifest.json
+	zip --junk-paths ./Release/rnode_firmware_lora32v20.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_lora32v20.boot_app0 build/rnode_firmware_lora32v20.bin build/rnode_firmware_lora32v20.bootloader build/rnode_firmware_lora32v20.partitions build/version.txt build/manifest/lora32v20/manifest.json
 	rm -r build
 
 release-lora32_v21: check_bt_buffers
@@ -515,7 +519,8 @@ release-lora32_v21: check_bt_buffers
 	cp build/esp32.esp32.ttgo-lora32/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_lora32v21.bootloader
 	cp build/esp32.esp32.ttgo-lora32/RNode_Firmware.ino.partitions.bin build/rnode_firmware_lora32v21.partitions
 	echo "$(PROTO_VERSION).$(shell git rev-list --count HEAD)" > build/version.txt
-	zip --junk-paths ./Release/rnode_firmware_lora32v21.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_lora32v21.boot_app0 build/rnode_firmware_lora32v21.bin build/rnode_firmware_lora32v21.bootloader build/rnode_firmware_lora32v21.partitions build/version.txt
+	python3 scripts/gen_manifest.py lora32v21 rnode_firmware_lora32v21 build/manifest/lora32v21/manifest.json
+	zip --junk-paths ./Release/rnode_firmware_lora32v21.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_lora32v21.boot_app0 build/rnode_firmware_lora32v21.bin build/rnode_firmware_lora32v21.bootloader build/rnode_firmware_lora32v21.partitions build/version.txt build/manifest/lora32v21/manifest.json
 	rm -r build
 
 release-lora32_v10_extled: check_bt_buffers
@@ -525,7 +530,8 @@ release-lora32_v10_extled: check_bt_buffers
 	cp build/esp32.esp32.ttgo-lora32/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_lora32v10.bootloader
 	cp build/esp32.esp32.ttgo-lora32/RNode_Firmware.ino.partitions.bin build/rnode_firmware_lora32v10.partitions
 	echo "$(PROTO_VERSION).$(shell git rev-list --count HEAD)" > build/version.txt
-	zip --junk-paths ./Release/rnode_firmware_lora32v10.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_lora32v10.boot_app0 build/rnode_firmware_lora32v10.bin build/rnode_firmware_lora32v10.bootloader build/rnode_firmware_lora32v10.partitions build/version.txt
+	python3 scripts/gen_manifest.py lora32v10 rnode_firmware_lora32v10 build/manifest/lora32v10/manifest.json
+	zip --junk-paths ./Release/rnode_firmware_lora32v10.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_lora32v10.boot_app0 build/rnode_firmware_lora32v10.bin build/rnode_firmware_lora32v10.bootloader build/rnode_firmware_lora32v10.partitions build/version.txt build/manifest/lora32v10/manifest.json
 	rm -r build
 
 release-lora32_v20_extled: check_bt_buffers
@@ -535,7 +541,8 @@ release-lora32_v20_extled: check_bt_buffers
 	cp build/esp32.esp32.ttgo-lora32/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_lora32v20.bootloader
 	cp build/esp32.esp32.ttgo-lora32/RNode_Firmware.ino.partitions.bin build/rnode_firmware_lora32v20.partitions
 	echo "$(PROTO_VERSION).$(shell git rev-list --count HEAD)" > build/version.txt
-	zip --junk-paths ./Release/rnode_firmware_lora32v20_extled.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_lora32v20.boot_app0 build/rnode_firmware_lora32v20.bin build/rnode_firmware_lora32v20.bootloader build/rnode_firmware_lora32v20.partitions build/version.txt
+	python3 scripts/gen_manifest.py lora32v20 rnode_firmware_lora32v20 build/manifest/lora32v20/manifest.json
+	zip --junk-paths ./Release/rnode_firmware_lora32v20_extled.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_lora32v20.boot_app0 build/rnode_firmware_lora32v20.bin build/rnode_firmware_lora32v20.bootloader build/rnode_firmware_lora32v20.partitions build/version.txt build/manifest/lora32v20/manifest.json
 	rm -r build
 
 release-lora32_v21_extled: check_bt_buffers
@@ -545,7 +552,8 @@ release-lora32_v21_extled: check_bt_buffers
 	cp build/esp32.esp32.ttgo-lora32/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_lora32v21.bootloader
 	cp build/esp32.esp32.ttgo-lora32/RNode_Firmware.ino.partitions.bin build/rnode_firmware_lora32v21.partitions
 	echo "$(PROTO_VERSION).$(shell git rev-list --count HEAD)" > build/version.txt
-	zip --junk-paths ./Release/rnode_firmware_lora32v21_extled.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_lora32v21.boot_app0 build/rnode_firmware_lora32v21.bin build/rnode_firmware_lora32v21.bootloader build/rnode_firmware_lora32v21.partitions build/version.txt
+	python3 scripts/gen_manifest.py lora32v21 rnode_firmware_lora32v21 build/manifest/lora32v21/manifest.json
+	zip --junk-paths ./Release/rnode_firmware_lora32v21_extled.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_lora32v21.boot_app0 build/rnode_firmware_lora32v21.bin build/rnode_firmware_lora32v21.bootloader build/rnode_firmware_lora32v21.partitions build/version.txt build/manifest/lora32v21/manifest.json
 	rm -r build
 
 release-lora32_v21_tcxo: check_bt_buffers
@@ -555,7 +563,8 @@ release-lora32_v21_tcxo: check_bt_buffers
 	cp build/esp32.esp32.ttgo-lora32/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_lora32v21_tcxo.bootloader
 	cp build/esp32.esp32.ttgo-lora32/RNode_Firmware.ino.partitions.bin build/rnode_firmware_lora32v21_tcxo.partitions
 	echo "$(PROTO_VERSION).$(shell git rev-list --count HEAD)" > build/version.txt
-	zip --junk-paths ./Release/rnode_firmware_lora32v21_tcxo.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_lora32v21_tcxo.boot_app0 build/rnode_firmware_lora32v21_tcxo.bin build/rnode_firmware_lora32v21_tcxo.bootloader build/rnode_firmware_lora32v21_tcxo.partitions build/version.txt
+	python3 scripts/gen_manifest.py lora32v21_tcxo rnode_firmware_lora32v21_tcxo build/manifest/lora32v21_tcxo/manifest.json
+	zip --junk-paths ./Release/rnode_firmware_lora32v21_tcxo.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_lora32v21_tcxo.boot_app0 build/rnode_firmware_lora32v21_tcxo.bin build/rnode_firmware_lora32v21_tcxo.bootloader build/rnode_firmware_lora32v21_tcxo.partitions build/version.txt build/manifest/lora32v21_tcxo/manifest.json
 	rm -r build
 
 release-heltec32_v2: check_bt_buffers
@@ -565,7 +574,8 @@ release-heltec32_v2: check_bt_buffers
 	cp build/esp32.esp32.heltec_wifi_lora_32_V2/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_heltec32v2.bootloader
 	cp build/esp32.esp32.heltec_wifi_lora_32_V2/RNode_Firmware.ino.partitions.bin build/rnode_firmware_heltec32v2.partitions
 	echo "$(PROTO_VERSION).$(shell git rev-list --count HEAD)" > build/version.txt
-	zip --junk-paths ./Release/rnode_firmware_heltec32v2.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_heltec32v2.boot_app0 build/rnode_firmware_heltec32v2.bin build/rnode_firmware_heltec32v2.bootloader build/rnode_firmware_heltec32v2.partitions build/version.txt
+	python3 scripts/gen_manifest.py heltec32v2 rnode_firmware_heltec32v2 build/manifest/heltec32v2/manifest.json
+	zip --junk-paths ./Release/rnode_firmware_heltec32v2.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_heltec32v2.boot_app0 build/rnode_firmware_heltec32v2.bin build/rnode_firmware_heltec32v2.bootloader build/rnode_firmware_heltec32v2.partitions build/version.txt build/manifest/heltec32v2/manifest.json
 	rm -r build
 
 release-heltec32_v3: check_bt_buffers
@@ -575,7 +585,8 @@ release-heltec32_v3: check_bt_buffers
 	cp build/esp32.esp32.heltec_wifi_lora_32_V3/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_heltec32v3.bootloader
 	cp build/esp32.esp32.heltec_wifi_lora_32_V3/RNode_Firmware.ino.partitions.bin build/rnode_firmware_heltec32v3.partitions
 	echo "$(PROTO_VERSION).$(shell git rev-list --count HEAD)" > build/version.txt
-	zip --junk-paths ./Release/rnode_firmware_heltec32v3.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_heltec32v3.boot_app0 build/rnode_firmware_heltec32v3.bin build/rnode_firmware_heltec32v3.bootloader build/rnode_firmware_heltec32v3.partitions build/version.txt
+	python3 scripts/gen_manifest.py heltec32v3 rnode_firmware_heltec32v3 build/manifest/heltec32v3/manifest.json
+	zip --junk-paths ./Release/rnode_firmware_heltec32v3.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_heltec32v3.boot_app0 build/rnode_firmware_heltec32v3.bin build/rnode_firmware_heltec32v3.bootloader build/rnode_firmware_heltec32v3.partitions build/version.txt build/manifest/heltec32v3/manifest.json
 	rm -r build
 
 release-heltec32_v4: check_bt_buffers
@@ -585,7 +596,8 @@ release-heltec32_v4: check_bt_buffers
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_heltec32v4pa.bootloader
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.partitions.bin build/rnode_firmware_heltec32v4pa.partitions
 	echo "$(PROTO_VERSION).$(shell git rev-list --count HEAD)" > build/version.txt
-	zip --junk-paths ./Release/rnode_firmware_heltec32v4pa.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_heltec32v4pa.boot_app0 build/rnode_firmware_heltec32v4pa.bin build/rnode_firmware_heltec32v4pa.bootloader build/rnode_firmware_heltec32v4pa.partitions build/version.txt
+	python3 scripts/gen_manifest.py heltec32v4pa rnode_firmware_heltec32v4pa build/manifest/heltec32v4pa/manifest.json
+	zip --junk-paths ./Release/rnode_firmware_heltec32v4pa.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_heltec32v4pa.boot_app0 build/rnode_firmware_heltec32v4pa.bin build/rnode_firmware_heltec32v4pa.bootloader build/rnode_firmware_heltec32v4pa.partitions build/version.txt build/manifest/heltec32v4pa/manifest.json
 	rm -r build
 
 release-heltec32_v2_extled: check_bt_buffers
@@ -595,7 +607,8 @@ release-heltec32_v2_extled: check_bt_buffers
 	cp build/esp32.esp32.heltec_wifi_lora_32_V2/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_heltec32v2.bootloader
 	cp build/esp32.esp32.heltec_wifi_lora_32_V2/RNode_Firmware.ino.partitions.bin build/rnode_firmware_heltec32v2.partitions
 	echo "$(PROTO_VERSION).$(shell git rev-list --count HEAD)" > build/version.txt
-	zip --junk-paths ./Release/rnode_firmware_heltec32v2.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_heltec32v2.boot_app0 build/rnode_firmware_heltec32v2.bin build/rnode_firmware_heltec32v2.bootloader build/rnode_firmware_heltec32v2.partitions build/version.txt
+	python3 scripts/gen_manifest.py heltec32v2 rnode_firmware_heltec32v2 build/manifest/heltec32v2/manifest.json
+	zip --junk-paths ./Release/rnode_firmware_heltec32v2.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_heltec32v2.boot_app0 build/rnode_firmware_heltec32v2.bin build/rnode_firmware_heltec32v2.bootloader build/rnode_firmware_heltec32v2.partitions build/version.txt build/manifest/heltec32v2/manifest.json
 	rm -r build
 
 release-rnode_ng_20: check_bt_buffers
@@ -605,7 +618,8 @@ release-rnode_ng_20: check_bt_buffers
 	cp build/esp32.esp32.ttgo-lora32/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_ng20.bootloader
 	cp build/esp32.esp32.ttgo-lora32/RNode_Firmware.ino.partitions.bin build/rnode_firmware_ng20.partitions
 	echo "$(PROTO_VERSION).$(shell git rev-list --count HEAD)" > build/version.txt
-	zip --junk-paths ./Release/rnode_firmware_ng20.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_ng20.boot_app0 build/rnode_firmware_ng20.bin build/rnode_firmware_ng20.bootloader build/rnode_firmware_ng20.partitions build/version.txt
+	python3 scripts/gen_manifest.py ng20 rnode_firmware_ng20 build/manifest/ng20/manifest.json
+	zip --junk-paths ./Release/rnode_firmware_ng20.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_ng20.boot_app0 build/rnode_firmware_ng20.bin build/rnode_firmware_ng20.bootloader build/rnode_firmware_ng20.partitions build/version.txt build/manifest/ng20/manifest.json
 	rm -r build
 
 release-rnode_ng_21: check_bt_buffers
@@ -615,7 +629,8 @@ release-rnode_ng_21: check_bt_buffers
 	cp build/esp32.esp32.ttgo-lora32/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_ng21.bootloader
 	cp build/esp32.esp32.ttgo-lora32/RNode_Firmware.ino.partitions.bin build/rnode_firmware_ng21.partitions
 	echo "$(PROTO_VERSION).$(shell git rev-list --count HEAD)" > build/version.txt
-	zip --junk-paths ./Release/rnode_firmware_ng21.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_ng21.boot_app0 build/rnode_firmware_ng21.bin build/rnode_firmware_ng21.bootloader build/rnode_firmware_ng21.partitions build/version.txt
+	python3 scripts/gen_manifest.py ng21 rnode_firmware_ng21 build/manifest/ng21/manifest.json
+	zip --junk-paths ./Release/rnode_firmware_ng21.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_ng21.boot_app0 build/rnode_firmware_ng21.bin build/rnode_firmware_ng21.bootloader build/rnode_firmware_ng21.partitions build/version.txt build/manifest/ng21/manifest.json
 	rm -r build
 
 release-t3s3:
@@ -625,7 +640,8 @@ release-t3s3:
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_t3s3.bootloader
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.partitions.bin build/rnode_firmware_t3s3.partitions
 	echo "$(PROTO_VERSION).$(shell git rev-list --count HEAD)" > build/version.txt
-	zip --junk-paths ./Release/rnode_firmware_t3s3.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_t3s3.boot_app0 build/rnode_firmware_t3s3.bin build/rnode_firmware_t3s3.bootloader build/rnode_firmware_t3s3.partitions build/version.txt
+	python3 scripts/gen_manifest.py t3s3 rnode_firmware_t3s3 build/manifest/t3s3/manifest.json
+	zip --junk-paths ./Release/rnode_firmware_t3s3.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_t3s3.boot_app0 build/rnode_firmware_t3s3.bin build/rnode_firmware_t3s3.bootloader build/rnode_firmware_t3s3.partitions build/version.txt build/manifest/t3s3/manifest.json
 	rm -r build
 
 release-t3s3_sx1280_pa:
@@ -635,7 +651,8 @@ release-t3s3_sx1280_pa:
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_t3s3_sx1280_pa.bootloader
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.partitions.bin build/rnode_firmware_t3s3_sx1280_pa.partitions
 	echo "$(PROTO_VERSION).$(shell git rev-list --count HEAD)" > build/version.txt
-	zip --junk-paths ./Release/rnode_firmware_t3s3_sx1280_pa.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_t3s3_sx1280_pa.boot_app0 build/rnode_firmware_t3s3_sx1280_pa.bin build/rnode_firmware_t3s3_sx1280_pa.bootloader build/rnode_firmware_t3s3_sx1280_pa.partitions build/version.txt
+	python3 scripts/gen_manifest.py t3s3_sx1280_pa rnode_firmware_t3s3_sx1280_pa build/manifest/t3s3_sx1280_pa/manifest.json
+	zip --junk-paths ./Release/rnode_firmware_t3s3_sx1280_pa.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_t3s3_sx1280_pa.boot_app0 build/rnode_firmware_t3s3_sx1280_pa.bin build/rnode_firmware_t3s3_sx1280_pa.bootloader build/rnode_firmware_t3s3_sx1280_pa.partitions build/version.txt build/manifest/t3s3_sx1280_pa/manifest.json
 	rm -r build
 
 release-t3s3_sx127x:
@@ -645,7 +662,8 @@ release-t3s3_sx127x:
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_t3s3_sx127x.bootloader
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.partitions.bin build/rnode_firmware_t3s3_sx127x.partitions
 	echo "$(PROTO_VERSION).$(shell git rev-list --count HEAD)" > build/version.txt
-	zip --junk-paths ./Release/rnode_firmware_t3s3_sx127x.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_t3s3_sx127x.boot_app0 build/rnode_firmware_t3s3_sx127x.bin build/rnode_firmware_t3s3_sx127x.bootloader build/rnode_firmware_t3s3_sx127x.partitions build/version.txt
+	python3 scripts/gen_manifest.py t3s3_sx127x rnode_firmware_t3s3_sx127x build/manifest/t3s3_sx127x/manifest.json
+	zip --junk-paths ./Release/rnode_firmware_t3s3_sx127x.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_t3s3_sx127x.boot_app0 build/rnode_firmware_t3s3_sx127x.bin build/rnode_firmware_t3s3_sx127x.bootloader build/rnode_firmware_t3s3_sx127x.partitions build/version.txt build/manifest/t3s3_sx127x/manifest.json
 	rm -r build
 
 release-tdeck:
@@ -655,7 +673,8 @@ release-tdeck:
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_tdeck.bootloader
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.partitions.bin build/rnode_firmware_tdeck.partitions
 	echo "$(PROTO_VERSION).$(shell git rev-list --count HEAD)" > build/version.txt
-	zip --junk-paths ./Release/rnode_firmware_tdeck.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_tdeck.boot_app0 build/rnode_firmware_tdeck.bin build/rnode_firmware_tdeck.bootloader build/rnode_firmware_tdeck.partitions build/version.txt
+	python3 scripts/gen_manifest.py tdeck rnode_firmware_tdeck build/manifest/tdeck/manifest.json
+	zip --junk-paths ./Release/rnode_firmware_tdeck.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_tdeck.boot_app0 build/rnode_firmware_tdeck.bin build/rnode_firmware_tdeck.bootloader build/rnode_firmware_tdeck.partitions build/version.txt build/manifest/tdeck/manifest.json
 	rm -r build
 
 release-tbeam_supreme:
@@ -665,7 +684,8 @@ release-tbeam_supreme:
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_tbeam_supreme.bootloader
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.partitions.bin build/rnode_firmware_tbeam_supreme.partitions
 	echo "$(PROTO_VERSION).$(shell git rev-list --count HEAD)" > build/version.txt
-	zip --junk-paths ./Release/rnode_firmware_tbeam_supreme.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_tbeam_supreme.boot_app0 build/rnode_firmware_tbeam_supreme.bin build/rnode_firmware_tbeam_supreme.bootloader build/rnode_firmware_tbeam_supreme.partitions build/version.txt
+	python3 scripts/gen_manifest.py tbeam_supreme rnode_firmware_tbeam_supreme build/manifest/tbeam_supreme/manifest.json
+	zip --junk-paths ./Release/rnode_firmware_tbeam_supreme.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_tbeam_supreme.boot_app0 build/rnode_firmware_tbeam_supreme.bin build/rnode_firmware_tbeam_supreme.bootloader build/rnode_firmware_tbeam_supreme.partitions build/version.txt build/manifest/tbeam_supreme/manifest.json
 	rm -r build
 
 release-tbeam_supreme_v3:
@@ -675,7 +695,8 @@ release-tbeam_supreme_v3:
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_tbeam_supreme_v3.bootloader
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.partitions.bin build/rnode_firmware_tbeam_supreme_v3.partitions
 	echo "$(PROTO_VERSION).$(shell git rev-list --count HEAD)" > build/version.txt
-	zip --junk-paths ./Release/rnode_firmware_tbeam_supreme_v3.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_tbeam_supreme_v3.boot_app0 build/rnode_firmware_tbeam_supreme_v3.bin build/rnode_firmware_tbeam_supreme_v3.bootloader build/rnode_firmware_tbeam_supreme_v3.partitions build/version.txt
+	python3 scripts/gen_manifest.py tbeam_supreme_v3 rnode_firmware_tbeam_supreme_v3 build/manifest/tbeam_supreme_v3/manifest.json
+	zip --junk-paths ./Release/rnode_firmware_tbeam_supreme_v3.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_tbeam_supreme_v3.boot_app0 build/rnode_firmware_tbeam_supreme_v3.bin build/rnode_firmware_tbeam_supreme_v3.bootloader build/rnode_firmware_tbeam_supreme_v3.partitions build/version.txt build/manifest/tbeam_supreme_v3/manifest.json
 	rm -r build
 
 release-featheresp32: check_bt_buffers
@@ -685,7 +706,8 @@ release-featheresp32: check_bt_buffers
 	cp build/esp32.esp32.featheresp32/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_featheresp32.bootloader
 	cp build/esp32.esp32.featheresp32/RNode_Firmware.ino.partitions.bin build/rnode_firmware_featheresp32.partitions
 	echo "$(PROTO_VERSION).$(shell git rev-list --count HEAD)" > build/version.txt
-	zip --junk-paths ./Release/rnode_firmware_featheresp32.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_featheresp32.boot_app0 build/rnode_firmware_featheresp32.bin build/rnode_firmware_featheresp32.bootloader build/rnode_firmware_featheresp32.partitions build/version.txt
+	python3 scripts/gen_manifest.py featheresp32 rnode_firmware_featheresp32 build/manifest/featheresp32/manifest.json
+	zip --junk-paths ./Release/rnode_firmware_featheresp32.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_featheresp32.boot_app0 build/rnode_firmware_featheresp32.bin build/rnode_firmware_featheresp32.bootloader build/rnode_firmware_featheresp32.partitions build/version.txt build/manifest/featheresp32/manifest.json
 	rm -r build
 
 release-genericesp32: check_bt_buffers
@@ -695,7 +717,8 @@ release-genericesp32: check_bt_buffers
 	cp build/esp32.esp32.esp32/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_esp32_generic.bootloader
 	cp build/esp32.esp32.esp32/RNode_Firmware.ino.partitions.bin build/rnode_firmware_esp32_generic.partitions
 	echo "$(PROTO_VERSION).$(shell git rev-list --count HEAD)" > build/version.txt
-	zip --junk-paths ./Release/rnode_firmware_esp32_generic.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_esp32_generic.boot_app0 build/rnode_firmware_esp32_generic.bin build/rnode_firmware_esp32_generic.bootloader build/rnode_firmware_esp32_generic.partitions build/version.txt
+	python3 scripts/gen_manifest.py genericesp32 rnode_firmware_esp32_generic build/manifest/esp32_generic/manifest.json
+	zip --junk-paths ./Release/rnode_firmware_esp32_generic.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_esp32_generic.boot_app0 build/rnode_firmware_esp32_generic.bin build/rnode_firmware_esp32_generic.bootloader build/rnode_firmware_esp32_generic.partitions build/version.txt build/manifest/esp32_generic/manifest.json
 	rm -r build
 
 release-meshpoe_s3: check_bt_buffers console-site spiffs-image-meshpoe_s3
@@ -706,7 +729,8 @@ release-meshpoe_s3: check_bt_buffers console-site spiffs-image-meshpoe_s3
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.partitions.bin build/rnode_firmware_meshpoe_s3.partitions
 	cp build/rnode_firmware_meshpoe_s3.bin Release/rnode_firmware_meshpoe_s3.bin
 	echo "$(PROTO_VERSION).$(shell git rev-list --count HEAD)" > build/version.txt
-	zip --junk-paths ./Release/rnode_firmware_meshpoe_s3.zip ./Release/esptool/esptool.py ./Release/console_image_meshpoe_s3.bin build/rnode_firmware_meshpoe_s3.boot_app0 build/rnode_firmware_meshpoe_s3.bin build/rnode_firmware_meshpoe_s3.bootloader build/rnode_firmware_meshpoe_s3.partitions build/version.txt
+	python3 scripts/gen_manifest.py meshpoe_s3 rnode_firmware_meshpoe_s3 build/manifest/meshpoe_s3/manifest.json
+	zip --junk-paths ./Release/rnode_firmware_meshpoe_s3.zip ./Release/esptool/esptool.py ./Release/console_image_meshpoe_s3.bin build/rnode_firmware_meshpoe_s3.boot_app0 build/rnode_firmware_meshpoe_s3.bin build/rnode_firmware_meshpoe_s3.bootloader build/rnode_firmware_meshpoe_s3.partitions build/version.txt build/manifest/meshpoe_s3/manifest.json
 	rm -r build
 
 release-meshadventurer_s3: check_bt_buffers console-site spiffs-image-meshadventurer_s3
@@ -717,7 +741,8 @@ release-meshadventurer_s3: check_bt_buffers console-site spiffs-image-meshadvent
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.partitions.bin build/rnode_firmware_meshadventurer_s3.partitions
 	cp build/rnode_firmware_meshadventurer_s3.bin Release/rnode_firmware_meshadventurer_s3.bin
 	echo "$(PROTO_VERSION).$(shell git rev-list --count HEAD)" > build/version.txt
-	zip --junk-paths ./Release/rnode_firmware_meshadventurer_s3.zip ./Release/esptool/esptool.py ./Release/console_image_meshadventurer_s3.bin build/rnode_firmware_meshadventurer_s3.boot_app0 build/rnode_firmware_meshadventurer_s3.bin build/rnode_firmware_meshadventurer_s3.bootloader build/rnode_firmware_meshadventurer_s3.partitions build/version.txt
+	python3 scripts/gen_manifest.py meshadventurer_s3 rnode_firmware_meshadventurer_s3 build/manifest/meshadventurer_s3/manifest.json
+	zip --junk-paths ./Release/rnode_firmware_meshadventurer_s3.zip ./Release/esptool/esptool.py ./Release/console_image_meshadventurer_s3.bin build/rnode_firmware_meshadventurer_s3.boot_app0 build/rnode_firmware_meshadventurer_s3.bin build/rnode_firmware_meshadventurer_s3.bootloader build/rnode_firmware_meshadventurer_s3.partitions build/version.txt build/manifest/meshadventurer_s3/manifest.json
 	rm -r build
 
 release-tbeam_1w: check_bt_buffers
@@ -727,7 +752,8 @@ release-tbeam_1w: check_bt_buffers
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_tbeam_1w.bootloader
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.partitions.bin build/rnode_firmware_tbeam_1w.partitions
 	echo "$(PROTO_VERSION).$(shell git rev-list --count HEAD)" > build/version.txt
-	zip --junk-paths ./Release/rnode_firmware_tbeam_1w.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_tbeam_1w.boot_app0 build/rnode_firmware_tbeam_1w.bin build/rnode_firmware_tbeam_1w.bootloader build/rnode_firmware_tbeam_1w.partitions build/version.txt
+	python3 scripts/gen_manifest.py tbeam_1w rnode_firmware_tbeam_1w build/manifest/tbeam_1w/manifest.json
+	zip --junk-paths ./Release/rnode_firmware_tbeam_1w.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_tbeam_1w.boot_app0 build/rnode_firmware_tbeam_1w.bin build/rnode_firmware_tbeam_1w.bootloader build/rnode_firmware_tbeam_1w.partitions build/version.txt build/manifest/tbeam_1w/manifest.json
 	rm -r build
 
 release-meshadventurer: check_bt_buffers
@@ -737,7 +763,8 @@ release-meshadventurer: check_bt_buffers
 	cp build/esp32.esp32.esp32/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_meshadventurer.bootloader
 	cp build/esp32.esp32.esp32/RNode_Firmware.ino.partitions.bin build/rnode_firmware_meshadventurer.partitions
 	echo "$(PROTO_VERSION).$(shell git rev-list --count HEAD)" > build/version.txt
-	zip --junk-paths ./Release/rnode_firmware_meshadventurer.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_meshadventurer.boot_app0 build/rnode_firmware_meshadventurer.bin build/rnode_firmware_meshadventurer.bootloader build/rnode_firmware_meshadventurer.partitions build/version.txt
+	python3 scripts/gen_manifest.py meshadventurer rnode_firmware_meshadventurer build/manifest/meshadventurer/manifest.json
+	zip --junk-paths ./Release/rnode_firmware_meshadventurer.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_meshadventurer.boot_app0 build/rnode_firmware_meshadventurer.bin build/rnode_firmware_meshadventurer.bootloader build/rnode_firmware_meshadventurer.partitions build/version.txt build/manifest/meshadventurer/manifest.json
 	rm -r build
 
 release-diy_v1: check_bt_buffers
@@ -747,7 +774,8 @@ release-diy_v1: check_bt_buffers
 	cp build/esp32.esp32.esp32/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_diy_v1.bootloader
 	cp build/esp32.esp32.esp32/RNode_Firmware.ino.partitions.bin build/rnode_firmware_diy_v1.partitions
 	echo "$(PROTO_VERSION).$(shell git rev-list --count HEAD)" > build/version.txt
-	zip --junk-paths ./Release/rnode_firmware_diy_v1.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_diy_v1.boot_app0 build/rnode_firmware_diy_v1.bin build/rnode_firmware_diy_v1.bootloader build/rnode_firmware_diy_v1.partitions build/version.txt
+	python3 scripts/gen_manifest.py diy_v1 rnode_firmware_diy_v1 build/manifest/diy_v1/manifest.json
+	zip --junk-paths ./Release/rnode_firmware_diy_v1.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_diy_v1.boot_app0 build/rnode_firmware_diy_v1.bin build/rnode_firmware_diy_v1.bootloader build/rnode_firmware_diy_v1.partitions build/version.txt build/manifest/diy_v1/manifest.json
 	rm -r build
 
 release-merged-diy_v1: check_bt_buffers
@@ -777,7 +805,8 @@ release-aethernode: check_bt_buffers
 	cp build/esp32.esp32.esp32/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_aethernode.bootloader
 	cp build/esp32.esp32.esp32/RNode_Firmware.ino.partitions.bin build/rnode_firmware_aethernode.partitions
 	echo "$(PROTO_VERSION).$(shell git rev-list --count HEAD)" > build/version.txt
-	zip --junk-paths ./Release/rnode_firmware_aethernode.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_aethernode.boot_app0 build/rnode_firmware_aethernode.bin build/rnode_firmware_aethernode.bootloader build/rnode_firmware_aethernode.partitions build/version.txt
+	python3 scripts/gen_manifest.py aethernode rnode_firmware_aethernode build/manifest/aethernode/manifest.json
+	zip --junk-paths ./Release/rnode_firmware_aethernode.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_aethernode.boot_app0 build/rnode_firmware_aethernode.bin build/rnode_firmware_aethernode.bootloader build/rnode_firmware_aethernode.partitions build/version.txt build/manifest/aethernode/manifest.json
 	rm -r build
 
 release-aethernode_s3: check_bt_buffers
@@ -787,7 +816,8 @@ release-aethernode_s3: check_bt_buffers
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_aethernode_s3.bootloader
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.partitions.bin build/rnode_firmware_aethernode_s3.partitions
 	echo "$(PROTO_VERSION).$(shell git rev-list --count HEAD)" > build/version.txt
-	zip --junk-paths ./Release/rnode_firmware_aethernode_s3.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_aethernode_s3.boot_app0 build/rnode_firmware_aethernode_s3.bin build/rnode_firmware_aethernode_s3.bootloader build/rnode_firmware_aethernode_s3.partitions build/version.txt
+	python3 scripts/gen_manifest.py aethernode_s3 rnode_firmware_aethernode_s3 build/manifest/aethernode_s3/manifest.json
+	zip --junk-paths ./Release/rnode_firmware_aethernode_s3.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_aethernode_s3.boot_app0 build/rnode_firmware_aethernode_s3.bin build/rnode_firmware_aethernode_s3.bootloader build/rnode_firmware_aethernode_s3.partitions build/version.txt build/manifest/aethernode_s3/manifest.json
 	rm -r build
 
 release-mega2560:
@@ -830,7 +860,8 @@ release-heltec_wtracker_v2: check_bt_buffers
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_heltec_wtracker_v2.bootloader
 	cp build/esp32.esp32.esp32s3/RNode_Firmware.ino.partitions.bin build/rnode_firmware_heltec_wtracker_v2.partitions
 	echo "$(PROTO_VERSION).$(shell git rev-list --count HEAD)" > build/version.txt
-	zip --junk-paths ./Release/rnode_firmware_heltec_wtracker_v2.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_heltec_wtracker_v2.boot_app0 build/rnode_firmware_heltec_wtracker_v2.bin build/rnode_firmware_heltec_wtracker_v2.bootloader build/rnode_firmware_heltec_wtracker_v2.partitions build/version.txt
+	python3 scripts/gen_manifest.py heltec_wtracker_v2 rnode_firmware_heltec_wtracker_v2 build/manifest/heltec_wtracker_v2/manifest.json
+	zip --junk-paths ./Release/rnode_firmware_heltec_wtracker_v2.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_heltec_wtracker_v2.boot_app0 build/rnode_firmware_heltec_wtracker_v2.bin build/rnode_firmware_heltec_wtracker_v2.bootloader build/rnode_firmware_heltec_wtracker_v2.partitions build/version.txt build/manifest/heltec_wtracker_v2/manifest.json
 	rm -r build
 
 release-promicro:
@@ -854,5 +885,6 @@ release-xiao_s3:
 	cp build/esp32.esp32.XIAO_ESP32S3/RNode_Firmware.ino.bootloader.bin build/rnode_firmware_xiao_esp32s3.bootloader
 	cp build/esp32.esp32.XIAO_ESP32S3/RNode_Firmware.ino.partitions.bin build/rnode_firmware_xiao_esp32s3.partitions
 	echo "$(PROTO_VERSION).$(shell git rev-list --count HEAD)" > build/version.txt
-	zip --junk-paths ./Release/rnode_firmware_xiao_esp32s3.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_xiao_esp32s3.boot_app0 build/rnode_firmware_xiao_esp32s3.bin build/rnode_firmware_xiao_esp32s3.bootloader build/rnode_firmware_xiao_esp32s3.partitions build/version.txt
+	python3 scripts/gen_manifest.py xiao_esp32s3 rnode_firmware_xiao_esp32s3 build/manifest/xiao_esp32s3/manifest.json
+	zip --junk-paths ./Release/rnode_firmware_xiao_esp32s3.zip ./Release/esptool/esptool.py ./Release/console_image.bin build/rnode_firmware_xiao_esp32s3.boot_app0 build/rnode_firmware_xiao_esp32s3.bin build/rnode_firmware_xiao_esp32s3.bootloader build/rnode_firmware_xiao_esp32s3.partitions build/version.txt build/manifest/xiao_esp32s3/manifest.json
 	rm -r build
