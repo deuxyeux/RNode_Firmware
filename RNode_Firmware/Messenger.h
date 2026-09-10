@@ -44,9 +44,14 @@
   #define MSNGR_MAX_BOOKMARKS  12
   #define MSNGR_MAX_ANNOUNCES  8
   #define MSNGR_PEER_MAX_MSG_ROWS 5
-
-  #define MSNGR_PRESET_COUNT 3
-  const char *const MSNGR_PRESETS[MSNGR_PRESET_COUNT] = { "Hi", "Bye", "SOS" };
+  // Scratch size for msngr_kb_decode_utf8() output when decoding a full
+  // message body (messenger_refresh_msg_detail_cache() below) - well
+  // past Menu.h's own MSNGR_MSG_DETAIL_MAX_LINES*_CHARS_PER_LINE (140,
+  // not visible from this file - Messenger.h is included before Menu.h,
+  // see msngr_kb_decode_utf8()'s own comment), which is all the detail
+  // screen can ever actually show regardless of how much more of a
+  // longer incoming message this leaves undecoded.
+  #define MSNGR_CONTENT_DECODE_BUF_LEN 256
 
   struct MessengerBookmark {
     bool in_use = false;
@@ -55,6 +60,23 @@
   };
   MessengerBookmark msngr_bookmarks[MSNGR_MAX_BOOKMARKS];
   uint8_t msngr_bookmark_count = 0;
+
+  // User-configurable quick-send buttons on MENU_STATE_MSNGR_PEER (Menu.h) -
+  // used to be a fixed compile-time {"Hi","Bye","SOS"}. Unlike bookmarks/
+  // announces (removed by matching a hash, so their backing array is
+  // sparse/in_use-flagged and order doesn't matter), presets are removed
+  // by *position* ("delete preset #2"), so this stays packed and
+  // contiguous instead - indices [0, msngr_preset_count) are always the
+  // live entries, no gaps. Capped at 5 mainly to keep MENU_STATE_MSNGR_
+  // PEER's action-row list from growing unbounded, not a technical limit.
+  // MSNGR_NAME_MAX_LEN (31), not MSNGR_TEXT_ENTRY_MAX_LEN (140) - a
+  // preset is a button label as much as message content ("Send: <text>"
+  // on the peer screen), so it gets the same short cap bookmark/display
+  // names already use.
+  #define MSNGR_MAX_PRESETS 5
+  #define MSNGR_PRESETS_PATH "/urns/msngr_presets.json"
+  char msngr_presets[MSNGR_MAX_PRESETS][MSNGR_NAME_MAX_LEN + 1];
+  uint8_t msngr_preset_count = 0;
 
   // Outbound LXMF delivery retry count - forwarded to urns_lxmf_router's
   // LXMRouter::set_max_delivery_attempts() (from messenger_init() below,
@@ -222,6 +244,64 @@
     y += (m <= 2);
   }
 
+  // Inverse of Menu.h's msngr_kb_expand_utf8() - decodes real UTF-8 (a
+  // message's content, or a peer's announced/delivered display name,
+  // both stored on disk as genuine UTF-8 - see MessageStore.cpp's own
+  // "Store content as UTF-8 for fast loading" comment) into this
+  // device's internal single-byte glyph codes, so it can render through
+  // Org_01's Cyrillic block (Fonts/Org_01.h). Defined here rather than
+  // shared with Menu.h's encoder because Messenger.h is included before
+  // Menu.h (Utilities.h) - same "duplicated under a distinct name"
+  // reasoning as msngr_civil_from_days() above, just for a file-order
+  // boundary instead of an #if one.
+  //
+  // Any codepoint this device has no glyph for (any script besides the
+  // Cyrillic letters Org_01.h added, or genuinely malformed UTF-8)
+  // becomes '?' - one substitution per source *character*, not per
+  // byte, so downstream word-wrap/substr math (Menu.h, which assumes 1
+  // byte == 1 glyph, same invariant msngr_text_entry_buf keeps) doesn't
+  // see a string longer or shorter than what will actually render.
+  // out_cap must leave room for the worst case (every input byte
+  // becomes one output byte - decoding only ever shrinks or holds
+  // length steady, never grows it) plus the NUL.
+  void msngr_kb_decode_utf8(const char *in, char *out, size_t out_cap) {
+    size_t oi = 0, i = 0;
+    while (in[i] != 0 && oi + 1 < out_cap) {
+      unsigned char b0 = (unsigned char)in[i];
+      if (b0 < 0x80) { out[oi++] = (char)b0; i++; continue; }
+
+      uint8_t seq_len;
+      uint32_t cp;
+      if      ((b0 & 0xE0) == 0xC0) { seq_len = 2; cp = b0 & 0x1F; }
+      else if ((b0 & 0xF0) == 0xE0) { seq_len = 3; cp = b0 & 0x0F; }
+      else if ((b0 & 0xF8) == 0xF0) { seq_len = 4; cp = b0 & 0x07; }
+      else { out[oi++] = '?'; i++; continue; } // stray continuation byte / invalid lead - resync 1 byte at a time
+
+      // Reads one continuation byte at a time and stops the instant one
+      // is invalid *or* is the string's own NUL - critical for a
+      // truncated/malformed sequence sitting right at the end of `in`:
+      // stopping there (and only advancing i by 1 below, not seq_len)
+      // means the next byte this function ever reads is that same NUL,
+      // never anything past the end of the buffer.
+      bool complete = true;
+      for (uint8_t k = 1; k < seq_len; k++) {
+        unsigned char bk = (unsigned char)in[i+k];
+        if (bk == 0 || (bk & 0xC0) != 0x80) { complete = false; break; }
+        cp = (cp << 6) | (bk & 0x3F);
+      }
+      if (!complete) { out[oi++] = '?'; i++; continue; }
+      i += seq_len;
+
+      if      (cp == 0x0401)                cp = 0x80;               // Ё
+      else if (cp >= 0x0410 && cp <= 0x042F) cp = 0x81 + (cp-0x0410); // А-Я
+      else if (cp == 0x0451)                cp = 0xA1;               // ё
+      else if (cp >= 0x0430 && cp <= 0x044F) cp = 0xA2 + (cp-0x0430); // а-я
+      else                                    cp = '?';
+      out[oi++] = (char)cp;
+    }
+    out[oi] = 0;
+  }
+
   // Called once when MENU_STATE_MSNGR_PEER is (re-)entered - on first
   // opening it from Inbox/Bookmarks/Announces, and again right after a
   // successful Send (a new message just got added). NOT called from the
@@ -247,7 +327,16 @@
       // No "<"/">" direction prefix here - MENU_STATE_MSNGR_PEER's own
       // draw code (Menu.h) uses the `incoming` flag below to left/right
       // align the row instead, so the full snippet width goes to content.
-      snprintf(msngr_peer_cache[i].snippet, sizeof(msngr_peer_cache[i].snippet), "%s", meta.valid ? meta.content.c_str() : "?");
+      // Decoded through msngr_kb_decode_utf8() first - meta.content is
+      // genuine UTF-8 off disk, and this snippet gets rendered through
+      // Org_01's glyph table same as everything else on this screen.
+      if (meta.valid) {
+        char snippet_decoded[sizeof(msngr_peer_cache[i].snippet)];
+        msngr_kb_decode_utf8(meta.content.c_str(), snippet_decoded, sizeof(snippet_decoded));
+        snprintf(msngr_peer_cache[i].snippet, sizeof(msngr_peer_cache[i].snippet), "%s", snippet_decoded);
+      } else {
+        snprintf(msngr_peer_cache[i].snippet, sizeof(msngr_peer_cache[i].snippet), "?");
+      }
       msngr_peer_cache[i].incoming = meta.valid && meta.incoming;
     }
     msngr_peer_cache_count = n;
@@ -275,7 +364,13 @@
     msngr_msg_detail_cache_valid = false;
     if (!urns_message_store) return;
     LXMF::MessageStore::MessageMetadata meta = urns_message_store->load_message_metadata(message_hash);
-    msngr_msg_detail_cache_content = meta.valid ? meta.content : std::string("(unavailable)");
+    if (meta.valid) {
+      char content_decoded[MSNGR_CONTENT_DECODE_BUF_LEN];
+      msngr_kb_decode_utf8(meta.content.c_str(), content_decoded, sizeof(content_decoded));
+      msngr_msg_detail_cache_content = content_decoded;
+    } else {
+      msngr_msg_detail_cache_content = "(unavailable)";
+    }
     msngr_msg_detail_cache_incoming = meta.valid && meta.incoming;
     msngr_msg_detail_cache_timestamp = meta.valid ? meta.timestamp : 0;
     msngr_msg_detail_cache_valid = true;
@@ -375,6 +470,76 @@
     messenger_bookmarks_save();
   }
 
+  // Same save/load shape as messenger_bookmarks_save/_load above, just a
+  // plain array of strings instead of hash+name objects - order matters
+  // here (it's the same order MENU_STATE_MSNGR_PEER shows the Send:
+  // buttons in), so this is a JSON array, not an object keyed by index.
+  void messenger_presets_save() {
+    JsonDocument doc;
+    JsonArray arr = doc["presets"].to<JsonArray>();
+    for (uint8_t i = 0; i < msngr_preset_count; i++) arr.add(msngr_presets[i]);
+    std::string out;
+    serializeJson(doc, out);
+    RNS::Utilities::OS::write_file(MSNGR_PRESETS_PATH, RNS::bytesFromString(out.c_str()));
+  }
+
+  // Falls back to the old hardcoded {"Hi","Bye","SOS"} set when the file
+  // doesn't exist yet (fresh device, or one flashed before this feature
+  // existed) - preserves today's peer-screen behavior for anyone who
+  // never opens the new Preset Messages settings screen, rather than
+  // silently going from 3 quick-send buttons to 0.
+  void messenger_presets_load() {
+    msngr_preset_count = 0;
+
+    RNS::Bytes raw;
+    if (RNS::Utilities::OS::read_file(MSNGR_PRESETS_PATH, raw) == 0) {
+      messenger_store_name(msngr_presets[0], "Hi");
+      messenger_store_name(msngr_presets[1], "Bye");
+      messenger_store_name(msngr_presets[2], "SOS");
+      msngr_preset_count = 3;
+      return;
+    }
+
+    JsonDocument doc;
+    if (deserializeJson(doc, (const char*)raw.data(), raw.size()) != DeserializationError::Ok) return;
+
+    JsonArray arr = doc["presets"].as<JsonArray>();
+    uint8_t i = 0;
+    for (JsonVariant v : arr) {
+      if (i >= MSNGR_MAX_PRESETS) break;
+      messenger_store_name(msngr_presets[i], (const char*)(v | ""));
+      i++;
+    }
+    msngr_preset_count = i;
+  }
+
+  bool messenger_preset_add(const std::string &text) {
+    if (msngr_preset_count >= MSNGR_MAX_PRESETS) return false;
+    messenger_store_name(msngr_presets[msngr_preset_count], text);
+    msngr_preset_count++;
+    messenger_presets_save();
+    return true;
+  }
+
+  void messenger_preset_update(uint8_t index, const std::string &text) {
+    if (index >= msngr_preset_count) return;
+    messenger_store_name(msngr_presets[index], text);
+    messenger_presets_save();
+  }
+
+  // Shifts every entry above index down by one to keep the array packed -
+  // unlike bookmark/announce removal, which just clears an in_use flag
+  // and leaves a hole, since those are found by hash lookup rather than
+  // rendered as a positional list.
+  void messenger_preset_delete(uint8_t index) {
+    if (index >= msngr_preset_count) return;
+    for (uint8_t i = index; i < msngr_preset_count - 1; i++) {
+      messenger_store_name(msngr_presets[i], msngr_presets[i + 1]);
+    }
+    msngr_preset_count--;
+    messenger_presets_save();
+  }
+
   // Inserts/refreshes an announce entry, evicting the oldest-heard slot
   // when the pool is full and this hash isn't already tracked - same
   // "bounded ring, evict oldest" shape as MessageStore's own conversation
@@ -468,14 +633,34 @@
   // label always wins even if they've since announced under a different
   // display name.
   std::string messenger_peer_display_name(const RNS::Bytes &peer_hash) {
+    // Bookmark names are never typed fresh - messenger_bookmark_add()'s
+    // only call site (Menu.h) always passes this very function's own
+    // return value, so whatever's in msngr_bookmarks[bm].name was
+    // already decoded (below) the moment it was captured. Decoding it a
+    // second time here would corrupt it - our internal Cyrillic byte
+    // codes (0x80-0xC1, see msngr_kb_decode_utf8()) look like invalid
+    // stray UTF-8 continuation bytes to a UTF-8 decoder.
     int8_t bm = messenger_bookmark_find(peer_hash);
     if (bm >= 0 && msngr_bookmarks[bm].name[0] != 0) return std::string(msngr_bookmarks[bm].name);
+    // MessageStore's cached name and the announce list, in contrast,
+    // always hold genuine UTF-8 straight off disk / off the wire (see
+    // MessageStore.cpp's own "Store content as UTF-8" comment and
+    // messenger_display_name_from_app_data()'s raw msgpack parse above) -
+    // decode both before returning.
     if (urns_message_store) {
       std::string cached = urns_message_store->get_display_name(peer_hash);
-      if (!cached.empty()) return cached;
+      if (!cached.empty()) {
+        char decoded[MSNGR_NAME_MAX_LEN + 1];
+        msngr_kb_decode_utf8(cached.c_str(), decoded, sizeof(decoded));
+        return std::string(decoded);
+      }
     }
     int8_t an = messenger_announce_find(peer_hash);
-    if (an >= 0 && msngr_announces[an].name[0] != 0) return std::string(msngr_announces[an].name);
+    if (an >= 0 && msngr_announces[an].name[0] != 0) {
+      char decoded[MSNGR_NAME_MAX_LEN + 1];
+      msngr_kb_decode_utf8(msngr_announces[an].name, decoded, sizeof(decoded));
+      return std::string(decoded);
+    }
     return peer_hash.toHex().substr(0, 16);
   }
 
@@ -1030,6 +1215,7 @@
     urns_message_store = new LXMF::MessageStore(URNS_BASE_PATH "/messages");
     RNS::Transport::register_announce_handler(msngr_announce_handler);
     messenger_bookmarks_load();
+    messenger_presets_load();
 
     // ADDR_CONF_MSNGR_RETRIES (ROM.h) - raw physical byte, not through
     // eeprom_addr(), same "out-of-range/erased (0xFF) keeps the compiled

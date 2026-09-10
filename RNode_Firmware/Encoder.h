@@ -145,6 +145,12 @@
           enc_btn_down_last = millis();
           enc_btn_hold_beeped = false;
           msngr_kb_chord_used = false; // fresh press - no chord performed with it yet
+          #if HAS_LXMF == true
+            msngr_kb_lang_hold_fired_enc = false;  // fresh press - EN/RU switch hasn't fired yet either
+            msngr_kb_alt_hold_fired_enc = false; // ...nor has the punctuation/letter-alternate
+            msngr_kb_del_hold_fired_enc = false;   // ...nor has DEL-repeat
+            msngr_kb_del_repeat_last_enc = 0;
+          #endif
         } else if (encoder_enabled) {
           menu_encoder_button(millis() - enc_btn_down_last);
         }
@@ -167,6 +173,26 @@
       buzzer_encoder_tick_melody();
       enc_btn_hold_beeped = true;
     }
+
+    // Live EN/RU switch, punctuation/letter-alternate, and DEL-repeat on
+    // a held encoder button - see Menu.h's msngr_kb_lang_hold_try()/
+    // msngr_kb_alt_hold_try()/msngr_kb_del_hold_try() for the shared
+    // logic (this control's own separate fired-flags are needed because
+    // enc_btn_state is a different debounce state machine than the
+    // main button's, Input.h).
+    #if HAS_LXMF == true
+      if (encoder_enabled && enc_btn_state == ENC_PRESSED) {
+        unsigned long held_ms = millis() - enc_btn_down_last;
+        msngr_kb_lang_hold_try(held_ms, msngr_kb_lang_hold_fired_enc);
+        msngr_kb_alt_hold_try(held_ms, msngr_kb_alt_hold_fired_enc);
+        msngr_kb_del_hold_try(held_ms, msngr_kb_del_hold_fired_enc, msngr_kb_del_repeat_last_enc);
+      } else {
+        msngr_kb_lang_hold_fired_enc = false;
+        msngr_kb_alt_hold_fired_enc = false;
+        msngr_kb_del_hold_fired_enc = false;
+        msngr_kb_del_repeat_last_enc = 0;
+      }
+    #endif
   }
 
 #endif

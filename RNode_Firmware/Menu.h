@@ -287,9 +287,9 @@
   #define MENU_STATE_MSNGR_MSG_DETAIL 38 // one message's full text, opened from MENU_STATE_MSNGR_PEER
   #define MENU_STATE_MSNGR_DELETE_CONFIRM 39 // DELETE/CANCEL list before a single message is actually deleted - same pattern as MENU_STATE_FWUPD_CONFIRM
   #define MENU_STATE_MSNGR_CLEAR_CONFIRM  40 // CLEAR/CANCEL list before a whole conversation is actually cleared - same pattern as MENU_STATE_FWUPD_CONFIRM
-  #define MENU_STATE_MSNGR_TEXT_ENTRY     41 // on-screen keyboard for composing a free-text message, opened from MSNGR_PEER_ACTION_SEND_CUSTOM
+  #define MENU_STATE_MSNGR_TEXT_ENTRY     41 // on-screen keyboard for composing a free-text message, opened from MSNGR_PEER_FIXED_ACTION_SEND_CUSTOM
   #define MENU_STATE_MSNGR_DISCARD_CONFIRM 42 // DISCARD/CANCEL list before leaving MENU_STATE_MSNGR_TEXT_ENTRY with unsent text - same pattern as MENU_STATE_FWUPD_CONFIRM
-  #define MENU_STATE_MSNGR_PING_RESULT 43 // live status + BACK, opened from MSNGR_PEER_ACTION_PING (Messenger.h's messenger_ping_start())
+  #define MENU_STATE_MSNGR_PING_RESULT 43 // live status + BACK, opened from MSNGR_PEER_FIXED_ACTION_PING (Messenger.h's messenger_ping_start())
   #define MENU_STATE_URNS_PATH_HASH_VIEW 44 // full path hash, two plain lines, no captions - opened from MENU_STATE_URNS_PATH_DETAIL's Hash row, dismissed by any input
   #define MENU_STATE_URNS_FREE_DETAIL 45 // urns partition usage broken down by data type (HAS_URNS boards), opened from MENU_STATE_URNS_LIST's Free row - read-only, computed once on entry (never in a draw path - see project_urns_partition_growth memory)
   #define MENU_STATE_MSNGR_SEND_RESULT 46 // live status (Sending.../Delivered/No Confirmation) + BACK, opened from MENU_STATE_MSNGR_PEER's Send Hi/Bye/SOS and MENU_STATE_MSNGR_TEXT_ENTRY's Send key - same "live status + BACK" shape as MENU_STATE_MSNGR_PING_RESULT, auto-dismisses on Delivered/No Confirmation (msngr_send_result_process(), polled from loop()) unlike Ping's manual-only dismiss
@@ -309,6 +309,8 @@
   #define MENU_STATE_MSNGR_SETTINGS_EDIT 55 // editing the Retries field (the only editable row in MENU_STATE_MSNGR_SETTINGS today)
   #define MENU_STATE_BT_SETTINGS 56 // Bluetooth's own Settings submenu (HAS_BLE only) - Legacy Pairing/Just Works (moved from MENU_STATE_BT_LIST, MCU_ESP32 only)/Auto Start (every HAS_BLE board)/Battery Service (every HAS_BLE board)/Back, opened from MENU_STATE_BT_LIST
   #define MENU_STATE_BT_SETTINGS_EDIT 57 // editing whichever of Legacy Pairing/Just Works/Auto Start/Battery Service was selected
+  #define MENU_STATE_MSNGR_PRESETS 58 // configurable quick-send buttons list (0-5) - Add Preset row (hidden once full) + one row per configured preset + BACK, opened from MENU_STATE_MSNGR_SETTINGS' own Preset Messages row
+  #define MENU_STATE_MSNGR_PRESET_DETAIL 59 // Edit/Delete/BACK for one existing preset, opened by selecting its row in MENU_STATE_MSNGR_PRESETS - same 3-row tail shape as MENU_STATE_MSNGR_MSG_DETAIL's Reply/Delete/BACK
 
   // The Hardware page used to only exist when there was board-level info
   // worth showing (battery/voltage sensing via HAS_PMU, or an ESP32-S3's
@@ -890,8 +892,9 @@
     #define MSNGR_SETTINGS_ITEM_ANNOUNCE_START    2
     #define MSNGR_SETTINGS_ITEM_ANNOUNCE_INTERVAL 3
     #define MSNGR_SETTINGS_ITEM_DISPLAY_NAME      4 // opens MENU_STATE_MSNGR_TEXT_ENTRY (reused from the message composer), not MSNGR_SETTINGS_EDIT
-    #define MSNGR_SETTINGS_ITEM_BACK              5
-    #define MSNGR_SETTINGS_ITEM_COUNT             6
+    #define MSNGR_SETTINGS_ITEM_PRESETS           5 // opens MENU_STATE_MSNGR_PRESETS
+    #define MSNGR_SETTINGS_ITEM_BACK              6
+    #define MSNGR_SETTINGS_ITEM_COUNT             7
 
     // "ANNOUNCED" has nothing to acknowledge (unlike "NOT READY", which
     // stays up until dismissed - same success/error asymmetry as NTP sync's
@@ -912,15 +915,27 @@
     // many message-snippet rows the current peer's thread contributes
     // (messenger_peer_msg_row_count()). Indices are relative offsets added
     // to that row count, not absolute - see draw/confirm handling.
-    #define MSNGR_PEER_ACTION_SEND_HI       0
-    #define MSNGR_PEER_ACTION_SEND_BYE      1
-    #define MSNGR_PEER_ACTION_SEND_SOS      2
-    #define MSNGR_PEER_ACTION_SEND_CUSTOM   3 // opens MENU_STATE_MSNGR_TEXT_ENTRY
-    #define MSNGR_PEER_ACTION_PING          4 // opens MENU_STATE_MSNGR_PING_RESULT
-    #define MSNGR_PEER_ACTION_BOOKMARK      5 // label switches Add/Remove Bookmark
-    #define MSNGR_PEER_ACTION_CLEAR         6 // opens MENU_STATE_MSNGR_CLEAR_CONFIRM
-    #define MSNGR_PEER_ACTION_BACK          7
-    #define MSNGR_PEER_ACTION_COUNT         8
+    //
+    // The first msngr_preset_count rows are "Send: <preset text>"
+    // buttons (0 to MSNGR_MAX_PRESETS of them, user-configurable -
+    // RNode Settings > Messenger > Settings > Preset Messages) - dynamic,
+    // not fixed compile-time indices the way SEND_HI/BYE/SOS used to be,
+    // so they don't get their own #defines here. MSNGR_PEER_FIXED_
+    // ACTION_* below are relative to *that*, i.e. the actual row index
+    // is msg_rows + msngr_preset_count + MSNGR_PEER_FIXED_ACTION_x - see
+    // msngr_peer_row_count() and the draw/confirm handling for exactly
+    // where the two pieces join.
+    #define MSNGR_PEER_FIXED_ACTION_SEND_CUSTOM 0 // opens MENU_STATE_MSNGR_TEXT_ENTRY
+    #define MSNGR_PEER_FIXED_ACTION_PING        1 // opens MENU_STATE_MSNGR_PING_RESULT
+    #define MSNGR_PEER_FIXED_ACTION_BOOKMARK    2 // label switches Add/Remove Bookmark
+    #define MSNGR_PEER_FIXED_ACTION_CLEAR       3 // opens MENU_STATE_MSNGR_CLEAR_CONFIRM
+    #define MSNGR_PEER_FIXED_ACTION_BACK        4
+    #define MSNGR_PEER_FIXED_ACTION_COUNT       5
+    // Worst-case row count for MENU_STATE_MSNGR_PEER's local draw arrays -
+    // message rows + every preset slot filled + all fixed actions, even
+    // though msngr_peer_row_count() (the *actual* count for any given
+    // peer/preset configuration) is almost always smaller.
+    #define MSNGR_PEER_MAX_ROWS (MSNGR_PEER_MAX_MSG_ROWS + MSNGR_MAX_PRESETS + MSNGR_PEER_FIXED_ACTION_COUNT)
 
     // MENU_STATE_MSNGR_MSG_DETAIL - a message's content, word-wrapped
     // across up to this many rows, plus one DELETE row (opens
@@ -959,6 +974,42 @@
       {'z', 'x', 'c', 'v', 'b', 'n', 'm', '.', ',', '?', '\x1b'},
     };
 
+    // Cyrillic (ЙЦУКЕН) layout, toggled onto the same grid via a hold on
+    // the Shift key (MSNGR_KB_ALT_HOLD_MS) rather than a dedicated cell -
+    // the grid is already full at 4x11. Letter cells hold the single-byte
+    // glyph codes Fonts/Org_01.h's Cyrillic block was extended with (see
+    // its own header comment for the Ё/А-Я/ё/а-я byte ranges), positioned
+    // to match a real Russian keyboard 1:1 by row/column (Q->Й, A->Ф,
+    // Z->Я, ...) so it's immediately familiar to anyone who's touch-typed
+    // one. Meta keys (\b \n \x02 ' ' \x1b) stay at identical grid
+    // positions in both layouts so msngr_kb_key_type()'s dispatch and the
+    // column layout math don't need to know which layout is active.
+    //
+    // A real Russian keyboard has 3 more letter positions per row than
+    // the ЙЦУКЕН rows below have cells for (the bracket/semicolon/quote
+    // keys) - Б, Ё, Ж, Х, Ъ, Э, Ю don't fit into that 26-cell layout as
+    // a result. Rather than lose them (or reach them through hidden
+    // hold/chord gestures - tried for Ж specifically, reverted once this
+    // turned out to fit directly), the top row's digits are replaced
+    // with these 7 letters in RU mode instead - alphabetical order, not
+    // real-keyboard position, since they no longer correspond to any
+    // physical key. '.', ',', '?' are still left as plain Latin
+    // punctuation rather than becoming their real-keyboard equivalents
+    // (Ю/Б - already covered above anyway) - composing an actual
+    // sentence needs a period more than it needs those two letters.
+    // Digits themselves are still one hold/chord away via the EN/RU
+    // switch (MSNGR_KB_ALT_HOLD_MS) - the 3 leftover cells (7 letters
+    // into 10 slots) hold '-'/'/'/'@' instead, none of which exist
+    // anywhere else on the grid: '-' is genuinely common in Russian
+    // (compound words like кто-то, dates, ranges), '/' for dates and
+    // и/или, '@' for addressing/handles.
+    static const char MSNGR_KB_LAYOUT_RU[MSNGR_KB_ROWS][MSNGR_KB_COLS] = {
+      {'\xA3', '\x80', '\xA8', '\xB7', '\xBC', '\xBF', '\xC0', '-', '/', '@', '\b'}, // Б Ё Ж Х Ъ Э Ю - / @
+      {'\xAB', '\xB8', '\xB5', '\xAC', '\xA7', '\xAF', '\xA5', '\xBA', '\xBB', '\xA9', '\n'},
+      {'\xB6', '\xBD', '\xA4', '\xA2', '\xB1', '\xB2', '\xB0', '\xAD', '\xA6', '\x02', ' '},
+      {'\xC1', '\xB9', '\xB3', '\xAE', '\xAA', '\xB4', '\xBE', '.', ',', '?', '\x1b'},
+    };
+
     #define MSNGR_KB_CHAR      0
     #define MSNGR_KB_BACKSPACE 1
     #define MSNGR_KB_SEND      2
@@ -973,6 +1024,111 @@
       if (ch == '\x02') return MSNGR_KB_SHIFT;
       if (ch == '\x1b') return MSNGR_KB_BACK;
       return MSNGR_KB_CHAR;
+    }
+
+    // Hold duration (ms) that means "do the alternate thing" instead of
+    // the key's plain action - a deliberate hold past this switches
+    // EN/RU on the Shift key, or types the paired punctuation mark on
+    // '.'/','/'?' (see msngr_kb_alt_pair()) - short of MSNGR_TEXT_
+    // ENTRY's own 3s leave-the-keyboard threshold (menu_encoder_button())
+    // and above the 500ms floor menu_button_press() already needs just
+    // to recognize a hold at all, so it's reachable as a deliberate
+    // gesture on both encoder and button-only boards without colliding
+    // with either.
+    #define MSNGR_KB_ALT_HOLD_MS 900
+
+    // Applies the currently-active layout's uppercase transform to a
+    // literal key char - Latin's is the familiar 'a'-'A' offset; the
+    // Cyrillic block in Fonts/Org_01.h was laid out with uppercase
+    // exactly 0x21 below lowercase for every letter (Ё/ё included), so
+    // one fixed offset covers all of it. Non-letter chars (space,
+    // punctuation, meta sentinels) pass through unchanged. Shared by the
+    // grid label (draw_menu_msngr_keyboard_disp()), the normal key-press
+    // insert, and the encoder chord-insert (menu_encoder_chord_rotate()),
+    // so all three stay in sync automatically as layouts are added.
+    char msngr_kb_apply_shift(char ch, bool shift_on) {
+      if (!shift_on) return ch;
+      unsigned char c = (unsigned char)ch;
+      if (c >= 'a' && c <= 'z') return (char)(c - 'a' + 'A');
+      if (c == 0xA1) return (char)0x80;             // ё -> Ё
+      if (c >= 0xA2 && c <= 0xC1) return (char)(c - 0x21); // а-я -> А-Я
+      return ch;
+    }
+
+    // The grid only has room for one punctuation mark per cell, so each
+    // of these is paired with a related mark that shares its cell
+    // rather than eating a whole extra key: '.'/':' (both read as a
+    // full stop/pause), ','/';' (both clause separators), '?'/'!' (both
+    // terminal/emphasis marks), '-'/'+' (both mid-word/number
+    // connectors), '/'/'\' (forward/backward slash - same key pairing
+    // most real keyboards use for these two), '@'/'#' (both address/tag
+    // markers). Returns 0 for any key with no pairing (letters, digits,
+    // meta keys) - callers treat that as "no alternate available".
+    // Reachable via the encoder chord (press-and-turn, menu_encoder_
+    // chord_rotate() - same gesture letters use for a one-shot capital)
+    // or a plain hold past MSNGR_KB_ALT_HOLD_MS (msngr_kb_alt_hold_try())
+    // - not the ordinary Shift toggle, which has no effect on any of
+    // these keys either way (none of them have an "uppercase" form, so
+    // msngr_kb_apply_shift() already leaves them unchanged).
+    //
+    // A hold-alt was tried here for one of the Cyrillic letters missing
+    // from the RU grid too ('ш' -> 'ж') before MSNGR_KB_LAYOUT_RU's top
+    // row was freed up to just hold all of them directly as real keys -
+    // reverted once that turned out to fit. msngr_kb_alt_hold_try()
+    // still runs whatever this returns through msngr_kb_apply_shift(),
+    // so a future letter-alt would still come out correctly cased for
+    // free if one ever gets added back.
+    char msngr_kb_alt_pair(char ch) {
+      if (ch == '.') return ':';
+      if (ch == ',') return ';';
+      if (ch == '?') return '!';
+      if (ch == '-') return '+';
+      if (ch == '/') return '\\';
+      if (ch == '@') return '#';
+      return 0;
+    }
+
+    // Expands msngr_text_entry_buf's internal single-byte Cyrillic codes
+    // into real 2-byte UTF-8 (Fonts/Org_01.h's byte-per-glyph remap is a
+    // device-local rendering shorthand - Adafruit_GFX can only index
+    // glyphs by a single byte, see its own header comment - so it can
+    // never leave the device as-is). Called right before the buffer's
+    // contents go anywhere else: LXMF send, display-name save. ASCII
+    // passes through unchanged. out_cap must leave room for the worst
+    // case (every byte a 2-byte Cyrillic code) plus the NUL.
+    void msngr_kb_expand_utf8(const char *in, char *out, size_t out_cap) {
+      size_t oi = 0;
+      for (size_t i = 0; in[i] != 0 && oi + 3 < out_cap; i++) {
+        unsigned char b = (unsigned char)in[i];
+        uint16_t cp;
+        if      (b == 0x80)                cp = 0x0401;             // Ё
+        else if (b >= 0x81 && b <= 0xA0)    cp = 0x0410 + (b-0x81);  // А-Я
+        else if (b == 0xA1)                 cp = 0x0451;             // ё
+        else if (b >= 0xA2 && b <= 0xC1)    cp = 0x0430 + (b-0xA2);  // а-я
+        else { out[oi++] = (char)b; continue; }
+        out[oi++] = (char)(0xC0 | (cp >> 6));
+        out[oi++] = (char)(0x80 | (cp & 0x3F));
+      }
+      out[oi] = 0;
+    }
+
+    // Byte length msngr_kb_expand_utf8() would produce for in, without
+    // materializing the expanded string - drives the header's char
+    // counter (draw_menu_msngr_keyboard_disp()), which shows actual
+    // wire/payload bytes rather than internal character count. That's
+    // the number that matters over LoRa airtime, and the one that'll
+    // actually get compared against a recipient's own limits - internal
+    // character count is just an implementation detail of this device's
+    // typing buffer. Same byte-range test as msngr_kb_expand_utf8(): any
+    // byte in the internal Cyrillic range (0x80-0xC1, see Fonts/Org_01.h)
+    // costs 2 UTF-8 bytes, everything else (ASCII) costs 1.
+    size_t msngr_kb_utf8_len(const char *in) {
+      size_t n = 0;
+      for (size_t i = 0; in[i] != 0; i++) {
+        unsigned char b = (unsigned char)in[i];
+        n += (b >= 0x80 && b <= 0xC1) ? 2 : 1;
+      }
+      return n;
     }
   #endif
   #endif
@@ -1699,6 +1855,13 @@
     uint8_t msngr_peer_cursor = 0;
     uint8_t msngr_msg_detail_cursor = 0;
     uint8_t msngr_settings_cursor = 0;
+    uint8_t msngr_presets_cursor = 0;
+    // Which msngr_presets[] slot MENU_STATE_MSNGR_PRESET_DETAIL is
+    // showing Edit/Delete/BACK for - set when a preset row is selected
+    // from MENU_STATE_MSNGR_PRESETS, same "remember which one" role
+    // msngr_active_message_hash plays for MENU_STATE_MSNGR_MSG_DETAIL.
+    uint8_t msngr_preset_detail_index = 0;
+    uint8_t msngr_preset_detail_cursor = 0;
 
     // MENU_STATE_MSNGR_SETTINGS/_EDIT - staged, no-write-until-confirmed
     // values, same "staged, commit on exit" shape as
@@ -1729,25 +1892,174 @@
     // MSNGR_KB_LAYOUT, a persistent Shift toggle (caps-lock style, not
     // meshtastic's one-shot long-press), and the message being composed.
     // Reset (cursor to 0, shift off, buffer cleared) every time the screen
-    // is opened fresh from MSNGR_PEER_ACTION_SEND_CUSTOM.
+    // is opened fresh from MSNGR_PEER_FIXED_ACTION_SEND_CUSTOM.
     uint8_t msngr_kb_cursor = 0;
     bool msngr_kb_shift_on = false;
+    // Latin/Cyrillic layout toggle - lives on the same Shift key as case
+    // (see MSNGR_KB_ALT_HOLD_MS), not a separate grid cell (the grid is
+    // already full - 4x11 with no spare slot). Reset alongside cursor/shift
+    // every time the screen is opened fresh, same as those.
+    bool msngr_kb_lang_ru = false;
     char msngr_text_entry_buf[MSNGR_TEXT_ENTRY_MAX_LEN + 1] = {0};
 
+    // The EN/RU switch fires live, the instant a Shift hold crosses
+    // MSNGR_KB_ALT_HOLD_MS, rather than waiting for release - polled
+    // every loop() tick (menu_button_process() below for the main
+    // button, Encoder.h's encoder_process() for the encoder's own
+    // button) via msngr_kb_lang_hold_try(), same "fire once while still
+    // held" shape as Encoder.h's own enc_btn_hold_beeped. Separate flags
+    // per control (rather than one shared flag) because Menu.h and
+    // Encoder.h are two different debounce state machines that can't
+    // see each other's press-state - menu_confirm_select()'s Shift
+    // branch checks/consumes both at release, so whichever control the
+    // switch actually happened on doesn't matter there.
+    bool msngr_kb_lang_hold_fired_btn = false;
+    bool msngr_kb_lang_hold_fired_enc = false;
+
+    // Shared by both pollers above - if held_ms has crossed the
+    // threshold, the current hold hasn't already fired this switch, and
+    // the grid position it's being measured against is actually the
+    // Shift key right now (cursor doesn't move during a plain hold, so
+    // this stays true for the whole gesture once checked), performs the
+    // switch and latches fired_flag so menu_confirm_select() knows to
+    // skip its own release-time toggle. No-ops instead of switching for
+    // any other key - holding a letter key isn't a gesture this screen
+    // gives meaning to, so it's left alone.
+    void msngr_kb_lang_hold_try(unsigned long held_ms, bool &fired_flag) {
+      if (menu_state != MENU_STATE_MSNGR_TEXT_ENTRY || fired_flag || held_ms < MSNGR_KB_ALT_HOLD_MS) return;
+      uint8_t kb_row = msngr_kb_cursor / MSNGR_KB_COLS;
+      uint8_t kb_col = msngr_kb_cursor % MSNGR_KB_COLS;
+      char key_ch = (msngr_kb_lang_ru ? MSNGR_KB_LAYOUT_RU : MSNGR_KB_LAYOUT)[kb_row][kb_col];
+      if (msngr_kb_key_type(key_ch) != MSNGR_KB_SHIFT) return;
+      msngr_kb_lang_ru = !msngr_kb_lang_ru;
+      msngr_kb_shift_on = false;
+      buzzer_encoder_tick_melody();
+      fired_flag = true;
+    }
+
     // MENU_STATE_MSNGR_TEXT_ENTRY is reused for editing the LXMF display
-    // name (RNode Settings > Messenger > Settings > Display Name) as well
-    // as composing a message - this tracks which, since the Send key's
-    // actual action and the exit/discard target differ. All the actual
-    // typing mechanics (grid cursor/shift/buffer above) are identical
-    // either way, only these two branch on it.
+    // name (RNode Settings > Messenger > Settings > Display Name), adding/
+    // editing a preset message (RNode Settings > Messenger > Settings >
+    // Preset Messages), and composing a message - this tracks which,
+    // since the Send key's actual action and the exit/discard target
+    // differ. All the actual typing mechanics (grid cursor/shift/buffer
+    // above) are identical regardless of purpose, only these three
+    // branch on it.
     #define MSNGR_TEXT_ENTRY_PURPOSE_MESSAGE      0
     #define MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME 1
+    #define MSNGR_TEXT_ENTRY_PURPOSE_PRESET        2
     uint8_t msngr_text_entry_purpose = MSNGR_TEXT_ENTRY_PURPOSE_MESSAGE;
+    // Which msngr_presets[] slot PURPOSE_PRESET is editing -
+    // MSNGR_MAX_PRESETS itself (one past the last real slot) is the
+    // sentinel for "adding a new preset" rather than editing an existing
+    // one, same "index == count means append" convention
+    // messenger_preset_add() itself uses internally.
+    uint8_t msngr_preset_edit_index = 0;
+
+    // Same live-while-held shape as msngr_kb_lang_hold_fired_btn/_enc
+    // above, for the punctuation-pair gesture (msngr_kb_alt_pair()) on
+    // '.'/','/'?' instead of the language switch on Shift - separate
+    // flags because a hold can only ever be doing one or the other
+    // (whichever key is actually highlighted), but menu_confirm_select()
+    // still needs to know which, if either, to skip at release.
+    bool msngr_kb_alt_hold_fired_btn = false;
+    bool msngr_kb_alt_hold_fired_enc = false;
+
+    // Same "fire once while held" shape as msngr_kb_lang_hold_try(), for
+    // the highlighted key's paired punctuation mark instead of a
+    // language switch - inserts it directly (respecting the same
+    // length cap the normal MSNGR_KB_CHAR path in menu_confirm_select()
+    // enforces; also run through msngr_kb_apply_shift() same as any
+    // other insert, currently a no-op for punctuation but keeps this
+    // correct for free if a letter-alt ever gets paired here again -
+    // see msngr_kb_alt_pair()'s own comment) rather than just flipping
+    // a mode, since there's nothing else for a hold on a plain
+    // character key to *do*. No-ops for any key with no pairing
+    // (msngr_kb_alt_pair() returns 0) - letters, digits, space, and
+    // every meta key are left entirely to their own existing hold
+    // behavior (Shift's language switch, BACK, etc).
+    void msngr_kb_alt_hold_try(unsigned long held_ms, bool &fired_flag) {
+      if (menu_state != MENU_STATE_MSNGR_TEXT_ENTRY || fired_flag || held_ms < MSNGR_KB_ALT_HOLD_MS) return;
+      uint8_t kb_row = msngr_kb_cursor / MSNGR_KB_COLS;
+      uint8_t kb_col = msngr_kb_cursor % MSNGR_KB_COLS;
+      char key_ch = (msngr_kb_lang_ru ? MSNGR_KB_LAYOUT_RU : MSNGR_KB_LAYOUT)[kb_row][kb_col];
+      char alt = msngr_kb_alt_pair(key_ch);
+      if (alt == 0) return;
+      alt = msngr_kb_apply_shift(alt, msngr_kb_shift_on);
+      size_t max_len = (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME ||
+                         msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_PRESET)
+        ? MSNGR_NAME_MAX_LEN : MSNGR_TEXT_ENTRY_MAX_LEN;
+      size_t text_len = strlen(msngr_text_entry_buf);
+      if (text_len < max_len) {
+        msngr_text_entry_buf[text_len] = alt;
+        msngr_text_entry_buf[text_len + 1] = 0;
+        buzzer_encoder_tick_melody();
+      }
+      fired_flag = true;
+    }
+
+    // Hold-to-repeat threshold/rate for DEL - shorter than MSNGR_KB_ALT_
+    // HOLD_MS on purpose: unlike Shift/punctuation (which do something
+    // *different* on a hold, so need enough delay to not misfire during
+    // an ordinary confirm), a held DEL doing the exact same thing it'd
+    // do anyway, just repeatedly, is safe to start almost immediately -
+    // 500ms is long enough that a normal single backspace tap/click
+    // never reaches it. Repeat interval is a plain judgement call
+    // (~8/sec) - fast enough to actually clear text, slow enough to
+    // still feel countable/controllable one character at a time.
+    #define MSNGR_KB_DEL_REPEAT_START_MS    500
+    #define MSNGR_KB_DEL_REPEAT_INTERVAL_MS 120
+
+    // Same per-control fired-flag pattern as msngr_kb_lang_hold_fired_*/
+    // msngr_kb_alt_hold_fired_* above, plus a per-control "when did
+    // this hold's most recent repeat happen" timestamp (0 = hasn't
+    // repeated yet this hold) to pace repeats at MSNGR_KB_DEL_REPEAT_
+    // INTERVAL_MS apart instead of firing every single loop() tick.
+    bool msngr_kb_del_hold_fired_btn = false;
+    bool msngr_kb_del_hold_fired_enc = false;
+    unsigned long msngr_kb_del_repeat_last_btn = 0;
+    unsigned long msngr_kb_del_repeat_last_enc = 0;
+
+    // Same "fire (repeatedly) while held" shape as msngr_kb_lang_hold_
+    // try()/msngr_kb_alt_hold_try(), except this one keeps firing at
+    // MSNGR_KB_DEL_REPEAT_INTERVAL_MS apart for as long as the hold
+    // continues past the start threshold, instead of just once. The
+    // very first repeat fires the moment held_ms crosses the start
+    // threshold (last_repeat_ms is still 0 then, so the interval check
+    // is skipped) - deletes exactly like a normal DEL tap would, just
+    // triggered early instead of waiting for release.
+    void msngr_kb_del_hold_try(unsigned long held_ms, bool &fired_flag, unsigned long &last_repeat_ms) {
+      if (menu_state != MENU_STATE_MSNGR_TEXT_ENTRY || held_ms < MSNGR_KB_DEL_REPEAT_START_MS) return;
+      uint8_t kb_row = msngr_kb_cursor / MSNGR_KB_COLS;
+      uint8_t kb_col = msngr_kb_cursor % MSNGR_KB_COLS;
+      char key_ch = (msngr_kb_lang_ru ? MSNGR_KB_LAYOUT_RU : MSNGR_KB_LAYOUT)[kb_row][kb_col];
+      if (msngr_kb_key_type(key_ch) != MSNGR_KB_BACKSPACE) return;
+      unsigned long now = millis();
+      if (last_repeat_ms != 0 && now - last_repeat_ms < MSNGR_KB_DEL_REPEAT_INTERVAL_MS) return;
+      size_t text_len = strlen(msngr_text_entry_buf);
+      if (text_len > 0) {
+        msngr_text_entry_buf[text_len - 1] = 0;
+        buzzer_encoder_tick_melody();
+      }
+      last_repeat_ms = now;
+      fired_flag = true;
+    }
 
     // MENU_STATE_MSNGR_DISCARD_CONFIRM - same "default to CANCEL" pattern
     // as msngr_delete_confirm_cursor/msngr_clear_confirm_cursor above
     // (0 = DISCARD, 1 = CANCEL).
     uint8_t msngr_discard_confirm_cursor = 1;
+
+    // Where leaving MENU_STATE_MSNGR_TEXT_ENTRY (Send/BACK/discard alike)
+    // lands, based on why it was opened - shared by menu_msngr_text_
+    // entry_leave() below and MENU_STATE_MSNGR_DISCARD_CONFIRM's own
+    // DISCARD branch (menu_confirm_select()), which used to duplicate
+    // this same two-way ternary rather than call it.
+    uint8_t msngr_text_entry_return_state() {
+      if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME) return MENU_STATE_MSNGR_SETTINGS;
+      if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_PRESET) return MENU_STATE_MSNGR_PRESETS;
+      return MENU_STATE_MSNGR_PEER;
+    }
 
     // Shared exit path for leaving MENU_STATE_MSNGR_TEXT_ENTRY without
     // sending - both the on-grid BACK key (msngr_kb_key_type() dispatch,
@@ -1758,8 +2070,7 @@
     // straight back to the peer screen if nothing's been typed; otherwise
     // opens a DISCARD/CANCEL confirmation instead of silently losing it.
     void menu_msngr_text_entry_leave() {
-      uint8_t return_state = (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME)
-        ? MENU_STATE_MSNGR_SETTINGS : MENU_STATE_MSNGR_PEER;
+      uint8_t return_state = msngr_text_entry_return_state();
       if (strlen(msngr_text_entry_buf) == 0) {
         menu_state = return_state;
       } else {
@@ -1816,6 +2127,18 @@
       return (uint8_t)(n + 1);
     }
 
+    // One row per configured preset, plus an "Add Preset" row (only
+    // while under MSNGR_MAX_PRESETS - unlike bookmarks/announces, presets
+    // have their own direct add action right in this list rather than
+    // being populated from elsewhere, so there's always something
+    // actionable to show even at 0 - no "No Presets" dead label needed),
+    // plus BACK.
+    uint8_t msngr_presets_row_count() {
+      uint8_t n = msngr_preset_count;
+      if (msngr_preset_count < MSNGR_MAX_PRESETS) n++; // "Add Preset"
+      return (uint8_t)(n + 1); // + BACK
+    }
+
     uint8_t msngr_announces_row_count() {
       uint8_t n = 0;
       for (uint8_t i = 0; i < MSNGR_MAX_ANNOUNCES; i++) if (msngr_announces[i].in_use) n++;
@@ -1837,7 +2160,7 @@
     }
 
     uint8_t msngr_peer_row_count() {
-      return (uint8_t)(msngr_peer_msg_row_count() + MSNGR_PEER_ACTION_COUNT);
+      return (uint8_t)(msngr_peer_msg_row_count() + msngr_preset_count + MSNGR_PEER_FIXED_ACTION_COUNT);
     }
 
     // Chars-per-row for MENU_STATE_MSNGR_MSG_DETAIL's word-wrap - tuned for
@@ -1854,7 +2177,7 @@
       size_t lines = (len + MSNGR_MSG_DETAIL_CHARS_PER_LINE - 1) / MSNGR_MSG_DETAIL_CHARS_PER_LINE;
       if (lines == 0) lines = 1;
       if (lines > MSNGR_MSG_DETAIL_MAX_LINES) lines = MSNGR_MSG_DETAIL_MAX_LINES;
-      return (uint8_t)(lines + 2); // content lines + DELETE + BACK
+      return (uint8_t)(lines + 3); // content lines + REPLY + DELETE + BACK
     }
   #endif
   #endif
@@ -3541,6 +3864,12 @@
         else if (msngr_settings_cursor == MSNGR_SETTINGS_ITEM_RETRY_DELAY) step_msngr_retry_delay(dir, wrap);
         else if (msngr_settings_cursor == MSNGR_SETTINGS_ITEM_ANNOUNCE_START) staged_msngr_announce_at_start = !staged_msngr_announce_at_start;
         else if (msngr_settings_cursor == MSNGR_SETTINGS_ITEM_ANNOUNCE_INTERVAL) step_msngr_announce_interval(dir, wrap);
+      } else if (menu_state == MENU_STATE_MSNGR_PRESETS) {
+        buzzer_encoder_tick_melody();
+        msngr_presets_cursor = menu_clamp_cursor(msngr_presets_cursor, dir, msngr_presets_row_count(), wrap);
+      } else if (menu_state == MENU_STATE_MSNGR_PRESET_DETAIL) {
+        buzzer_encoder_tick_melody();
+        msngr_preset_detail_cursor = menu_clamp_cursor(msngr_preset_detail_cursor, dir, 3, wrap);
       }
       #endif
     #endif
@@ -3627,27 +3956,49 @@
   // Called instead of menu_encoder_rotate() when a rotation tick arrives
   // while the button is held (Encoder.h's encoder_process()). Only
   // MENU_STATE_MSNGR_TEXT_ENTRY gives the chord any meaning - press-and-
-  // turn inserts the highlighted key's uppercase form without moving the
-  // cursor, the same "shifted" gesture meshtastic's own VirtualKeyboard
-  // gets from a long-press (not reusable here, since a long hold on this
-  // screen already means "leave the keyboard" - see menu_encoder_button()
-  // and menu_msngr_text_entry_leave()). Every other screen falls straight
-  // through to the normal rotate handling - so holding the button while
-  // turning anywhere else keeps behaving exactly as it already did.
+  // turn inserts the highlighted key's uppercase form (letters) or its
+  // paired alternate mark (the '.'/','/'?' punctuation cells, see
+  // msngr_kb_alt_pair()) without moving the cursor, the same "shifted"
+  // gesture meshtastic's own VirtualKeyboard gets from a long-press (not
+  // reusable here, since a long hold on this screen already means
+  // "leave the keyboard" - see menu_encoder_button() and menu_msngr_
+  // text_entry_leave()). Every other screen falls straight through to
+  // the normal rotate handling - so holding the button while turning
+  // anywhere else keeps behaving exactly as it already did.
   void menu_encoder_chord_rotate(int8_t dir) {
     #if HAS_LXMF == true
       if (menu_state == MENU_STATE_MSNGR_TEXT_ENTRY) {
         msngr_kb_chord_used = true;
         uint8_t kb_row = msngr_kb_cursor / MSNGR_KB_COLS;
         uint8_t kb_col = msngr_kb_cursor % MSNGR_KB_COLS;
-        char key_ch = MSNGR_KB_LAYOUT[kb_row][kb_col];
+        char key_ch = (msngr_kb_lang_ru ? MSNGR_KB_LAYOUT_RU : MSNGR_KB_LAYOUT)[kb_row][kb_col];
         if (msngr_kb_key_type(key_ch) == MSNGR_KB_CHAR) {
           size_t text_len = strlen(msngr_text_entry_buf);
-          if (text_len < MSNGR_TEXT_ENTRY_MAX_LEN && key_ch >= 'a' && key_ch <= 'z') {
-            msngr_text_entry_buf[text_len] = key_ch - 'a' + 'A';
+          // Letters get their uppercase form; punctuation has no
+          // uppercase (apply_shift() leaves it unchanged), so falls
+          // back to its paired alternate mark instead - either way,
+          // to_insert == key_ch means "this key has no chord action".
+          char shifted = msngr_kb_apply_shift(key_ch, true);
+          char to_insert = (shifted != key_ch) ? shifted : msngr_kb_alt_pair(key_ch);
+          if (text_len < MSNGR_TEXT_ENTRY_MAX_LEN && to_insert != 0) {
+            msngr_text_entry_buf[text_len] = to_insert;
             msngr_text_entry_buf[text_len + 1] = 0;
             buzzer_encoder_tick_melody();
           }
+        } else if (msngr_kb_key_type(key_ch) == MSNGR_KB_SHIFT) {
+          // Quick alternative to holding Shift past MSNGR_KB_ALT_HOLD_MS
+          // (msngr_kb_lang_hold_try()) - press-and-turn switches EN/RU
+          // immediately on the first tick, same as chording a letter
+          // inserts its capital immediately rather than waiting for a
+          // hold. Reuses msngr_kb_chord_used (already set true above)
+          // for release-suppression, so there's no separate fired-flag
+          // needed the way the hold path requires - a rotated tick while
+          // still held plus release only ever means "chord", covered by
+          // the exact same is-this-release-the-tail-of-a-chord check
+          // menu_encoder_button() already does for every other chord.
+          msngr_kb_lang_ru = !msngr_kb_lang_ru;
+          msngr_kb_shift_on = false;
+          buzzer_encoder_tick_melody();
         }
         return;
       }
@@ -3655,7 +4006,7 @@
     menu_encoder_rotate(dir, false);
   }
 
-  void menu_confirm_select();
+  void menu_confirm_select(unsigned long duration = 0);
 
   // Shared by the encoder's long-press-from-closed and the main button's
   // dedicated open-menu hold duration (see button_event()) - no-ops if the
@@ -3776,14 +4127,31 @@
       return;
     }
 
-    if (menu_state != MENU_STATE_CLOSED) buzzer_encoder_click_melody();
-    menu_confirm_select();
+    // Skip the usual click - msngr_kb_lang_hold_try()/msngr_kb_alt_
+    // hold_try() already played their own tick the moment the hold
+    // actually fired, mid-press; beeping again here on release would be
+    // a redundant second sound for the same one gesture. Only relevant
+    // to this encoder button's own flags (msngr_kb_..._fired_enc) - the
+    // main button's (msngr_kb_..._fired_btn) are menu_button_press()'s
+    // concern, released independently.
+    #if HAS_LXMF == true
+      bool msngr_kb_alt_already_beeped = msngr_kb_lang_hold_fired_enc || msngr_kb_alt_hold_fired_enc || msngr_kb_del_hold_fired_enc;
+    #else
+      bool msngr_kb_alt_already_beeped = false;
+    #endif
+    if (menu_state != MENU_STATE_CLOSED && !msngr_kb_alt_already_beeped) buzzer_encoder_click_melody();
+    menu_confirm_select(duration);
   }
 
   // The "confirm/select at the current level" action - shared by the
   // encoder's short-click and the main button's long-press (see
   // menu_button_press()), so both controls behave identically here.
-  void menu_confirm_select() {
+  // duration is the triggering press's hold time (ms) as both callers
+  // already had it - unused everywhere except MSNGR_TEXT_ENTRY's Shift
+  // key (see MSNGR_KB_ALT_HOLD_MS); every other branch ignores it, same
+  // as before this parameter existed. Defaults to 0 at the declaration
+  // for any future call site that has no meaningful duration to give it.
+  void menu_confirm_select(unsigned long duration) {
     if (menu_state == MENU_STATE_LIST) {
       if (menu_cursor == MENU_ITEM_SAVE_EXIT) {
         menu_commit_and_exit();
@@ -4527,7 +4895,11 @@
           }
           msngr_kb_cursor = 0;
           msngr_kb_shift_on = false;
+          msngr_kb_lang_ru = false;
           menu_state = MENU_STATE_MSNGR_TEXT_ENTRY;
+        } else if (msngr_settings_cursor == MSNGR_SETTINGS_ITEM_PRESETS) {
+          msngr_presets_cursor = 0;
+          menu_state = MENU_STATE_MSNGR_PRESETS;
         } else if (msngr_settings_cursor == MSNGR_SETTINGS_ITEM_BACK) {
           if (staged_msngr_max_retries != msngr_max_retries) {
             msngr_retries_conf_save(staged_msngr_max_retries);
@@ -4548,6 +4920,47 @@
         // to the list, actual eeprom_update() happens on the list's own
         // BACK row" shape as MENU_STATE_BT_SETTINGS_EDIT.
         menu_state = MENU_STATE_MSNGR_SETTINGS;
+      } else if (menu_state == MENU_STATE_MSNGR_PRESETS) {
+        uint8_t row_count = msngr_presets_row_count();
+        bool has_add_row = msngr_preset_count < MSNGR_MAX_PRESETS;
+        if (msngr_presets_cursor == row_count - 1) {
+          menu_state = MENU_STATE_MSNGR_SETTINGS;
+        } else if (has_add_row && msngr_presets_cursor == msngr_preset_count) {
+          // "Add Preset" row - same reset-and-open sequence Display
+          // Name/Reply already use, blank buffer (nothing to pre-fill
+          // for a brand new preset) and the append sentinel (see
+          // msngr_preset_edit_index's own declaration).
+          msngr_text_entry_purpose = MSNGR_TEXT_ENTRY_PURPOSE_PRESET;
+          msngr_preset_edit_index = msngr_preset_count;
+          msngr_text_entry_buf[0] = 0;
+          msngr_kb_cursor = 0;
+          msngr_kb_shift_on = false;
+          msngr_kb_lang_ru = false;
+          menu_state = MENU_STATE_MSNGR_TEXT_ENTRY;
+        } else if (msngr_presets_cursor < msngr_preset_count) {
+          msngr_preset_detail_index = msngr_presets_cursor;
+          msngr_preset_detail_cursor = 0;
+          menu_state = MENU_STATE_MSNGR_PRESET_DETAIL;
+        }
+      } else if (menu_state == MENU_STATE_MSNGR_PRESET_DETAIL) {
+        if (msngr_preset_detail_cursor == 0) { // Edit
+          msngr_text_entry_purpose = MSNGR_TEXT_ENTRY_PURPOSE_PRESET;
+          msngr_preset_edit_index = msngr_preset_detail_index;
+          snprintf(msngr_text_entry_buf, MSNGR_TEXT_ENTRY_MAX_LEN + 1, "%s", msngr_presets[msngr_preset_detail_index]);
+          msngr_kb_cursor = 0;
+          msngr_kb_shift_on = false;
+          msngr_kb_lang_ru = false;
+          menu_state = MENU_STATE_MSNGR_TEXT_ENTRY;
+        } else if (msngr_preset_detail_cursor == 1) { // Delete
+          // Immediate, no confirm dialog - unlike MENU_STATE_MSNGR_
+          // DELETE_CONFIRM (a received message, permanent data loss), a
+          // preset is trivially retypable, same directness bookmark
+          // removal already gets away with.
+          messenger_preset_delete(msngr_preset_detail_index);
+          menu_state = MENU_STATE_MSNGR_PRESETS;
+        } else { // BACK
+          menu_state = MENU_STATE_MSNGR_PRESETS;
+        }
       } else if (menu_state == MENU_STATE_MSNGR_INBOX) {
         uint8_t row_count = msngr_inbox_row_count();
         if (msngr_inbox_cursor == row_count - 1) {
@@ -4616,30 +5029,8 @@
           menu_state = MENU_STATE_MSNGR_MSG_DETAIL;
         } else {
           uint8_t action = msngr_peer_cursor - msg_rows;
-          if (action == MSNGR_PEER_ACTION_BACK) {
-            menu_state = msngr_peer_return_state;
-          } else if (action == MSNGR_PEER_ACTION_BOOKMARK) {
-            if (messenger_bookmark_find(msngr_active_peer_hash) >= 0) {
-              messenger_bookmark_remove(msngr_active_peer_hash);
-            } else {
-              messenger_bookmark_add(msngr_active_peer_hash, messenger_peer_display_name(msngr_active_peer_hash));
-            }
-          } else if (action == MSNGR_PEER_ACTION_CLEAR) {
-            msngr_clear_confirm_cursor = 1; // default CANCEL - see its own declaration
-            menu_state = MENU_STATE_MSNGR_CLEAR_CONFIRM;
-          } else if (action == MSNGR_PEER_ACTION_PING) {
-            messenger_ping_start(msngr_active_peer_hash);
-            msngr_ping_result_cursor = 1; // default BACK - see its own declaration
-            menu_state = MENU_STATE_MSNGR_PING_RESULT;
-          } else if (action == MSNGR_PEER_ACTION_SEND_CUSTOM) {
-            msngr_kb_cursor = 0;
-            msngr_kb_shift_on = false;
-            msngr_text_entry_buf[0] = 0;
-            menu_state = MENU_STATE_MSNGR_TEXT_ENTRY;
-          } else if (action == MSNGR_PEER_ACTION_SEND_HI || action == MSNGR_PEER_ACTION_SEND_BYE || action == MSNGR_PEER_ACTION_SEND_SOS) {
-            // MSNGR_PEER_ACTION_SEND_HI/BYE/SOS are 0/1/2, same order as
-            // MSNGR_PRESETS (Messenger.h) - index straight through.
-            msngr_last_send_result = messenger_send_lxmf(msngr_active_peer_hash, MSNGR_PRESETS[action]);
+          if (action < msngr_preset_count) {
+            msngr_last_send_result = messenger_send_lxmf(msngr_active_peer_hash, msngr_presets[action]);
             if (msngr_last_send_result == URNS_LXMF_SEND_OK || msngr_last_send_result == URNS_LXMF_SEND_RESOLVING) {
               // A new (outgoing) message was just saved (OK) - or identity/
               // path is still being resolved and nothing exists to show yet
@@ -4657,17 +5048,64 @@
               menu_open_popup(urns_lxmf_send_result_text(msngr_last_send_result), MENU_STATE_MSNGR_PEER);
               menu_popup_auto_dismiss_at = millis() + ACTION_POPUP_MS;
             }
+          } else {
+            uint8_t fixed_action = action - msngr_preset_count;
+            if (fixed_action == MSNGR_PEER_FIXED_ACTION_BACK) {
+              menu_state = msngr_peer_return_state;
+            } else if (fixed_action == MSNGR_PEER_FIXED_ACTION_BOOKMARK) {
+              if (messenger_bookmark_find(msngr_active_peer_hash) >= 0) {
+                messenger_bookmark_remove(msngr_active_peer_hash);
+              } else {
+                messenger_bookmark_add(msngr_active_peer_hash, messenger_peer_display_name(msngr_active_peer_hash));
+              }
+            } else if (fixed_action == MSNGR_PEER_FIXED_ACTION_CLEAR) {
+              msngr_clear_confirm_cursor = 1; // default CANCEL - see its own declaration
+              menu_state = MENU_STATE_MSNGR_CLEAR_CONFIRM;
+            } else if (fixed_action == MSNGR_PEER_FIXED_ACTION_PING) {
+              messenger_ping_start(msngr_active_peer_hash);
+              msngr_ping_result_cursor = 1; // default BACK - see its own declaration
+              menu_state = MENU_STATE_MSNGR_PING_RESULT;
+            } else if (fixed_action == MSNGR_PEER_FIXED_ACTION_SEND_CUSTOM) {
+              // Explicit reset, not a reliance on MSNGR_TEXT_ENTRY_
+              // PURPOSE_MESSAGE just happening to be the compile-time
+              // default (0) - now that DISPLAY_NAME/PRESET entry points
+              // both set this away from MESSAGE, this screen needs to
+              // set it back explicitly too, or a stale purpose from
+              // whichever of those was opened most recently would leak
+              // into this compose session.
+              msngr_text_entry_purpose = MSNGR_TEXT_ENTRY_PURPOSE_MESSAGE;
+              msngr_kb_cursor = 0;
+              msngr_kb_shift_on = false;
+              msngr_kb_lang_ru = false;
+              msngr_text_entry_buf[0] = 0;
+              menu_state = MENU_STATE_MSNGR_TEXT_ENTRY;
+            }
           }
         }
       } else if (menu_state == MENU_STATE_MSNGR_MSG_DETAIL) {
-        // Content lines are read-only - only the trailing DELETE/BACK rows
-        // do anything.
+        // Content lines are read-only - only the trailing REPLY/DELETE/
+        // BACK rows do anything.
         uint8_t row_count = msngr_msg_detail_row_count();
         if (msngr_msg_detail_cursor == row_count - 1) {
           menu_state = MENU_STATE_MSNGR_PEER;
         } else if (msngr_msg_detail_cursor == row_count - 2) {
           msngr_delete_confirm_cursor = 1; // default CANCEL - see its own declaration
           menu_state = MENU_STATE_MSNGR_DELETE_CONFIRM;
+        } else if (msngr_msg_detail_cursor == row_count - 3) {
+          // Same reset sequence MSNGR_PEER_FIXED_ACTION_SEND_CUSTOM uses to
+          // open the keyboard fresh - msngr_active_peer_hash is already
+          // this message's own peer (set on entering MENU_STATE_MSNGR_
+          // PEER, never touched by MSG_DETAIL), so the composed reply
+          // goes to the right destination without needing to look
+          // anything up again here. Purpose reset explicitly, not left
+          // to the compile-time default - see MSNGR_PEER_FIXED_ACTION_
+          // SEND_CUSTOM's own matching comment on the peer screen.
+          msngr_text_entry_purpose = MSNGR_TEXT_ENTRY_PURPOSE_MESSAGE;
+          msngr_kb_cursor = 0;
+          msngr_kb_shift_on = false;
+          msngr_kb_lang_ru = false;
+          msngr_text_entry_buf[0] = 0;
+          menu_state = MENU_STATE_MSNGR_TEXT_ENTRY;
         }
       } else if (menu_state == MENU_STATE_MSNGR_DELETE_CONFIRM) {
         if (msngr_delete_confirm_cursor == 0) { // DELETE
@@ -4720,48 +5158,112 @@
         // since confirm_select() is already spoken for as "press this key".
         uint8_t kb_row = msngr_kb_cursor / MSNGR_KB_COLS;
         uint8_t kb_col = msngr_kb_cursor % MSNGR_KB_COLS;
-        char key_ch = MSNGR_KB_LAYOUT[kb_row][kb_col];
+        char key_ch = (msngr_kb_lang_ru ? MSNGR_KB_LAYOUT_RU : MSNGR_KB_LAYOUT)[kb_row][kb_col];
         uint8_t key_type = msngr_kb_key_type(key_ch);
         size_t text_len = strlen(msngr_text_entry_buf);
 
         if (key_type == MSNGR_KB_CHAR || key_type == MSNGR_KB_SPACE) {
-          // Display Name uses the same practical cap as bookmark/announce
-          // names elsewhere in this file (MSNGR_NAME_MAX_LEN=31) - the
-          // protocol's own single-announce-packet ceiling is much higher
-          // (~274-280 bytes, derived from Type::Reticulum::MTU/HEADER_
-          // MAXSIZE/IFAC_MIN_SIZE minus the announce's fixed identity/
-          // signature/ratchet fields), but that's not a sane UI limit for
-          // a name field. Message composing keeps the higher MSNGR_TEXT_
-          // ENTRY_MAX_LEN (140) unchanged.
-          size_t max_len = (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME)
-            ? MSNGR_NAME_MAX_LEN : MSNGR_TEXT_ENTRY_MAX_LEN;
-          if (text_len < max_len) {
-            char c = (key_type == MSNGR_KB_SPACE) ? ' ' : key_ch;
-            if (msngr_kb_shift_on && c >= 'a' && c <= 'z') c = c - 'a' + 'A';
-            msngr_text_entry_buf[text_len] = c;
-            msngr_text_entry_buf[text_len + 1] = 0;
+          if (msngr_kb_alt_hold_fired_btn || msngr_kb_alt_hold_fired_enc) {
+            // Already inserted the paired punctuation mark live, mid-hold
+            // (msngr_kb_alt_hold_try(), see its own comment) - this
+            // release is just the tail end of that gesture, not a fresh
+            // press, so it shouldn't also insert the key's own plain
+            // character on top of it.
+            msngr_kb_alt_hold_fired_btn = false;
+            msngr_kb_alt_hold_fired_enc = false;
+          } else {
+            // Display Name uses the same practical cap as bookmark/announce
+            // names elsewhere in this file (MSNGR_NAME_MAX_LEN=31) - the
+            // protocol's own single-announce-packet ceiling is much higher
+            // (~274-280 bytes, derived from Type::Reticulum::MTU/HEADER_
+            // MAXSIZE/IFAC_MIN_SIZE minus the announce's fixed identity/
+            // signature/ratchet fields), but that's not a sane UI limit for
+            // a name field. Message composing keeps the higher MSNGR_TEXT_
+            // ENTRY_MAX_LEN (140) unchanged.
+            size_t max_len = (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME ||
+                               msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_PRESET)
+              ? MSNGR_NAME_MAX_LEN : MSNGR_TEXT_ENTRY_MAX_LEN;
+            if (text_len < max_len) {
+              char c = (key_type == MSNGR_KB_SPACE) ? ' ' : msngr_kb_apply_shift(key_ch, msngr_kb_shift_on);
+              msngr_text_entry_buf[text_len] = c;
+              msngr_text_entry_buf[text_len + 1] = 0;
+            }
           }
         } else if (key_type == MSNGR_KB_BACKSPACE) {
-          if (text_len > 0) msngr_text_entry_buf[text_len - 1] = 0;
+          if (msngr_kb_del_hold_fired_btn || msngr_kb_del_hold_fired_enc) {
+            // Already deleted (at least once, maybe several times) live,
+            // mid-hold (msngr_kb_del_hold_try()) - this release is just
+            // the tail end of that gesture, not a fresh press, so it
+            // shouldn't also delete one more character on top of it.
+            msngr_kb_del_hold_fired_btn = false;
+            msngr_kb_del_hold_fired_enc = false;
+          } else if (text_len > 0) {
+            msngr_text_entry_buf[text_len - 1] = 0;
+          }
         } else if (key_type == MSNGR_KB_SHIFT) {
-          msngr_kb_shift_on = !msngr_kb_shift_on;
+          // A quick press still just toggles case (unchanged). A
+          // deliberate hold past MSNGR_KB_ALT_HOLD_MS switches layout
+          // instead - but that already happened live, mid-hold (see
+          // msngr_kb_lang_hold_try(), polled from menu_button_process()/
+          // Encoder.h's encoder_process()), not here. This release is
+          // just the tail end of that gesture, so it only needs to
+          // consume whichever flag fired and skip toggling case - the
+          // duration check below is a defensive fallback for a release
+          // that somehow crossed the threshold without a live poll
+          // catching it first, which shouldn't normally happen since
+          // polling runs every loop() tick, far more often than a
+          // release can occur.
+          if (msngr_kb_lang_hold_fired_btn || msngr_kb_lang_hold_fired_enc) {
+            msngr_kb_lang_hold_fired_btn = false;
+            msngr_kb_lang_hold_fired_enc = false;
+          } else if (duration >= MSNGR_KB_ALT_HOLD_MS) {
+            msngr_kb_lang_ru = !msngr_kb_lang_ru;
+            msngr_kb_shift_on = false;
+          } else {
+            msngr_kb_shift_on = !msngr_kb_shift_on;
+          }
         } else if (key_type == MSNGR_KB_BACK) {
           menu_msngr_text_entry_leave();
         } else if (key_type == MSNGR_KB_SEND) {
           if (text_len > 0 && msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME) {
             // No result screen needed - unlike an LXMF send, this can't
             // fail in a way worth reporting (a local file write), so it's
-            // save-and-return rather than save-and-show-status.
-            msngr_display_name_conf_save(msngr_text_entry_buf);
+            // save-and-return rather than save-and-show-status. Expanded
+            // to real UTF-8 first (msngr_kb_expand_utf8()) - the announce
+            // this name goes out in is read by other Reticulum clients,
+            // not just this device's own Org_01 glyph table.
+            char name_utf8[MSNGR_NAME_MAX_LEN * 2 + 1];
+            msngr_kb_expand_utf8(msngr_text_entry_buf, name_utf8, sizeof(name_utf8));
+            msngr_display_name_conf_save(name_utf8);
             msngr_text_entry_buf[0] = 0;
             menu_state = MENU_STATE_MSNGR_SETTINGS;
+          } else if (text_len > 0 && msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_PRESET) {
+            // No UTF-8 expansion needed here unlike the display-name/
+            // message branches - this text never leaves the device, same
+            // reasoning bookmark names already get away with storing as
+            // typed (Messenger.h). msngr_preset_edit_index == msngr_
+            // preset_count (set when MENU_STATE_MSNGR_PRESETS' own "Add
+            // Preset" row opened this screen) means append a new one;
+            // anything less is an existing slot being edited in place -
+            // same "index == count means append" sentinel messenger_
+            // preset_add() itself uses.
+            if (msngr_preset_edit_index >= msngr_preset_count) {
+              messenger_preset_add(msngr_text_entry_buf);
+            } else {
+              messenger_preset_update(msngr_preset_edit_index, msngr_text_entry_buf);
+            }
+            msngr_text_entry_buf[0] = 0;
+            menu_state = MENU_STATE_MSNGR_PRESETS;
           } else if (text_len > 0) {
             // Only actually clear the composed text on a confirmed send -
             // a failure leaves it in place so the user can retry instead
             // of having to retype it. Same MENU_STATE_MSNGR_SEND_RESULT
             // hand-off as the preset Send: Hi/Bye/SOS actions - see that
-            // branch's own comment.
-            msngr_last_send_result = messenger_send_lxmf(msngr_active_peer_hash, msngr_text_entry_buf);
+            // branch's own comment. Expanded to real UTF-8 first, same
+            // reasoning as the display-name save above.
+            char msg_utf8[MSNGR_TEXT_ENTRY_MAX_LEN * 2 + 1];
+            msngr_kb_expand_utf8(msngr_text_entry_buf, msg_utf8, sizeof(msg_utf8));
+            msngr_last_send_result = messenger_send_lxmf(msngr_active_peer_hash, msg_utf8);
             if (msngr_last_send_result == URNS_LXMF_SEND_OK || msngr_last_send_result == URNS_LXMF_SEND_RESOLVING) {
               // RESOLVING already has its own copy of this text (msngr_send_
               // pending_content, Messenger.h) independent of this buffer -
@@ -4780,8 +5282,7 @@
       } else if (menu_state == MENU_STATE_MSNGR_DISCARD_CONFIRM) {
         if (msngr_discard_confirm_cursor == 0) { // DISCARD
           msngr_text_entry_buf[0] = 0;
-          menu_state = (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME)
-            ? MENU_STATE_MSNGR_SETTINGS : MENU_STATE_MSNGR_PEER;
+          menu_state = msngr_text_entry_return_state();
         } else { // CANCEL - resume typing, buffer/cursor/shift untouched
           menu_state = MENU_STATE_MSNGR_TEXT_ENTRY;
         }
@@ -5065,8 +5566,16 @@
       }
     } else if (duration >= 500) {
       menu_btn_pending = false; // long-press supersedes any pending tap
-      if (menu_state != MENU_STATE_CLOSED) buzzer_encoder_click_melody();
-      menu_confirm_select();
+      // Skip the usual click if the hold already beeped for itself -
+      // see menu_encoder_button()'s own matching comment (same reasoning,
+      // just this control's own _btn flags instead of _enc).
+      #if HAS_LXMF == true
+        bool msngr_kb_alt_already_beeped = msngr_kb_lang_hold_fired_btn || msngr_kb_alt_hold_fired_btn || msngr_kb_del_hold_fired_btn;
+      #else
+        bool msngr_kb_alt_already_beeped = false;
+      #endif
+      if (menu_state != MENU_STATE_CLOSED && !msngr_kb_alt_already_beeped) buzzer_encoder_click_melody();
+      menu_confirm_select(duration);
     }
   }
 
@@ -5078,6 +5587,26 @@
       menu_btn_pending = false;
       menu_encoder_rotate(1, true);
     }
+    #if HAS_LXMF == true
+      // Live EN/RU switch, punctuation/letter-alternate, and DEL-repeat
+      // on a held main button - see msngr_kb_lang_hold_try()/msngr_kb_alt_
+      // hold_try()/msngr_kb_del_hold_try()'s own comments. Encoder
+      // boards get the same behavior from their encoder's own button
+      // via Encoder.h's encoder_process(), polled there instead since
+      // button_pressed()/button_down_last (Input.h) only ever reflect
+      // this main button, not the encoder's separate physical button.
+      if (button_pressed()) {
+        unsigned long held_ms = millis() - button_down_last;
+        msngr_kb_lang_hold_try(held_ms, msngr_kb_lang_hold_fired_btn);
+        msngr_kb_alt_hold_try(held_ms, msngr_kb_alt_hold_fired_btn);
+        msngr_kb_del_hold_try(held_ms, msngr_kb_del_hold_fired_btn, msngr_kb_del_repeat_last_btn);
+      } else {
+        msngr_kb_lang_hold_fired_btn = false;
+        msngr_kb_alt_hold_fired_btn = false;
+        msngr_kb_del_hold_fired_btn = false;
+        msngr_kb_del_repeat_last_btn = 0;
+      }
+    #endif
   }
 
   // Org_01 glyphs sit 4px above and 1px below the setCursor() baseline, so
@@ -5264,27 +5793,68 @@
       MENU_GFX.setFont(MENU_FONT);
       MENU_GFX.setTextSize(1);
       MENU_GFX.setTextColor(SSD1306_WHITE);
-      MENU_GFX.setCursor(6, MENU_HEADER_TEXT_Y);
-      MENU_GFX.print(msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME ? "Name" : "Send Message");
+      // 1px below the usual MENU_HEADER_TEXT_Y baseline every other
+      // screen's title uses - the EN/RU indicator box below needs that
+      // extra pixel of headroom above its own text or it clips against
+      // the very top of the canvas. Local to this screen only; every
+      // other menu keeps the shared constant unchanged.
+      const int16_t header_y = MENU_HEADER_TEXT_Y + 1;
+      MENU_GFX.setCursor(6, header_y);
+      MENU_GFX.print(msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME ? "Name" :
+                     msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_PRESET ? "Preset" : "Send Msg");
 
-      // Char count, right-aligned on the same title line - "(used/max)",
-      // max matching whichever buffer msngr_kb_key_type()'s DEL/typing
-      // handlers are actually enforcing for this purpose (MSNGR_NAME_MAX_LEN
-      // for the display-name reuse of this screen, MSNGR_TEXT_ENTRY_MAX_LEN
-      // otherwise - same ternary already used at the input-handling site).
+      // Byte count, right-aligned on the same title line - "(N bytes)",
+      // the actual UTF-8 payload size this buffer would send/save as
+      // (msngr_kb_utf8_len()) - the number that costs LoRa airtime, not
+      // this device's internal 1-byte-per-glyph typing representation.
+      // No "/max" denominator - the actual typing cap enforced at input
+      // time (msngr_kb_key_type()'s DEL/typing handlers, MSNGR_NAME_MAX_LEN
+      // or MSNGR_TEXT_ENTRY_MAX_LEN) is character-based, not byte-based,
+      // so pairing it with a byte count here just produced a confusing
+      // pair of numbers that don't share a unit.
+      //
+      // The EN/RU tag itself is drawn as its own filled/inverted square
+      // (dark caption on a bright box) rather than plain text - there's
+      // no room on the grid to show the active layout (the Shift key's
+      // own label is already busy with '^'/'^^', see MSNGR_KB_ALT_HOLD_MS),
+      // so this is the one place on the whole screen that has to stand
+      // in as the layout indicator, and it reads faster set off in its
+      // own box than blended into the surrounding text. Sized off
+      // getTextBounds()'s actual measured glyph box (not a guessed
+      // padding constant) so it stays correct if the label or font ever
+      // changes.
       {
-        uint8_t max_len = (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME)
-          ? MSNGR_NAME_MAX_LEN : MSNGR_TEXT_ENTRY_MAX_LEN;
-        char count_buf[16];
-        snprintf(count_buf, sizeof(count_buf), "(%u/%u)", (unsigned)strlen(msngr_text_entry_buf), (unsigned)max_len);
-        int16_t x1, y1; uint16_t cw, ch;
-        MENU_GFX.getTextBounds(count_buf, 0, 0, &x1, &y1, &cw, &ch);
-        MENU_GFX.setCursor(4 + MENU_CONTENT_W - (int16_t)cw, MENU_HEADER_TEXT_Y);
+        char count_buf[24];
+        snprintf(count_buf, sizeof(count_buf), " (%u bytes)", (unsigned)msngr_kb_utf8_len(msngr_text_entry_buf));
+        const char *lang_label = msngr_kb_lang_ru ? "RU" : "EN";
+
+        int16_t lx1, ly1; uint16_t lang_w, lang_h;
+        MENU_GFX.getTextBounds(lang_label, 0, header_y, &lx1, &ly1, &lang_w, &lang_h);
+        int16_t cx1, cy1; uint16_t count_w, count_h;
+        MENU_GFX.getTextBounds(count_buf, 0, 0, &cx1, &cy1, &count_w, &count_h);
+
+        const int16_t pad_x = 2, pad_y = 1;
+        const int16_t lang_box_w = (int16_t)lang_w + pad_x * 2;
+        const int16_t lang_box_h = (int16_t)lang_h + pad_y * 2;
+        const int16_t lang_box_x = 4 + MENU_CONTENT_W - lang_box_w - (int16_t)count_w;
+        const int16_t lang_box_y = ly1 - pad_y;
+
+        MENU_GFX.fillRect(lang_box_x, lang_box_y, lang_box_w, lang_box_h, SSD1306_WHITE);
+        MENU_GFX.setTextColor(SSD1306_BLACK);
+        MENU_GFX.setCursor(lang_box_x + pad_x, header_y);
+        MENU_GFX.print(lang_label);
+
+        MENU_GFX.setTextColor(SSD1306_WHITE);
+        MENU_GFX.setCursor(lang_box_x + lang_box_w, header_y);
         MENU_GFX.print(count_buf);
       }
 
-      MENU_GFX.drawFastHLine(4, MENU_HEADER_HLINE_Y, MENU_CONTENT_W, SSD1306_WHITE);
-
+      // No header separator line here anymore - the input box's own top
+      // border (box_y below, MENU_HEADER_HLINE_Y + 1) sat directly under
+      // where this used to draw, so the two 1px lines stacked into a
+      // visibly 2px-thick double border. The box border alone is enough
+      // separation from the title row above.
+      //
       // Input preview - tail of what's typed so far (leading "..." if it
       // doesn't all fit), with a caret after the last character. Same
       // "show the tail, not the head" idea as MSNGR_MSG_DETAIL's word-wrap,
@@ -5346,7 +5916,7 @@
 
       for (uint8_t r = 0; r < MSNGR_KB_ROWS; r++) {
         for (uint8_t c = 0; c < MSNGR_KB_COLS; c++) {
-          char ch = MSNGR_KB_LAYOUT[r][c];
+          char ch = (msngr_kb_lang_ru ? MSNGR_KB_LAYOUT_RU : MSNGR_KB_LAYOUT)[r][c];
           uint8_t type = msngr_kb_key_type(ch);
           int16_t kx = col_x[c];
           int16_t ky = grid_top + r * row_h;
@@ -5361,8 +5931,7 @@
             case MSNGR_KB_BACK:      label = "BACK"; break;
             case MSNGR_KB_SHIFT:     label = msngr_kb_shift_on ? "^^" : "^"; break;
             default: {
-              char c2 = ch;
-              if (msngr_kb_shift_on && c2 >= 'a' && c2 <= 'z') c2 = c2 - 'a' + 'A';
+              char c2 = msngr_kb_apply_shift(ch, msngr_kb_shift_on);
               label_buf[0] = c2; label_buf[1] = 0;
               label = label_buf;
               break;
@@ -6962,6 +7531,16 @@
         uint8_t row_count = msngr_announces_row_count();
         const char *labels[MSNGR_MAX_ANNOUNCES + 1];
         char valbufs[MSNGR_MAX_ANNOUNCES + 1][24];
+        // msngr_announces[].name is genuine UTF-8 off the wire (see
+        // msngr_kb_decode_utf8()'s own comment, Messenger.h) - unlike
+        // every other place this list of names gets read, this draw
+        // path doesn't go through messenger_peer_display_name() (this
+        // *is* one of that function's own sources), so it has to decode
+        // for itself. Needs its own backing buffer since labels[] just
+        // holds pointers - can't decode in place over msngr_announces
+        // itself without corrupting the very UTF-8 messenger_peer_
+        // display_name() still needs to read on its own next call.
+        char name_decoded[MSNGR_MAX_ANNOUNCES][MSNGR_NAME_MAX_LEN + 1];
 
         uint8_t any = 0;
         for (uint8_t i = 0; i < MSNGR_MAX_ANNOUNCES; i++) if (msngr_announces[i].in_use) any++;
@@ -6973,7 +7552,12 @@
           uint8_t vis = 0;
           for (uint8_t i = 0; i < MSNGR_MAX_ANNOUNCES; i++) {
             if (!msngr_announces[i].in_use) continue;
-            labels[vis] = msngr_announces[i].name[0] ? msngr_announces[i].name : "(unnamed)";
+            if (msngr_announces[i].name[0]) {
+              msngr_kb_decode_utf8(msngr_announces[i].name, name_decoded[vis], sizeof(name_decoded[vis]));
+              labels[vis] = name_decoded[vis];
+            } else {
+              labels[vis] = "(unnamed)";
+            }
             unsigned long ago_s = (millis() - msngr_announces[i].last_heard_ms) / 1000;
             if (ago_s < 60) sprintf(valbufs[vis], "%lus", ago_s);
             else if (ago_s < 3600) sprintf(valbufs[vis], "%lum", ago_s / 60);
@@ -6994,13 +7578,18 @@
 
         uint8_t msg_rows = msngr_peer_msg_row_count();
         uint8_t row_count = msngr_peer_row_count();
-        const char *labels[MSNGR_PEER_MAX_MSG_ROWS + MSNGR_PEER_ACTION_COUNT];
+        const char *labels[MSNGR_PEER_MAX_ROWS];
         char label_bufs[MSNGR_PEER_MAX_MSG_ROWS][24];
-        char valbufs[MSNGR_PEER_MAX_MSG_ROWS + MSNGR_PEER_ACTION_COUNT][24];
-        const uint8_t *icons[MSNGR_PEER_MAX_MSG_ROWS + MSNGR_PEER_ACTION_COUNT] = { nullptr };
-        uint8_t icon_widths[MSNGR_PEER_MAX_MSG_ROWS + MSNGR_PEER_ACTION_COUNT] = { 0 };
-        const uint8_t *right_icons[MSNGR_PEER_MAX_MSG_ROWS + MSNGR_PEER_ACTION_COUNT] = { nullptr };
-        uint8_t right_icon_widths[MSNGR_PEER_MAX_MSG_ROWS + MSNGR_PEER_ACTION_COUNT] = { 0 };
+        // "Send: <preset text>" labels - dynamic text now (msngr_presets[]
+        // is user-configurable), not the string literals "Send: Hi"/"Send:
+        // Bye"/"Send: SOS" used to be, so each needs its own backing
+        // buffer the same way label_bufs[] already does for message rows.
+        char preset_label_bufs[MSNGR_MAX_PRESETS][24];
+        char valbufs[MSNGR_PEER_MAX_ROWS][24];
+        const uint8_t *icons[MSNGR_PEER_MAX_ROWS] = { nullptr };
+        uint8_t icon_widths[MSNGR_PEER_MAX_ROWS] = { 0 };
+        const uint8_t *right_icons[MSNGR_PEER_MAX_ROWS] = { nullptr };
+        uint8_t right_icon_widths[MSNGR_PEER_MAX_ROWS] = { 0 };
 
         // Reads msngr_peer_cache (Messenger.h, populated once on screen
         // entry/after a send), not MessageStore directly - see that
@@ -7011,69 +7600,80 @@
         //
         // draw_menu_list_disp() left-aligns labels[] and right-aligns
         // valbufs[] - reused here (instead of a real bubble layout) to
-        // put outgoing messages on the left and incoming ones on the
+        // put incoming messages on the left and outgoing ones on the
         // right, so direction reads at a glance without needing the old
-        // "<"/">" text prefix. bm_menu_icon_msngr_msg_outgoing sits left of
-        // the label (the plain left-icon column) and
-        // bm_menu_icon_msngr_msg_incoming sits right of the value (the new
-        // right_icons column draw_menu_list_disp() grew for this).
+        // "<"/">" text prefix. bm_menu_icon_msngr_msg_incoming sits left
+        // of the label (the plain left-icon column) and
+        // bm_menu_icon_msngr_msg_outgoing sits right of the value (the
+        // right_icons column draw_menu_list_disp() grew for this) - per
+        // user request, reversed from this feature's first pass (outgoing
+        // left/incoming right), to match the "yours on the right" reading
+        // convention most chat UIs use.
         for (uint8_t i = 0; i < msg_rows; i++) {
           if (msngr_peer_cache[i].incoming) {
-            labels[i] = "";
-            snprintf(valbufs[i], 24, "%s", msngr_peer_cache[i].snippet);
-            right_icons[i] = bm_menu_icon_msngr_msg_incoming;
-            right_icon_widths[i] = MENU_ICON_W_MSNGR_MSG_INCOMING;
-          } else {
             snprintf(label_bufs[i], sizeof(label_bufs[i]), "%s", msngr_peer_cache[i].snippet);
             labels[i] = label_bufs[i];
             valbufs[i][0] = 0;
-            icons[i] = bm_menu_icon_msngr_msg_outgoing;
-            icon_widths[i] = MENU_ICON_W_MSNGR_MSG_OUTGOING;
+            icons[i] = bm_menu_icon_msngr_msg_incoming;
+            icon_widths[i] = MENU_ICON_W_MSNGR_MSG_INCOMING;
+          } else {
+            labels[i] = "";
+            snprintf(valbufs[i], 24, "%s", msngr_peer_cache[i].snippet);
+            right_icons[i] = bm_menu_icon_msngr_msg_outgoing;
+            right_icon_widths[i] = MENU_ICON_W_MSNGR_MSG_OUTGOING;
           }
         }
 
         uint8_t base = msg_rows;
-        labels[base + MSNGR_PEER_ACTION_SEND_HI]  = "Send: Hi";  valbufs[base + MSNGR_PEER_ACTION_SEND_HI][0]  = 0;
-        labels[base + MSNGR_PEER_ACTION_SEND_BYE] = "Send: Bye"; valbufs[base + MSNGR_PEER_ACTION_SEND_BYE][0] = 0;
-        labels[base + MSNGR_PEER_ACTION_SEND_SOS] = "Send: SOS"; valbufs[base + MSNGR_PEER_ACTION_SEND_SOS][0] = 0;
-        labels[base + MSNGR_PEER_ACTION_SEND_CUSTOM] = "Send: Custom"; valbufs[base + MSNGR_PEER_ACTION_SEND_CUSTOM][0] = 0;
-        labels[base + MSNGR_PEER_ACTION_PING] = "Ping"; valbufs[base + MSNGR_PEER_ACTION_PING][0] = 0;
-        icons[base + MSNGR_PEER_ACTION_PING] = bm_menu_icon_msngr_ping;
-        icon_widths[base + MSNGR_PEER_ACTION_PING] = MENU_ICON_W_MSNGR_PING;
+        for (uint8_t i = 0; i < msngr_preset_count; i++) {
+          snprintf(preset_label_bufs[i], sizeof(preset_label_bufs[i]), "Send: %s", msngr_presets[i]);
+          labels[base + i] = preset_label_bufs[i];
+          valbufs[base + i][0] = 0;
+        }
+
+        uint8_t fixed_base = base + msngr_preset_count;
+        labels[fixed_base + MSNGR_PEER_FIXED_ACTION_SEND_CUSTOM] = "Compose message"; valbufs[fixed_base + MSNGR_PEER_FIXED_ACTION_SEND_CUSTOM][0] = 0;
+        icons[fixed_base + MSNGR_PEER_FIXED_ACTION_SEND_CUSTOM] = bm_menu_icon_msngr_compose;
+        icon_widths[fixed_base + MSNGR_PEER_FIXED_ACTION_SEND_CUSTOM] = MENU_ICON_W_MSNGR_COMPOSE;
+        labels[fixed_base + MSNGR_PEER_FIXED_ACTION_PING] = "Ping"; valbufs[fixed_base + MSNGR_PEER_FIXED_ACTION_PING][0] = 0;
+        icons[fixed_base + MSNGR_PEER_FIXED_ACTION_PING] = bm_menu_icon_msngr_ping;
+        icon_widths[fixed_base + MSNGR_PEER_FIXED_ACTION_PING] = MENU_ICON_W_MSNGR_PING;
 
         bool is_bookmarked = messenger_bookmark_find(msngr_active_peer_hash) >= 0;
-        labels[base + MSNGR_PEER_ACTION_BOOKMARK] = is_bookmarked ? "Remove Bookmark" : "Add Bookmark";
-        valbufs[base + MSNGR_PEER_ACTION_BOOKMARK][0] = 0;
+        labels[fixed_base + MSNGR_PEER_FIXED_ACTION_BOOKMARK] = is_bookmarked ? "Remove Bookmark" : "Add Bookmark";
+        valbufs[fixed_base + MSNGR_PEER_FIXED_ACTION_BOOKMARK][0] = 0;
 
-        labels[base + MSNGR_PEER_ACTION_CLEAR] = "Clear Conversation";
-        valbufs[base + MSNGR_PEER_ACTION_CLEAR][0] = 0;
-        icons[base + MSNGR_PEER_ACTION_CLEAR] = bm_menu_icon_msngr_delete;
-        icon_widths[base + MSNGR_PEER_ACTION_CLEAR] = MENU_ICON_W_MSNGR_DELETE;
+        labels[fixed_base + MSNGR_PEER_FIXED_ACTION_CLEAR] = "Clear Conversation";
+        valbufs[fixed_base + MSNGR_PEER_FIXED_ACTION_CLEAR][0] = 0;
+        icons[fixed_base + MSNGR_PEER_FIXED_ACTION_CLEAR] = bm_menu_icon_msngr_delete;
+        icon_widths[fixed_base + MSNGR_PEER_FIXED_ACTION_CLEAR] = MENU_ICON_W_MSNGR_DELETE;
 
-        labels[base + MSNGR_PEER_ACTION_BACK] = "BACK";
-        valbufs[base + MSNGR_PEER_ACTION_BACK][0] = 0;
+        labels[fixed_base + MSNGR_PEER_FIXED_ACTION_BACK] = "BACK";
+        valbufs[fixed_base + MSNGR_PEER_FIXED_ACTION_BACK][0] = 0;
 
         char title[24];
         snprintf(title, sizeof(title), "%s", messenger_peer_display_name(msngr_active_peer_hash).c_str());
-        // icon_col_shared=false - only the message rows and the Ping
-        // action row above opted into icons[]/right_icons[], the remaining
-        // action rows stay at the plain x=8 they always used.
+        // icon_col_shared=false - only the message rows and the Compose
+        // message/Ping/Clear Conversation action rows above opted into
+        // icons[]/right_icons[], the remaining action rows stay at the
+        // plain x=8 they always used.
         draw_menu_list_disp(title, labels, valbufs, row_count, msngr_peer_cursor, icons, icon_widths, nullptr, false, nullptr, right_icons, right_icon_widths);
       } else if (menu_state == MENU_STATE_MSNGR_MSG_DETAIL) {
         uint8_t row_count = msngr_msg_detail_row_count();
-        // +2, not +1 - content lines plus the trailing Delete and BACK rows.
-        const char *labels[MSNGR_MSG_DETAIL_MAX_LINES + 2];
+        // +3, not +1 - content lines plus the trailing Reply, Delete and
+        // BACK rows.
+        const char *labels[MSNGR_MSG_DETAIL_MAX_LINES + 3];
         char label_bufs[MSNGR_MSG_DETAIL_MAX_LINES][MSNGR_MSG_DETAIL_CHARS_PER_LINE + 1];
-        char valbufs[MSNGR_MSG_DETAIL_MAX_LINES + 2][24];
-        const uint8_t *icons[MSNGR_MSG_DETAIL_MAX_LINES + 2] = { nullptr };
-        uint8_t icon_widths[MSNGR_MSG_DETAIL_MAX_LINES + 2] = { 0 };
+        char valbufs[MSNGR_MSG_DETAIL_MAX_LINES + 3][24];
+        const uint8_t *icons[MSNGR_MSG_DETAIL_MAX_LINES + 3] = { nullptr };
+        uint8_t icon_widths[MSNGR_MSG_DETAIL_MAX_LINES + 3] = { 0 };
 
         // Reads msngr_msg_detail_cache_* (Messenger.h, populated once
         // when the message row was selected) - same "don't read flash
         // from the render path" reasoning as MENU_STATE_MSNGR_PEER above.
         const std::string &content = msngr_msg_detail_cache_content;
 
-        uint8_t lines = row_count - 2; // content lines - DELETE + BACK are appended after
+        uint8_t lines = row_count - 3; // content lines - Reply, Delete, BACK are appended after
         for (uint8_t i = 0; i < lines; i++) {
           size_t start = (size_t)i * MSNGR_MSG_DETAIL_CHARS_PER_LINE;
           if (start < content.size()) {
@@ -7085,12 +7685,16 @@
           valbufs[i][0] = 0;
         }
 
-        labels[lines] = "Delete";
+        labels[lines] = "Reply";
         valbufs[lines][0] = 0;
-        icons[lines] = bm_menu_icon_msngr_delete;
-        icon_widths[lines] = MENU_ICON_W_MSNGR_DELETE;
-        labels[lines + 1] = "BACK";
+        icons[lines] = bm_menu_icon_msngr_reply;
+        icon_widths[lines] = MENU_ICON_W_MSNGR_REPLY;
+        labels[lines + 1] = "Delete";
         valbufs[lines + 1][0] = 0;
+        icons[lines + 1] = bm_menu_icon_msngr_delete;
+        icon_widths[lines + 1] = MENU_ICON_W_MSNGR_DELETE;
+        labels[lines + 2] = "BACK";
+        valbufs[lines + 2][0] = 0;
 
         // Local (Timezone-shifted) time+date, same apply_tz_offset()
         // convention as the RTC list's own Time/Date rows - time first,
@@ -7116,9 +7720,9 @@
           snprintf(title, sizeof(title), "%s", msngr_msg_detail_cache_incoming ? "RCVD" : "SENT");
         }
 
-        // icon_col_shared=false - only the Delete row above opted into
-        // icons[], BACK keeps its own auto-icon path and the content lines
-        // stay at the plain x=8 they always used.
+        // icon_col_shared=false - only the Reply/Delete rows above opted
+        // into icons[], BACK keeps its own auto-icon path and the
+        // content lines stay at the plain x=8 they always used.
         draw_menu_list_disp(title, labels, valbufs, row_count, msngr_msg_detail_cursor, icons, icon_widths, nullptr, false);
       } else if (menu_state == MENU_STATE_MSNGR_DELETE_CONFIRM) {
         // Plain 2-item list, same draw_menu_list_disp() as everywhere else -
@@ -7253,6 +7857,9 @@
           }
         }
 
+        labels[MSNGR_SETTINGS_ITEM_PRESETS] = "Preset Messages";
+        sprintf(valbufs[MSNGR_SETTINGS_ITEM_PRESETS], "%u", (unsigned)msngr_preset_count);
+
         labels[MSNGR_SETTINGS_ITEM_BACK] = "BACK";
         valbufs[MSNGR_SETTINGS_ITEM_BACK][0] = 0;
 
@@ -7272,6 +7879,37 @@
           sprintf(valbuf, msngr_announce_interval_labels[staged_msngr_announce_interval_idx]);
           draw_menu_edit_disp("AUTO ANNOUNCE", valbuf);
         }
+      } else if (menu_state == MENU_STATE_MSNGR_PRESETS) {
+        uint8_t row_count = msngr_presets_row_count();
+        const char *labels[MSNGR_MAX_PRESETS + 2]; // presets + Add Preset + BACK
+        char valbufs[MSNGR_MAX_PRESETS + 2][24];
+
+        for (uint8_t i = 0; i < msngr_preset_count; i++) {
+          // Points directly at the persistent global entry's own text
+          // buffer, same "no temporary copy needed" reasoning
+          // MENU_STATE_MSNGR_BOOKMARKS' own draw code already uses for
+          // msngr_bookmarks[i].name.
+          labels[i] = msngr_presets[i];
+          valbufs[i][0] = 0;
+        }
+        uint8_t next = msngr_preset_count;
+        if (msngr_preset_count < MSNGR_MAX_PRESETS) {
+          labels[next] = "Add Preset";
+          valbufs[next][0] = 0;
+          next++;
+        }
+        labels[row_count - 1] = "BACK";
+        valbufs[row_count - 1][0] = 0;
+
+        draw_menu_list_disp("PRESET MESSAGES", labels, valbufs, row_count, msngr_presets_cursor);
+      } else if (menu_state == MENU_STATE_MSNGR_PRESET_DETAIL) {
+        const char *labels[3] = { "Edit", "Delete", "BACK" };
+        char valbufs[3][24] = { {0}, {0}, {0} };
+        // Title is the preset's own text (e.g. "Hi") - same "show what
+        // you're actually looking at" idea as MSNGR_MSG_DETAIL's RCVD/
+        // SENT-plus-timestamp title, just simpler since there's no
+        // timestamp/direction for a preset.
+        draw_menu_list_disp(msngr_presets[msngr_preset_detail_index], labels, valbufs, 3, msngr_preset_detail_cursor);
       }
       #endif
     #endif
