@@ -115,6 +115,11 @@ bool urns_enqueue_outgoing(const uint8_t* data, uint16_t len);
   // and given up for good. Forward-declared for the same reason as
   // messenger_on_delivery()/messenger_on_delivered() above.
   void messenger_on_failed(LXMF::LXMessage& msg);
+
+  // Periodic propagation-node sync tick - polled from urns_lxmf_loop()
+  // below, right after urns_lxmf_router->process_sync(). Forward-declared
+  // for the same reason as messenger_on_delivery() above.
+  void messenger_sync_process();
 #endif
 
 // RX-side counterpart to urns_enqueue_outgoing() above - kiss_write_packet()
@@ -242,6 +247,45 @@ private:
 #endif
 
 microStore::FileSystem urns_filesystem;
+
+// Mounts the "urns" LittleFS partition and registers it with
+// RNS::Utilities::OS - split out of urns_init() (which used to do this
+// inline) so Vault.h's vault_try_unlock()/vault_enable()/vault_disable()
+// can read/write vault.vk and identity.vault from the boot-unlock screen
+// (RNode_Firmware.ino's setup(), before urns_init() itself runs).
+//
+// FIXED (real bug, confirmed via live testing): before this split existed,
+// vault_unlock_boot_screen() called vault_try_unlock() -> OS::file_exists()
+// with NO filesystem ever registered yet (that only happened inside
+// urns_init(), which runs strictly after the boot-unlock screen returns) -
+// OS::file_exists() throws std::runtime_error("FileSystem has not been
+// registered") in that state (Utilities/OS.h), and that throw happens
+// OUTSIDE vault_try_unlock()'s own try/catch (which only wraps
+// vault_unwrap_blob()), so it propagated all the way up uncaught. Net
+// effect: every single unlock attempt crashed the device regardless of
+// what password was entered - the password was never even reached before
+// the crash - which from the outside just looked like "enter PIN, device
+// resets, boots back into the same PIN screen," indistinguishable from a
+// wrong PIN. This is why a *correctly re-enrolled* PIN still failed.
+//
+// Idempotent (checked via urns_filesystem's own operator bool - see
+// FileSystem::isValid(), microStore/FileSystem.h) so calling this again
+// from urns_init() after the boot-unlock screen already called it once is
+// a no-op, not a double-mount.
+bool urns_mount_filesystem() {
+  if (urns_filesystem) {
+    return true;
+  }
+  DEBUG_LOG("[URNS] mounting LittleFS\r\n");
+  if (!LittleFS.begin(true, URNS_BASE_PATH, 10, URNS_PARTITION_LABEL)) {
+    DEBUG_LOG("[URNS] Failed to mount partition\r\n");
+    return false;
+  }
+  urns_filesystem = microStore::Adapters::LittleFSFileSystem(URNS_BASE_PATH);
+  RNS::Utilities::OS::register_filesystem(urns_filesystem);
+  return true;
+}
+
 RNS::Reticulum urns_reticulum({RNS::Type::NONE});
 RNS::Identity urns_identity({RNS::Type::NONE});
 RNS::Interface urns_lora_interface({RNS::Type::NONE});
@@ -466,16 +510,14 @@ void urns_init() {
   RNS::set_log_callback(urns_rns_log_callback);
   RNS::loglevel(RNS::LOG_INFO);
 
-  DEBUG_LOG("[URNS] step 1: mounting LittleFS\r\n");
-  if (!LittleFS.begin(true, URNS_BASE_PATH, 10, URNS_PARTITION_LABEL)) {
+  DEBUG_LOG("[URNS] step 1-3: mounting/registering filesystem\r\n");
+  // No-op if the boot-unlock screen (vault_unlock_boot_screen(),
+  // VaultUnlock.h) already did this before urns_init() ever ran - see
+  // urns_mount_filesystem()'s own comment for why that ordering matters.
+  if (!urns_mount_filesystem()) {
     DEBUG_LOG("[URNS] Failed to mount partition, onboard node disabled\r\n");
     return;
   }
-  DEBUG_LOG("[URNS] step 2: mounted, constructing filesystem adapter\r\n");
-
-  urns_filesystem = microStore::Adapters::LittleFSFileSystem(URNS_BASE_PATH);
-  DEBUG_LOG("[URNS] step 3: registering filesystem\r\n");
-  RNS::Utilities::OS::register_filesystem(urns_filesystem);
 
   DEBUG_LOG("[URNS] step 4: constructing Reticulum\r\n");
   urns_reticulum = RNS::Reticulum();
@@ -545,7 +587,20 @@ void urns_init() {
   DEBUG_LOG("[URNS] step 8: reticulum started, path table entries=%u\r\n",
     (unsigned)RNS::Transport::new_path_table().size());
 
-  if (RNS::Utilities::OS::file_exists(URNS_IDENTITY_PATH)) {
+  if (vault_enabled) {
+    // Vault.h's vault_enable() migration always leaves an identity.vault in
+    // place before setting ADDR_CONF_VAULT_ENABLED, and VaultUnlock.h's
+    // boot screen must have already called vault_try_unlock() successfully
+    // before urns_init() runs (see RNode_Firmware.ino's setup()) - so
+    // vault_unlocked is expected to already be true here.
+    DEBUG_LOG("[URNS] step 9: loading identity from vault\r\n");
+    RNS::Bytes identity_plain = vault_load_identity_plaintext();
+    urns_identity = RNS::Identity(false);
+    urns_identity.load_private_key(identity_plain);
+    RNS::secure_zero(identity_plain);
+    DEBUG_LOG("[URNS] step 10: loaded identity from vault\r\n");
+  }
+  else if (RNS::Utilities::OS::file_exists(URNS_IDENTITY_PATH)) {
     DEBUG_LOG("[URNS] step 9: loading persisted identity\r\n");
     urns_identity = RNS::Identity::from_file(URNS_IDENTITY_PATH);
     DEBUG_LOG("[URNS] step 10: loaded persisted identity\r\n");
@@ -719,6 +774,8 @@ void urns_lxmf_loop() {
   _fs_t0 = millis();
   urns_lxmf_router->process_inbound();
   if (millis() - _fs_t0 > 40) DEBUG_LOG("[FS] process_inbound took %lums\r\n", (unsigned long)(millis() - _fs_t0));
+  urns_lxmf_router->process_sync();
+  messenger_sync_process();
 #endif
   CP(CP_URNS_CULL_STORES);
   _fs_t0 = millis();

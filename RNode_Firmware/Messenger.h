@@ -53,13 +53,46 @@
   // longer incoming message this leaves undecoded.
   #define MSNGR_CONTENT_DECODE_BUF_LEN 256
 
+  // Cap for MessengerPeerMsgCacheRow's own snippet below - wide enough for
+  // the marquee-scroll feature (MENU_STATE_MSNGR_PEER, Menu.h) to have real
+  // hidden tail text to reveal on a long message, without going as far as
+  // MSNGR_CONTENT_DECODE_BUF_LEN's own full-message allowance (that's a
+  // single on-demand buffer for MSG_DETAIL; this one is x5, permanently
+  // resident for as long as MENU_STATE_MSNGR_PEER's cache is populated).
+  #define MSNGR_PEER_SNIPPET_CAP 160
+
+  // A bookmark is either an LXMF peer (the default - Ping/Send Hi-Bye-SOS/
+  // Compose target, MENU_STATE_MSNGR_PEER) or a propagation node (added
+  // via Bookmarks > Add by Hash with Type switched to Propagation,
+  // Menu.h's MSNGR_KB_LAYOUT_HEX row 2) - the latter isn't an LXMF
+  // delivery destination at all (it answers on the "lxmf"/"propagation"
+  // aspect, not "lxmf"/"delivery"), so MENU_STATE_MSNGR_PEER swaps its
+  // entire action set for one of these instead of showing Ping/Compose/
+  // Clear Conversation - see msngr_bookmark_is_prop_node().
+  #define MSNGR_BOOKMARK_TYPE_LXMF        0
+  #define MSNGR_BOOKMARK_TYPE_PROPAGATION 1
+
   struct MessengerBookmark {
     bool in_use = false;
     uint8_t hash[LXMF::PEER_HASH_SIZE];
     char name[MSNGR_NAME_MAX_LEN + 1];
+    uint8_t type = MSNGR_BOOKMARK_TYPE_LXMF;
   };
   MessengerBookmark msngr_bookmarks[MSNGR_MAX_BOOKMARKS];
   uint8_t msngr_bookmark_count = 0;
+
+  // The propagation-node bookmark currently in effect for outbound
+  // PROPAGATED delivery/sync (RNode Settings > Messenger > Bookmarks >
+  // <a Propagation-type bookmark> > Set Active) - empty when none is
+  // selected, which also means PROPAGATED delivery/periodic sync/
+  // Propagate on Fail are all inert regardless of their own settings
+  // (LXMRouter::set_outbound_propagation_node() with an empty hash is
+  // exactly what disables them - see messenger_prop_node_set_active()/
+  // _clear_active() below). Persisted alongside the bookmarks themselves
+  // (messenger_bookmarks_save/_load below) rather than EEPROM - it's a
+  // 16-byte hash, and the bookmarks file already exists on LittleFS for
+  // this exact kind of data.
+  RNS::Bytes msngr_active_prop_node_hash;
 
   // User-configurable quick-send buttons on MENU_STATE_MSNGR_PEER (Menu.h) -
   // used to be a fixed compile-time {"Hi","Bye","SOS"}. Unlike bookmarks/
@@ -154,6 +187,85 @@
     if (urns_lxmf_router) urns_lxmf_router->set_announce_interval(msngr_announce_interval_presets_s[idx]);
   }
 
+  // Whether a failed DIRECT/OPPORTUNISTIC LXMF delivery automatically
+  // retries via the active propagation node - forwarded to LXMRouter::
+  // set_fallback_to_propagation(). RNode Settings > Messenger > Settings >
+  // Propagate on Fail. Only takes effect once a propagation node is
+  // actually active (Bookmarks > <node> > Set Active) - LXMRouter's own
+  // fallback path no-ops with no outbound propagation node configured.
+  // See ADDR_CONF_MSNGR_PROP_ON_FAIL (ROM.h) for the persisted-value
+  // details.
+  bool msngr_propagate_on_fail = false;
+
+  void msngr_propagate_on_fail_conf_save(bool enabled) {
+    msngr_propagate_on_fail = enabled;
+    eeprom_update(ADDR_CONF_MSNGR_PROP_ON_FAIL,
+      enabled ? MSNGR_PROP_ON_FAIL_ENABLE_BYTE : MSNGR_PROP_ON_FAIL_DISABLE_BYTE);
+    if (urns_lxmf_router) urns_lxmf_router->set_fallback_to_propagation(enabled);
+  }
+
+  // Periodic propagation-node sync interval, as a preset index into this
+  // table (seconds) - same "preset index, not raw value" shape as
+  // msngr_announce_interval_presets_s above, but its own table since sync
+  // is heavier (a full Link round-trip fetching queued messages) than a
+  // one-packet announce, so the sane interval range skews longer. Index 0
+  // (Off) means no periodic sync at all - see messenger_sync_process()
+  // for where this is actually checked.
+  #define MSNGR_SYNC_INTERVAL_PRESET_COUNT 8
+  const uint32_t msngr_sync_interval_presets_s[MSNGR_SYNC_INTERVAL_PRESET_COUNT] = {
+    0,      // Off
+    900,    // 15 min
+    1800,   // 30 min
+    3600,   // 1h
+    7200,   // 2h
+    21600,  // 6h
+    43200,  // 12h
+    86400   // 24h
+  };
+  const char *const msngr_sync_interval_labels[MSNGR_SYNC_INTERVAL_PRESET_COUNT] = {
+    "Off", "15m", "30m", "1h", "2h", "6h", "12h", "24h"
+  };
+  uint8_t msngr_sync_interval_idx = 0;
+
+  void msngr_sync_interval_conf_save(uint8_t idx) {
+    msngr_sync_interval_idx = idx;
+    eeprom_update(ADDR_CONF_MSNGR_SYNC_INTERVAL, idx);
+  }
+
+  // Max messages requested per propagation sync - forwarded to LXMRouter::
+  // set_sync_message_limit(). RNode Settings > Messenger > Settings >
+  // Sync Limit. 0 = unlimited. See ADDR_CONF_MSNGR_SYNC_LIMIT (ROM.h) for
+  // why the menu's own valid range stops at 254, not 255.
+  #define MSNGR_SYNC_LIMIT_DEFAULT 8
+  #define MSNGR_SYNC_LIMIT_MAX     254
+  uint8_t msngr_sync_limit = MSNGR_SYNC_LIMIT_DEFAULT;
+
+  void msngr_sync_limit_conf_save(uint8_t limit) {
+    msngr_sync_limit = limit;
+    eeprom_update(ADDR_CONF_MSNGR_SYNC_LIMIT, limit);
+    if (urns_lxmf_router) urns_lxmf_router->set_sync_message_limit(limit);
+  }
+
+  // Required LXMF stamp cost for inbound delivery - forwarded to
+  // LXMRouter::set_stamp_cost()/enforce_stamps()/ignore_stamps(). RNode
+  // Settings > Messenger > Settings > Required Stamp Cost. 0 (the
+  // compiled default) disables enforcement entirely; see ADDR_CONF_MSNGR_
+  // STAMP_COST (ROM.h) for why the menu's own valid range stops at 254,
+  // not 255.
+  #define MSNGR_STAMP_COST_DEFAULT 0
+  #define MSNGR_STAMP_COST_MAX     254
+  uint8_t msngr_stamp_cost = MSNGR_STAMP_COST_DEFAULT;
+
+  void msngr_stamp_cost_conf_save(uint8_t cost) {
+    msngr_stamp_cost = cost;
+    eeprom_update(ADDR_CONF_MSNGR_STAMP_COST, cost);
+    if (urns_lxmf_router) {
+      urns_lxmf_router->set_stamp_cost(cost);
+      if (cost > 0) urns_lxmf_router->enforce_stamps();
+      else urns_lxmf_router->ignore_stamps();
+    }
+  }
+
   // LXMF display name - persisted to URNS_DISPLAY_NAME_PATH (URNS.h), same
   // file urns_lxmf_display_name() already reads/falls back from at boot
   // (that read/fallback logic already existed; this is the first writer -
@@ -205,7 +317,7 @@
   // this feature's scope.
   struct MessengerPeerMsgCacheRow {
     uint8_t hash[LXMF::MESSAGE_HASH_SIZE];
-    char snippet[24];
+    char snippet[MSNGR_PEER_SNIPPET_CAP];
     bool incoming;
   };
   MessengerPeerMsgCacheRow msngr_peer_cache[MSNGR_PEER_MAX_MSG_ROWS];
@@ -215,6 +327,80 @@
   // detect a new message arriving while MENU_STATE_MSNGR_PEER is sitting
   // open, without needing a flash read to do it.
   size_t msngr_peer_cache_message_count = 0;
+
+  // Marquee-scroll state for MENU_STATE_MSNGR_PEER's message rows (Menu.h,
+  // draw_settings_menu_disp()'s own MSNGR_PEER case) - only the currently
+  // selected message row scrolls, revealing snippet[] past whatever a
+  // static 23-char window would show. Declared here (not Menu.h) so
+  // messenger_refresh_peer_cache() below can reset them at the same single
+  // "screen just (re-)entered, or a new message arrived" moment it already
+  // resets everything else the cache holds - keeps the scroll position from
+  // ever surviving stale across a real cache refresh.
+  uint8_t msngr_peer_scroll_row = 0xFF; // 0xFF = none active yet
+  uint8_t msngr_peer_scroll_offset = 0;
+  unsigned long msngr_peer_scroll_last_step_ms = 0;
+  // 0 = still scrolling, not yet paused at the end - once the marquee
+  // reaches its own tail, it holds there for MSNGR_PEER_SCROLL_LOOP_
+  // PAUSE_MS (Menu.h) before looping back to the start, per user request.
+  unsigned long msngr_peer_scroll_paused_since_ms = 0;
+  // 0 = no start-pause armed - set to a future deadline the instant a loop
+  // resets back to offset 0, so the beginning of the message stays
+  // readable for MSNGR_PEER_SCROLL_START_PAUSE_MS (Menu.h) before
+  // scrolling resumes, per user request. Not armed for a row's very first
+  // scroll (only loop restarts) - see the draw block's own comment.
+  unsigned long msngr_peer_scroll_start_pause_until_ms = 0;
+
+  // Same marquee mechanism, but for MENU_STATE_MSNGR_CHAT (Menu.h) - every
+  // visible row that doesn't fit scrolls independently and simultaneously
+  // (no single "currently selected" row the way MSNGR_PEER has), hence a
+  // per-row array rather than one scalar offset/timer. Indices line up 1:1
+  // with msngr_chat_cache, below - Chat's own message-history cache, not
+  // msngr_peer_cache (see that cache's own comment for why it's genuinely
+  // separate). 0 in msngr_chat_scroll_paused_since_ms means "still
+  // scrolling, not yet paused at the end" - once a row's marquee reaches
+  // its own tail, it holds there for MSNGR_PEER_SCROLL_LOOP_PAUSE_MS
+  // (Menu.h) before looping back to the start, per user request.
+  uint8_t msngr_chat_scroll_offset[MSNGR_PEER_MAX_MSG_ROWS] = {0};
+  unsigned long msngr_chat_scroll_last_step_ms[MSNGR_PEER_MAX_MSG_ROWS] = {0};
+  unsigned long msngr_chat_scroll_paused_since_ms[MSNGR_PEER_MAX_MSG_ROWS] = {0};
+  // Same per-row "pause after a loop restart" as msngr_peer_scroll_start_
+  // pause_until_ms's own comment above, just one slot per visible row.
+  unsigned long msngr_chat_scroll_start_pause_until_ms[MSNGR_PEER_MAX_MSG_ROWS] = {0};
+
+  // MENU_STATE_MSNGR_CHAT's own message-history cache - genuinely separate
+  // from msngr_peer_cache above, not reused: unlike MSNGR_PEER's tail-
+  // anchored (5 most recent, newest-first) list, Chat supports scrolling
+  // through the ENTIRE conversation (Up/Down/PgUp/PgDn/Home/End, Menu.h) in
+  // normal chronological reading order (oldest at the top, newest at the
+  // bottom, same convention as any chat app) - a genuinely different
+  // windowing/ordering scheme that would risk real cross-screen staleness
+  // bugs if it shared MSNGR_PEER's own array (e.g. a screen transition that
+  // doesn't happen to re-trigger the right refresh first leaving one
+  // screen's ordering/window behind for the other to render as if it were
+  // its own).
+  MessengerPeerMsgCacheRow msngr_chat_cache[MSNGR_PEER_MAX_MSG_ROWS];
+  uint8_t msngr_chat_cache_count = 0;
+  // Absolute index (0-based, oldest-first across the WHOLE conversation) of
+  // msngr_chat_cache[0] - i.e. which message the currently-loaded window
+  // starts at.
+  size_t msngr_chat_window_start = 0;
+  // Total message count for the conversation - defines the valid range for
+  // window_start/navigation (Home/End, PgUp/PgDn clamping). Refreshed
+  // alongside the window itself, below.
+  size_t msngr_chat_total_count = 0;
+  // Which row within the current window (0..msngr_chat_cache_count-1) is
+  // selected for deletion - 0xFF means "not browsing" (focus is the
+  // compose box, the default/normal state). See blekbd_key_event()'s own
+  // MENU_STATE_MSNGR_CHAT branch (Menu.h) for the full focus-switching
+  // model between composing and browsing.
+  uint8_t msngr_chat_sel = 0xFF;
+  // Last time browsing (msngr_chat_sel != 0xFF) actually moved - checked
+  // against MSNGR_CHAT_SEL_TIMEOUT_MS (Menu.h) every redraw while Chat is
+  // open, same "poll from the render path, no separate process() needed"
+  // idiom the marquee timers already use - a selection left untouched
+  // auto-deselects back to the compose box after that long, per user
+  // request.
+  unsigned long msngr_chat_sel_last_activity_ms = 0;
 
   std::string msngr_msg_detail_cache_content;
   bool msngr_msg_detail_cache_incoming = false;
@@ -314,6 +500,14 @@
       buzzer_wait_for_melody();
     #endif
     msngr_peer_cache_count = 0;
+    // A stale scroll position/timer from before this refresh could
+    // otherwise survive onto a completely different message at the same
+    // row index (rows shift as new messages arrive, most-recent-first).
+    msngr_peer_scroll_row = 0xFF;
+    msngr_peer_scroll_offset = 0;
+    msngr_peer_scroll_last_step_ms = millis();
+    msngr_peer_scroll_paused_since_ms = 0;
+    msngr_peer_scroll_start_pause_until_ms = 0;
     if (!urns_message_store) return;
     std::vector<RNS::Bytes> hashes = urns_message_store->get_messages_for_conversation(peer_hash);
     msngr_peer_cache_message_count = hashes.size();
@@ -340,6 +534,99 @@
       msngr_peer_cache[i].incoming = meta.valid && meta.incoming;
     }
     msngr_peer_cache_count = n;
+  }
+
+  // MENU_STATE_MSNGR_CHAT's own windowed history fetch (Menu.h's
+  // navigation functions call this on every Up/Down/PgUp/PgDn/Home/End) -
+  // loads up to MSNGR_PEER_MAX_MSG_ROWS messages starting at start_index,
+  // chronological/oldest-first (unlike messenger_refresh_peer_cache()
+  // above, always the most recent N, newest-first). Same "only ever called
+  // from a discrete input event, never the render path" discipline as
+  // every other flash-reading refresh in this file - see that function's
+  // own comment on why (a real, confirmed crash otherwise).
+  //
+  // start_index gets clamped into range here (not just by the caller) -
+  // in particular, pulled back so a short/empty tail never leaves the
+  // window showing fewer than a full page while older messages still
+  // exist to fill it, same "clamp to the end" idiom trim_conversation_to_
+  // retention() uses elsewhere (MessageStore.cpp), just applied to a
+  // read-side window here. Callers can therefore pass any index (SIZE_MAX
+  // for "jump to the end", 0 for "jump to the start") without pre-clamping
+  // it themselves.
+  void messenger_refresh_chat_window(const RNS::Bytes &peer_hash, size_t start_index) {
+    #if HAS_BUZZER == true
+      buzzer_wait_for_melody();
+    #endif
+    msngr_chat_cache_count = 0;
+    for (uint8_t i = 0; i < MSNGR_PEER_MAX_MSG_ROWS; i++) {
+      msngr_chat_scroll_offset[i] = 0;
+      msngr_chat_scroll_last_step_ms[i] = millis();
+      msngr_chat_scroll_paused_since_ms[i] = 0;
+      msngr_chat_scroll_start_pause_until_ms[i] = 0;
+    }
+    if (!urns_message_store) return;
+    std::vector<RNS::Bytes> hashes = urns_message_store->get_messages_for_conversation(peer_hash);
+    msngr_chat_total_count = hashes.size();
+    if (start_index > msngr_chat_total_count) start_index = msngr_chat_total_count;
+    // FIXED: pulling start_index back to leave a full page ending at the
+    // true end used to be gated on msngr_chat_total_count > MSNGR_PEER_
+    // MAX_MSG_ROWS, so a conversation with 5 or fewer messages total never
+    // re-triggered it - "jump to the end" (start_index passed in as
+    // (size_t)-1, then clamped to msngr_chat_total_count by the line
+    // above) left start_index sitting one past the last real message,
+    // which the loop below correctly reads as "0 messages to show" (n =
+    // min(MAX_ROWS, total - start_index) = min(MAX_ROWS, 0) = 0) - an
+    // empty window even though real messages exist. Confirmed on hardware:
+    // sending the first message into an empty conversation showed nothing
+    // until Home (start_index=0 explicitly, bypassing this clamp
+    // entirely) was pressed. Unconditional now - whenever the requested
+    // window would run short of a full page, pull it back just enough to
+    // end at the true last message instead, regardless of how few
+    // messages exist in total.
+    if (start_index + MSNGR_PEER_MAX_MSG_ROWS > msngr_chat_total_count) {
+      start_index = (msngr_chat_total_count > MSNGR_PEER_MAX_MSG_ROWS)
+        ? (msngr_chat_total_count - MSNGR_PEER_MAX_MSG_ROWS) : 0;
+    }
+    msngr_chat_window_start = start_index;
+    uint8_t n = (uint8_t)std::min((size_t)MSNGR_PEER_MAX_MSG_ROWS, msngr_chat_total_count - start_index);
+    for (uint8_t i = 0; i < n; i++) {
+      // Chronological (oldest-first) - hashes itself already is, so this
+      // is a direct forward index, unlike messenger_refresh_peer_cache()'s
+      // own reversed one.
+      const RNS::Bytes &msg_hash = hashes[start_index + i];
+      memcpy(msngr_chat_cache[i].hash, msg_hash.data(), std::min((size_t)LXMF::MESSAGE_HASH_SIZE, msg_hash.size()));
+      LXMF::MessageStore::MessageMetadata meta = urns_message_store->load_message_metadata(msg_hash);
+      if (meta.valid) {
+        char snippet_decoded[sizeof(msngr_chat_cache[i].snippet)];
+        msngr_kb_decode_utf8(meta.content.c_str(), snippet_decoded, sizeof(snippet_decoded));
+        snprintf(msngr_chat_cache[i].snippet, sizeof(msngr_chat_cache[i].snippet), "%s", snippet_decoded);
+      } else {
+        snprintf(msngr_chat_cache[i].snippet, sizeof(msngr_chat_cache[i].snippet), "?");
+      }
+      msngr_chat_cache[i].incoming = meta.valid && meta.incoming;
+    }
+    msngr_chat_cache_count = n;
+  }
+
+  // Safe to call every redraw while MENU_STATE_MSNGR_CHAT is open (unlike
+  // messenger_refresh_chat_window() itself) - same get_conversation_info()
+  // in-RAM-only check messenger_refresh_peer_cache_if_stale() below uses.
+  //
+  // Per user request, ANY message event (sent or received - either way
+  // the conversation's message_count changes) jumps the window straight to
+  // the end, unconditionally - "should scroll to the bottom on every
+  // message event to simplify communication". Also drops any active
+  // selection (msngr_chat_sel, Menu.h's browsing mode) rather than leaving
+  // it pointing at a row index that may no longer mean the same message
+  // once the window's jumped - deliberate messages ARE getting deleted
+  // too, so a stale index there is a real, not just theoretical, hazard.
+  void messenger_refresh_chat_window_if_stale(const RNS::Bytes &peer_hash) {
+    if (!urns_message_store) return;
+    LXMF::MessageStore::ConversationInfo info = urns_message_store->get_conversation_info(peer_hash);
+    if (info.message_count != msngr_chat_total_count) {
+      messenger_refresh_chat_window(peer_hash, (size_t)-1);
+      msngr_chat_sel = 0xFF;
+    }
   }
 
   // Safe to call every redraw while MENU_STATE_MSNGR_PEER is open (unlike
@@ -391,6 +678,28 @@
     snprintf(dst, MSNGR_NAME_MAX_LEN + 1, "%s", name.c_str());
   }
 
+  // Manual "Add by Hash" bookmark entry (Menu.h, MSNGR_TEXT_ENTRY_PURPOSE_
+  // BOOKMARK_HASH) - decodes a typed hex string into a raw LXMF::
+  // PEER_HASH_SIZE-byte destination hash. Requires exactly 32 hex chars
+  // (2 per byte, case-insensitive) and rejects anything else outright
+  // rather than accepting a short/padded hash, since a wrong hash here
+  // silently addresses a different (or nonexistent) destination forever.
+  bool messenger_hash_from_hex(const char *hex, uint8_t *out) {
+    size_t len = strlen(hex);
+    if (len != (size_t)(LXMF::PEER_HASH_SIZE * 2)) return false;
+    for (size_t i = 0; i < LXMF::PEER_HASH_SIZE; i++) {
+      char hi = hex[i * 2], lo = hex[i * 2 + 1];
+      if (!isxdigit((unsigned char)hi) || !isxdigit((unsigned char)lo)) return false;
+      auto nibble = [](char c) -> uint8_t {
+        if (c >= '0' && c <= '9') return (uint8_t)(c - '0');
+        if (c >= 'a' && c <= 'f') return (uint8_t)(c - 'a' + 10);
+        return (uint8_t)(c - 'A' + 10);
+      };
+      out[i] = (uint8_t)((nibble(hi) << 4) | nibble(lo));
+    }
+    return true;
+  }
+
   int8_t messenger_bookmark_find(const RNS::Bytes &hash) {
     for (uint8_t i = 0; i < MSNGR_MAX_BOOKMARKS; i++) {
       if (msngr_bookmarks[i].in_use && messenger_hash_matches(msngr_bookmarks[i].hash, hash)) return i;
@@ -413,6 +722,14 @@
       JsonObject o = arr.add<JsonObject>();
       o["hash"] = RNS::Bytes(msngr_bookmarks[i].hash, LXMF::PEER_HASH_SIZE).toHex();
       o["name"] = msngr_bookmarks[i].name;
+      o["type"] = msngr_bookmarks[i].type;
+    }
+    // Active propagation node (messenger_prop_node_set_active/_clear_
+    // active below) - lives in this same file/object rather than its own
+    // separate LittleFS file, since it's small and only ever meaningful
+    // alongside the Propagation-type bookmark it points at.
+    if (msngr_active_prop_node_hash.size() == LXMF::PEER_HASH_SIZE) {
+      doc["active_prop_node"] = msngr_active_prop_node_hash.toHex();
     }
     std::string out;
     serializeJson(doc, out);
@@ -422,6 +739,7 @@
   void messenger_bookmarks_load() {
     for (uint8_t i = 0; i < MSNGR_MAX_BOOKMARKS; i++) msngr_bookmarks[i].in_use = false;
     msngr_bookmark_count = 0;
+    msngr_active_prop_node_hash = RNS::Bytes();
 
     RNS::Bytes raw;
     if (RNS::Utilities::OS::read_file(MSNGR_BOOKMARKS_PATH, raw) == 0) return;
@@ -442,18 +760,30 @@
       if (hash.size() != LXMF::PEER_HASH_SIZE) continue;
       messenger_store_hash(msngr_bookmarks[i].hash, hash);
       messenger_store_name(msngr_bookmarks[i].name, (const char*)(o["name"] | ""));
+      // Absent "type" (bookmarks saved before this feature) defaults to
+      // LXMF - every bookmark was an LXMF peer before Propagation-type
+      // bookmarks existed.
+      msngr_bookmarks[i].type = (uint8_t)(o["type"] | MSNGR_BOOKMARK_TYPE_LXMF);
       msngr_bookmarks[i].in_use = true;
       i++;
     }
     msngr_bookmark_count = i;
+
+    const char *active_hex = doc["active_prop_node"] | "";
+    if (active_hex[0] != 0) {
+      RNS::Bytes active_hash;
+      active_hash.assignHex(active_hex);
+      if (active_hash.size() == LXMF::PEER_HASH_SIZE) msngr_active_prop_node_hash = active_hash;
+    }
   }
 
-  bool messenger_bookmark_add(const RNS::Bytes &hash, const std::string &name) {
+  bool messenger_bookmark_add(const RNS::Bytes &hash, const std::string &name, uint8_t type = MSNGR_BOOKMARK_TYPE_LXMF) {
     if (messenger_bookmark_find(hash) >= 0) return true; // already bookmarked
     for (uint8_t i = 0; i < MSNGR_MAX_BOOKMARKS; i++) {
       if (msngr_bookmarks[i].in_use) continue;
       messenger_store_hash(msngr_bookmarks[i].hash, hash);
       messenger_store_name(msngr_bookmarks[i].name, name);
+      msngr_bookmarks[i].type = type;
       msngr_bookmarks[i].in_use = true;
       msngr_bookmark_count++;
       messenger_bookmarks_save();
@@ -462,9 +792,45 @@
     return false; // pool full
   }
 
+  bool messenger_bookmark_is_prop_node(const RNS::Bytes &hash) {
+    int8_t idx = messenger_bookmark_find(hash);
+    return idx >= 0 && msngr_bookmarks[idx].type == MSNGR_BOOKMARK_TYPE_PROPAGATION;
+  }
+
+  bool messenger_prop_node_is_active(const RNS::Bytes &hash) {
+    return msngr_active_prop_node_hash.size() == LXMF::PEER_HASH_SIZE &&
+           messenger_hash_matches(msngr_active_prop_node_hash.data(), hash);
+  }
+
+  // RNode Settings > Messenger > Bookmarks > <a Propagation-type bookmark>
+  // > Set Active (Menu.h) - makes this the propagation node PROPAGATED
+  // sends/periodic sync/Propagate on Fail all target, via LXMRouter::set_
+  // outbound_propagation_node(). Only one node can be active at a time -
+  // selecting a new one silently replaces whichever was active before, no
+  // separate unset step required (same "last write wins" shape as every
+  // other single-value setting in this menu).
+  void messenger_prop_node_set_active(const RNS::Bytes &hash) {
+    msngr_active_prop_node_hash = hash;
+    if (urns_lxmf_router) urns_lxmf_router->set_outbound_propagation_node(hash);
+    messenger_bookmarks_save();
+  }
+
+  // RNode Settings > Messenger > Bookmarks > <the active Propagation-type
+  // bookmark> > Unset Active - clears LXMRouter's outbound propagation
+  // node, which is what actually disables PROPAGATED delivery/periodic
+  // sync/Propagate on Fail (they all no-op with no node configured,
+  // regardless of their own individual settings) until another node is
+  // set active again.
+  void messenger_prop_node_clear_active() {
+    msngr_active_prop_node_hash = RNS::Bytes();
+    if (urns_lxmf_router) urns_lxmf_router->set_outbound_propagation_node(RNS::Bytes());
+    messenger_bookmarks_save();
+  }
+
   void messenger_bookmark_remove(const RNS::Bytes &hash) {
     int8_t idx = messenger_bookmark_find(hash);
     if (idx < 0) return;
+    if (messenger_prop_node_is_active(hash)) messenger_prop_node_clear_active();
     msngr_bookmarks[idx].in_use = false;
     msngr_bookmark_count--;
     messenger_bookmarks_save();
@@ -655,6 +1021,27 @@
         return std::string(decoded);
       }
     }
+    // Nothing cached yet for this peer (most likely a manually-added-by-
+    // hash bookmark, or an inbound sender this node has never directly
+    // announce-heard) - Identity::_known_destinations may since have
+    // picked up app_data anyway, e.g. from a path response answering an
+    // earlier Ping/Send's request_path() (Identity.cpp's own "app_data
+    // backfill" comment on validate_announce() explains why that wasn't
+    // possible before). Checked live on every redraw rather than only at
+    // message-delivery time, since a path response can arrive well after
+    // the message that prompted it did. Persisted via set_display_name()
+    // so future lookups hit the MessageStore cache above instead of
+    // re-decoding app_data every redraw.
+    if (urns_message_store) {
+      RNS::Bytes live_app_data = RNS::Identity::recall_app_data(peer_hash);
+      std::string live_name;
+      if (messenger_display_name_from_app_data(live_app_data, live_name)) {
+        urns_message_store->set_display_name(peer_hash, live_name);
+        char decoded[MSNGR_NAME_MAX_LEN + 1];
+        msngr_kb_decode_utf8(live_name.c_str(), decoded, sizeof(decoded));
+        return std::string(decoded);
+      }
+    }
     int8_t an = messenger_announce_find(peer_hash);
     if (an >= 0 && msngr_announces[an].name[0] != 0) {
       char decoded[MSNGR_NAME_MAX_LEN + 1];
@@ -706,6 +1093,21 @@
     RNS::Bytes cached_app_data = RNS::Identity::recall_app_data(msg.source_hash());
     if (messenger_display_name_from_app_data(cached_app_data, name)) {
       urns_message_store->set_display_name(msg.source_hash(), name);
+    } else {
+      // Still no cached app_data for this sender (typical for a manually-
+      // added-by-hash bookmark - their identity got resolved via a bare
+      // path response while Pinging/Sending, Menu.h, which carries no
+      // app_data of its own) - a real LXMF delivery just proved this peer
+      // is reachable right now, so it's worth spending one more path
+      // request to try to actually pick up their announce (and therefore
+      // their display name) rather than silently staying nameless
+      // forever. Harmless no-op if it never resolves - just falls back to
+      // the hex label already shown, same as today. Whatever comes back
+      // is picked up live by messenger_peer_display_name()'s own
+      // Identity::recall_app_data() check (Identity.cpp's app_data
+      // backfill comment explains why a later, better answer isn't
+      // silently dropped anymore) rather than needing to be awaited here.
+      RNS::Transport::request_path(msg.source_hash());
     }
 
     #if HAS_BUZZER == true
@@ -1203,6 +1605,20 @@
     return urns_message_store->get_unread_count() > 0;
   }
 
+  // Message count from the most recently *completed* sync (manual
+  // MSNGR_TOP_ITEM_SYNC_PROP or periodic messenger_sync_process() below,
+  // whichever finishes next) - set by the register_sync_complete_
+  // callback() lambda in messenger_init() below, which LXMRouter always
+  // calls with a real count right before flipping to PR_COMPLETE (never
+  // on PR_FAILED - see on_message_get_response()/on_message_list_
+  // response(), LXMRouter.cpp), so by the time anything polling get_sync_
+  // state() sees PR_COMPLETE this is already correct for that same sync.
+  // Menu.h's msngr_sync_popup_process() is the only reader today.
+  // Declared ahead of messenger_init() (not next to messenger_sync_
+  // process() further down, where it's otherwise topically closer) since
+  // that function's own lambda needs to see it already declared.
+  size_t msngr_sync_last_count = 0;
+
   void messenger_init() {
     // RNS::set_log_callback()/loglevel() now happen unconditionally in
     // urns_init() (URNS.h, HAS_URNS-gated) instead of here - this used to
@@ -1213,9 +1629,36 @@
     // always runs before messenger_init() (RNode_Firmware.ino setup()), so
     // this is already done by the time we get here.
     urns_message_store = new LXMF::MessageStore(URNS_BASE_PATH "/messages");
+    // PIN/passphrase vault (phase (c), Vault.h) - only wired when the
+    // vault is actually on, so a device that never opts in gets the
+    // store's original zero-overhead plaintext behavior untouched. Safe
+    // to check vault_enabled here (not vault_unlocked): setup() already
+    // ran vault_unlock_boot_screen() to completion before urns_init() and
+    // this messenger_init() call, so vault_enabled implies vault_unlocked
+    // by this point (see RNode_Firmware.ino's setup() ordering).
+    #if HAS_URNS == true
+      if (vault_enabled) {
+        urns_message_store->set_field_cipher(vault_encrypt_message_field, vault_decrypt_message_field);
+      }
+    #endif
     RNS::Transport::register_announce_handler(msngr_announce_handler);
     messenger_bookmarks_load();
     messenger_presets_load();
+
+    // Re-arm the active propagation node (if any) loaded from bookmarks.json -
+    // LXMRouter itself starts with no outbound propagation node configured
+    // every boot, this is the only thing that re-applies a prior Set Active.
+    if (urns_lxmf_router && msngr_active_prop_node_hash.size() == LXMF::PEER_HASH_SIZE) {
+      urns_lxmf_router->set_outbound_propagation_node(msngr_active_prop_node_hash);
+    }
+
+    // Feeds msngr_sync_last_count above - see its own comment for why
+    // reading it once get_sync_state() reports PR_COMPLETE is safe.
+    if (urns_lxmf_router) {
+      urns_lxmf_router->register_sync_complete_callback([](size_t count) {
+        msngr_sync_last_count = count;
+      });
+    }
 
     // ADDR_CONF_MSNGR_RETRIES (ROM.h) - raw physical byte, not through
     // eeprom_addr(), same "out-of-range/erased (0xFF) keeps the compiled
@@ -1248,8 +1691,120 @@
     if (announce_interval_raw < MSNGR_ANNOUNCE_INTERVAL_PRESET_COUNT) msngr_announce_interval_idx = announce_interval_raw;
     if (urns_lxmf_router) urns_lxmf_router->set_announce_interval(msngr_announce_interval_presets_s[msngr_announce_interval_idx]);
 
-    DEBUG_LOG("[Messenger] ready, %u bookmark(s) loaded, max_retries=%u, retry_delay_s=%u, announce_at_start=%u, announce_interval_idx=%u\r\n",
-      (unsigned)msngr_bookmark_count, (unsigned)msngr_max_retries, (unsigned)msngr_retry_delay_s, (unsigned)msngr_announce_at_start, (unsigned)msngr_announce_interval_idx);
+    // ADDR_CONF_MSNGR_PROP_ON_FAIL (ROM.h) - only ENABLE_BYTE/DISABLE_BYTE
+    // are valid, anything else (including erased 0xFF) keeps the compiled
+    // default (false).
+    uint8_t prop_on_fail_raw = EEPROM.read(ADDR_CONF_MSNGR_PROP_ON_FAIL);
+    if (prop_on_fail_raw == MSNGR_PROP_ON_FAIL_ENABLE_BYTE) msngr_propagate_on_fail = true;
+    else if (prop_on_fail_raw == MSNGR_PROP_ON_FAIL_DISABLE_BYTE) msngr_propagate_on_fail = false;
+    if (urns_lxmf_router) urns_lxmf_router->set_fallback_to_propagation(msngr_propagate_on_fail);
+
+    // ADDR_CONF_MSNGR_SYNC_INTERVAL (ROM.h) - same "out-of-range/erased
+    // keeps compiled default (0/Off)" shape as Announce Interval above.
+    uint8_t sync_interval_raw = EEPROM.read(ADDR_CONF_MSNGR_SYNC_INTERVAL);
+    if (sync_interval_raw < MSNGR_SYNC_INTERVAL_PRESET_COUNT) msngr_sync_interval_idx = sync_interval_raw;
+
+    // ADDR_CONF_MSNGR_SYNC_LIMIT (ROM.h) - out-of-range/erased (255) keeps
+    // the compiled default (8); 0 (unlimited) is a valid, distinct value.
+    uint8_t sync_limit_raw = EEPROM.read(ADDR_CONF_MSNGR_SYNC_LIMIT);
+    if (sync_limit_raw <= MSNGR_SYNC_LIMIT_MAX) msngr_sync_limit = sync_limit_raw;
+    if (urns_lxmf_router) urns_lxmf_router->set_sync_message_limit(msngr_sync_limit);
+
+    // ADDR_CONF_MSNGR_STAMP_COST (ROM.h) - out-of-range/erased (255) keeps
+    // the compiled default (0/disabled), same shape as Sync Limit above.
+    uint8_t stamp_cost_raw = EEPROM.read(ADDR_CONF_MSNGR_STAMP_COST);
+    if (stamp_cost_raw <= MSNGR_STAMP_COST_MAX) msngr_stamp_cost = stamp_cost_raw;
+    if (urns_lxmf_router) {
+      urns_lxmf_router->set_stamp_cost(msngr_stamp_cost);
+      if (msngr_stamp_cost > 0) urns_lxmf_router->enforce_stamps();
+      else urns_lxmf_router->ignore_stamps();
+    }
+
+    DEBUG_LOG("[Messenger] ready, %u bookmark(s) loaded, max_retries=%u, retry_delay_s=%u, announce_at_start=%u, announce_interval_idx=%u, propagate_on_fail=%u, sync_interval_idx=%u, sync_limit=%u, stamp_cost=%u\r\n",
+      (unsigned)msngr_bookmark_count, (unsigned)msngr_max_retries, (unsigned)msngr_retry_delay_s, (unsigned)msngr_announce_at_start, (unsigned)msngr_announce_interval_idx,
+      (unsigned)msngr_propagate_on_fail, (unsigned)msngr_sync_interval_idx, (unsigned)msngr_sync_limit, (unsigned)msngr_stamp_cost);
+  }
+
+  #if HAS_LXMF == true
+    // Bulk re-save every stored message through save_message(), forward-
+    // declared for VaultUnlock.h's vault_enroll_flow() (see that header's
+    // own comment on why the forward declaration is needed) - called
+    // right after vault_enable() commits, while this session's vault_key
+    // is already resident, so the user isn't asked to re-enter the PIN a
+    // third time just to encrypt history that already exists.
+    //
+    // Walking + re-saving through the normal save_message() path (rather
+    // than a bespoke bulk-rewrite) reuses its already-tested two-phase
+    // .tmp/.bak commit for each individual file, so a power loss mid-walk
+    // leaves every file it touches in a consistent state (either still
+    // the old plaintext generation, or the new encrypted one) - it does
+    // NOT make the whole migration atomic across the store as a unit. A
+    // power loss partway through leaves some messages encrypted and some
+    // still plaintext; simply re-running this (e.g. by re-toggling PIN
+    // Protection) finishes the job - re-encrypting an already-encrypted
+    // message is a safe, idempotent-in-effect re-save (produces a new
+    // envelope under the same subkey), not a hazard.
+    void vault_migrate_messages_encrypt() {
+      if (!urns_message_store) return;
+      urns_message_store->set_field_cipher(vault_encrypt_message_field, vault_decrypt_message_field);
+      for (const RNS::Bytes& peer_hash : urns_message_store->get_conversations()) {
+        for (const RNS::Bytes& msg_hash : urns_message_store->get_messages_for_conversation(peer_hash)) {
+          LXMF::LXMessage msg = urns_message_store->load_message(msg_hash);
+          if (msg.hash().size() == 0) continue; // failed to load - skip, don't lose the rest of the walk over one bad file
+          urns_message_store->save_message(msg);
+        }
+      }
+    }
+
+    // Mirror of the above for vault_disable_flow() - decrypts every
+    // stored message back to plaintext. The field-decrypt hook stays
+    // wired throughout the walk (existing files still need it to load)
+    // but the encrypt side is cleared first, forcing save_message() to
+    // write the now-plaintext branch instead of re-encrypting - see
+    // MessageStore.cpp's save_message()/set_field_cipher() for why a
+    // falsy _field_encrypt alone is what selects that branch. Both hooks
+    // are cleared once the walk finishes, so anything saved afterward
+    // (this session, with the vault now off) is plaintext with no cipher
+    // call at all, matching a device that never opted in.
+    void vault_migrate_messages_decrypt() {
+      if (!urns_message_store) return;
+      urns_message_store->set_field_cipher(nullptr, vault_decrypt_message_field);
+      for (const RNS::Bytes& peer_hash : urns_message_store->get_conversations()) {
+        for (const RNS::Bytes& msg_hash : urns_message_store->get_messages_for_conversation(peer_hash)) {
+          LXMF::LXMessage msg = urns_message_store->load_message(msg_hash);
+          if (msg.hash().size() == 0) continue;
+          urns_message_store->save_message(msg);
+        }
+      }
+      urns_message_store->set_field_cipher(nullptr, nullptr);
+    }
+  #endif
+
+  // Periodic propagation-node sync (msngr_sync_interval_idx, Off by
+  // default) - polled from loop() (URNS.h, right after process_sync()
+  // itself) same shape as LXMRouter::process_outbound()'s own periodic
+  // announce check. Only fires when a node is actually active and no
+  // sync is already in flight - request_messages_from_propagation_node()
+  // itself is a no-op (logs+PR_FAILED) with no active node, but skipping
+  // here avoids spamming that warning every tick once idle.
+  unsigned long msngr_sync_last_ms = 0;
+
+  void messenger_sync_process() {
+    if (msngr_sync_interval_idx == 0) return; // Off
+    if (msngr_active_prop_node_hash.size() != LXMF::PEER_HASH_SIZE) return; // no active node
+    if (!urns_lxmf_router) return;
+
+    LXMF::LXMRouter::PropagationSyncState state = urns_lxmf_router->get_sync_state();
+    if (state != LXMF::LXMRouter::PR_IDLE && state != LXMF::LXMRouter::PR_COMPLETE && state != LXMF::LXMRouter::PR_FAILED) {
+      return; // sync already in flight
+    }
+
+    unsigned long now = millis();
+    unsigned long interval_ms = msngr_sync_interval_presets_s[msngr_sync_interval_idx] * 1000UL;
+    if (now - msngr_sync_last_ms < interval_ms) return;
+    msngr_sync_last_ms = now;
+
+    urns_lxmf_router->request_messages_from_propagation_node();
   }
 
 #endif

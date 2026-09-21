@@ -57,6 +57,7 @@
     CP_MSNGR_PING,
     CP_MSNGR_SEND,
     CP_MSNGR_SEND_RESULT,
+    CP_MSNGR_SYNC_POPUP,
     CP_MSNGR_HEARTBEAT,
     CP_URNS_ANNOUNCE,
     CP_DIO0_PENDING,
@@ -116,6 +117,7 @@
       case CP_MSNGR_PING:            return "messenger_ping_process()";
       case CP_MSNGR_SEND:            return "messenger_send_process()";
       case CP_MSNGR_SEND_RESULT:     return "msngr_send_result_process()";
+      case CP_MSNGR_SYNC_POPUP:      return "msngr_sync_popup_process()";
       case CP_MSNGR_HEARTBEAT:       return "messenger_heartbeat_process()";
       case CP_URNS_ANNOUNCE:         return "urns_announce()";
       case CP_DIO0_PENDING:          return "handleDio0IfPending()";
@@ -689,6 +691,48 @@ void setup() {
     #endif
   #endif
 
+  #if HAS_BUZZER == true
+    // Moved ahead of the HAS_URNS block below (was originally further down,
+    // after it) - the vault PIN-entry screen (VaultUnlock.h) needs
+    // buzzer_encoder_click_melody() working for its per-digit confirm
+    // click, but that screen runs from inside the HAS_URNS block, before
+    // buzzer_init() used to run. Confirmed via live testing: beeps were
+    // silently no-ops on the boot-time unlock screen specifically (the
+    // Menu.h-triggered enroll/disable flow worked fine, since by then
+    // buzzer_init() had already run on a normal, non-blocking boot).
+    #if HAS_EEPROM
+      uint8_t snd_raw = EEPROM.read(eeprom_addr(ADDR_CONF_SND));
+    #elif MCU_VARIANT == MCU_NRF52
+      uint8_t snd_raw = eeprom_read(eeprom_addr(ADDR_CONF_SND));
+    #endif
+    // Explicit ON/OFF only ever get written as SND_ENABLE_BYTE/
+    // SND_DISABLE_BYTE (see the KISS handler and snd_conf_save()) - any
+    // other value (erased EEPROM reads 0xFF, not 0x00) means "never
+    // touched", so leave sound_enabled at its board default
+    // (SOUND_ENABLED_DEFAULT, Boards.h) instead of forcing it either way.
+    if (snd_raw == SND_ENABLE_BYTE) sound_enabled = true;
+    else if (snd_raw == SND_DISABLE_BYTE) sound_enabled = false;
+    #if HAS_GPIO_MENU == true
+      // Must run before buzzer_init(), which reads buzzer_pin to set up
+      // the actual hardware pin.
+      #if HAS_EEPROM
+        uint8_t buz_raw = EEPROM.read(eeprom_addr(ADDR_CONF_BUZ));
+      #elif MCU_VARIANT == MCU_NRF52
+        uint8_t buz_raw = eeprom_read(eeprom_addr(ADDR_CONF_BUZ));
+      #endif
+      // Only 0xFF (erased EEPROM) means "unset" here - see the equivalent
+      // comment on the encoder-pin loads above, same reasoning (D0 is a
+      // legitimate candidate pin, not a sentinel).
+      if (buz_raw != 0xFF) {
+        for (uint8_t i = 0; i < GPIO_FREE_PIN_CANDIDATE_COUNT; i++) {
+          if (gpio_free_pin_candidates[i] == buz_raw) { buzzer_pin = buz_raw; break; }
+        }
+      }
+    #endif
+    buzzer_init();
+    buzzer_boot_melody();
+  #endif
+
   #if HAS_URNS == true
     // Raw physical byte, not through eeprom_addr() - see ADDR_CONF_URNS
     // (ROM.h), same convention as ADDR_CONF_GNSS just above. Explicit
@@ -731,6 +775,30 @@ void setup() {
       }
     #endif
 
+    // Same "never touched" EEPROM convention as urns_raw above, raw
+    // physical byte not through eeprom_addr() (Vault.h/ROM.h) - must be
+    // readable before urns_init() below even attempts to mount the "urns"
+    // partition, since this decides whether the boot-unlock screen runs at
+    // all before that happens.
+    uint8_t vault_raw = EEPROM.read(ADDR_CONF_VAULT_ENABLED);
+    if (vault_raw == VAULT_ENABLE_BYTE) vault_enabled = true;
+    else if (vault_raw == VAULT_DISABLE_BYTE) vault_enabled = false;
+
+    if (vault_enabled) {
+      // FIXED (real bug, confirmed via live testing): vault_try_unlock()
+      // needs the "urns" filesystem mounted/registered to read vault.vk -
+      // without this call, every single unlock attempt crashed
+      // (OS::file_exists() throws when nothing's registered yet) before
+      // the entered password was ever even checked, regardless of what
+      // was typed - see urns_mount_filesystem()'s own comment (URNS.h)
+      // for the full story. urns_init() below calls this too but it's
+      // idempotent, so no double-mount.
+      urns_mount_filesystem();
+      // Blocking - does not return until vault_try_unlock() succeeds, so
+      // urns_init() below never runs against a still-encrypted identity.
+      vault_unlock_boot_screen();
+    }
+
     if (urns_enabled) {
       // Identity/persistence only - doesn't touch the radio, so it's fine
       // this early. urns_radio_bringup() is deferred to after
@@ -769,40 +837,6 @@ void setup() {
         urns_probe_destination_enabled = false;
       }
     }
-  #endif
-
-  #if HAS_BUZZER == true
-    #if HAS_EEPROM
-      uint8_t snd_raw = EEPROM.read(eeprom_addr(ADDR_CONF_SND));
-    #elif MCU_VARIANT == MCU_NRF52
-      uint8_t snd_raw = eeprom_read(eeprom_addr(ADDR_CONF_SND));
-    #endif
-    // Explicit ON/OFF only ever get written as SND_ENABLE_BYTE/
-    // SND_DISABLE_BYTE (see the KISS handler and snd_conf_save()) - any
-    // other value (erased EEPROM reads 0xFF, not 0x00) means "never
-    // touched", so leave sound_enabled at its board default
-    // (SOUND_ENABLED_DEFAULT, Boards.h) instead of forcing it either way.
-    if (snd_raw == SND_ENABLE_BYTE) sound_enabled = true;
-    else if (snd_raw == SND_DISABLE_BYTE) sound_enabled = false;
-    #if HAS_GPIO_MENU == true
-      // Must run before buzzer_init(), which reads buzzer_pin to set up
-      // the actual hardware pin.
-      #if HAS_EEPROM
-        uint8_t buz_raw = EEPROM.read(eeprom_addr(ADDR_CONF_BUZ));
-      #elif MCU_VARIANT == MCU_NRF52
-        uint8_t buz_raw = eeprom_read(eeprom_addr(ADDR_CONF_BUZ));
-      #endif
-      // Only 0xFF (erased EEPROM) means "unset" here - see the equivalent
-      // comment on the encoder-pin loads above, same reasoning (D0 is a
-      // legitimate candidate pin, not a sentinel).
-      if (buz_raw != 0xFF) {
-        for (uint8_t i = 0; i < GPIO_FREE_PIN_CANDIDATE_COUNT; i++) {
-          if (gpio_free_pin_candidates[i] == buz_raw) { buzzer_pin = buz_raw; break; }
-        }
-      }
-    #endif
-    buzzer_init();
-    buzzer_boot_melody();
   #endif
 
   #if HAS_ENCODER == true
@@ -1471,7 +1505,7 @@ void urns_radio_bringup() {
   lora_bw   = 125000;    // 125 kHz
   lora_sf   = 10;
   lora_cr   = 7;
-  lora_txp  = 17;         // dBm
+  lora_txp  = 17;        // dBm
 
   startRadio();
 
@@ -1872,6 +1906,12 @@ void serial_callback(uint8_t sbyte) {
   } else if (IN_FRAME && sbyte == FEND && command == CMD_PROVISION_REQ && frame_len > 0) {
     IN_FRAME = false;
     on_provision_request(prov_req_buf, frame_len);
+  } else if (IN_FRAME && sbyte == FEND && command == CMD_IDENTITY_EXPORT && frame_len > 0) {
+    IN_FRAME = false;
+    on_identity_export_request();
+  } else if (IN_FRAME && sbyte == FEND && command == CMD_IDENTITY_IMPORT && frame_len > 0) {
+    IN_FRAME = false;
+    on_identity_import_request(identity_import_buf, frame_len);
   #endif
 
   } else if (sbyte == FEND) {
@@ -2099,6 +2139,31 @@ void serial_callback(uint8_t sbyte) {
           ESCAPE = false;
         }
         if (frame_len < MTU) prov_req_buf[frame_len++] = sbyte;
+      }
+    } else if (command == CMD_IDENTITY_EXPORT) {
+      // Payload is a bare trigger (contents ignored, IdentityTransfer.h's
+      // own comment) - cmdbuf/CMD_L is plenty, same as CMD_SYNC_WORD just
+      // above, no need for a dedicated buffer.
+      if (sbyte == FESC) {
+        ESCAPE = true;
+      } else {
+        if (ESCAPE) {
+          if (sbyte == TFEND) sbyte = FEND;
+          if (sbyte == TFESC) sbyte = FESC;
+          ESCAPE = false;
+        }
+        if (frame_len < CMD_L) cmdbuf[frame_len++] = sbyte;
+      }
+    } else if (command == CMD_IDENTITY_IMPORT) {
+      if (sbyte == FESC) {
+        ESCAPE = true;
+      } else {
+        if (ESCAPE) {
+          if (sbyte == TFEND) sbyte = FEND;
+          if (sbyte == TFESC) sbyte = FESC;
+          ESCAPE = false;
+        }
+        if (frame_len < MTU) identity_import_buf[frame_len++] = sbyte;
       }
     #endif
     } else if (command == CMD_IMPLICIT) {
@@ -3096,6 +3161,10 @@ void loop() {
     esp_task_wdt_reset();
   #endif
   CP(CP_LOOP_TOP);
+  blekbd_loop();
+  blekbd_pair_result_process();
+  blekbd_notice_process();
+  blekbd_key_repeat_process();
   // housekeeping_task()/kiss_tx_task()/ws_tx_task() used to run as their
   // own dedicated FreeRTOS tasks, pinned to core 0, alongside loopTask on
   // core 1 - folded back here 2026-08-15 to match microReticulum_
@@ -3123,6 +3192,11 @@ void loop() {
         messenger_send_process();
         CP(CP_MSNGR_SEND_RESULT);
         msngr_send_result_process();
+        #if HAS_BLE_HID_HOST == true
+          msngr_chat_send_watch_process();
+        #endif
+        CP(CP_MSNGR_SYNC_POPUP);
+        msngr_sync_popup_process();
         #if HAS_DEBUG_UART == true
           CP(CP_MSNGR_HEARTBEAT);
           messenger_heartbeat_process();
@@ -3524,6 +3598,27 @@ void sleep_now() {
 }
 
 void button_event(uint8_t event, unsigned long duration) {
+  // Boot-unlock screen (or the Menu.h PIN-enable/disable flow) owns the
+  // single button on encoder-less boards (MeshPoE-S3) - same redirect
+  // Encoder.h does for encoder_process() on encoder boards. Only the
+  // release-with-duration event matters to VaultUnlock.h's tap/hold tiers.
+  #if HAS_URNS == true
+    if (vault_unlock_active) {
+      if (event == EVENT_BUTTON_CLICK) {
+        vault_unlock_button_press(duration);
+      }
+      return;
+    }
+    // The live-submit hold's eventual physical release is still coming
+    // once control returns here (vault_unlock_prompt() returns without
+    // waiting for it) - swallow that one release instead of letting its
+    // 3s+ duration land in the tiers below (menu_open_from_closed() at
+    // duration>3000, Menu.h) and pop Settings open right after unlock.
+    if (vault_suppress_next_release) {
+      vault_suppress_next_release = false;
+      if (event == EVENT_BUTTON_CLICK) return;
+    }
+  #endif
   #if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
     if (display_blanked) {
       display_unblank();

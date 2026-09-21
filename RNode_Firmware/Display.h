@@ -311,6 +311,13 @@ bool device_firmware_ok();
     // comment for why.
     void draw_button_hold_overlay();
   #endif
+  #if HAS_BLE_HID_HOST == true
+    // Ambient "keyboard connected/disconnected" notice (Menu.h) - same
+    // "drawn every cycle, not just once" reasoning as draw_button_hold_
+    // overlay() above, but (per user request) called from both the
+    // menu-open and menu-closed redraw paths below, not just the latter.
+    void draw_blekbd_notice_overlay();
+  #endif
 #endif
 
 #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1
@@ -4194,6 +4201,13 @@ void update_display(bool blank = false) {
             #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1 || BOARD_MODEL == BOARD_HELTEC_T114
               push_menu_canvas();
             #endif
+            #if HAS_BLE_HID_HOST == true
+              // Per user request, the KBD CONNECTED/DISCONNECTED notice
+              // shows on top of an open menu screen too, not just the idle
+              // main screen - see draw_blekbd_notice_overlay()'s own
+              // comment for why this is safe to call here.
+              draw_blekbd_notice_overlay();
+            #endif
           } else
         #endif
         {
@@ -4205,6 +4219,9 @@ void update_display(bool blank = false) {
             update_disp_area();
             #if HAS_MENU == true && HAS_INPUT == true
               draw_button_hold_overlay();
+            #endif
+            #if HAS_MENU == true && HAS_BLE_HID_HOST == true
+              draw_blekbd_notice_overlay();
             #endif
           }
         }

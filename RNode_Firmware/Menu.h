@@ -38,6 +38,7 @@
     #define MENU_GFX menu_canvas
     #define MENU_FONT SMALL_FONT
     #define MENU_CONTENT_W (MENU_CANVAS_W - 8) // 4px margin each side
+    #define MENU_CONTENT_X 4 // left edge of the content/border box - see MENU_CONTENT_W's own comment
     #define MENU_LIST_ROW_H 11
     // 5 rows * 11px from MENU_LIST_TOP_Y (15) reaches y=70, which is exactly
     // where the footer below now starts - same zero-gap fit the original
@@ -108,6 +109,7 @@
     #define MENU_GFX menu_canvas
     #define MENU_FONT TEXT_ENTRY_FONT
     #define MENU_CONTENT_W (MENU_CANVAS_W - 8) // 4px margin each side
+    #define MENU_CONTENT_X 4 // left edge of the content/border box - see MENU_CONTENT_W's own comment
     #define MENU_LIST_ROW_H 20
     // 8 rows (22 to 22+8*20=182) left 37px of clear space before the footer
     // hline at MENU_CANVAS_H-21=219 - room for one more 20px row (182-202)
@@ -157,7 +159,14 @@
   #else
     #define MENU_GFX display
     #define MENU_FONT SMALL_FONT
-    #define MENU_CONTENT_W 120
+    // Full 128px physical SSD1306 width, not 120 - per user request, every
+    // menu screen's horizontal separators/borders/selection highlight
+    // should reach the actual screen edges on this small OLED, not leave a
+    // 4px unused margin on each side. MENU_CONTENT_X=0 (below) is this
+    // board group's own left-edge counterpart - T096/T114/WTRACKER_V2 keep
+    // their existing 4px margin (MENU_CONTENT_X=4 there) untouched.
+    #define MENU_CONTENT_W 128
+    #define MENU_CONTENT_X 0
     #define MENU_LIST_ROW_H 11
     #define MENU_LIST_VISIBLE_ROWS 4
     // 5px up from the original 15 - tracks MENU_HEADER_HLINE_Y below 1:1
@@ -311,6 +320,15 @@
   #define MENU_STATE_BT_SETTINGS_EDIT 57 // editing whichever of Legacy Pairing/Just Works/Auto Start/Battery Service was selected
   #define MENU_STATE_MSNGR_PRESETS 58 // configurable quick-send buttons list (0-5) - Add Preset row (hidden once full) + one row per configured preset + BACK, opened from MENU_STATE_MSNGR_SETTINGS' own Preset Messages row
   #define MENU_STATE_MSNGR_PRESET_DETAIL 59 // Edit/Delete/BACK for one existing preset, opened by selecting its row in MENU_STATE_MSNGR_PRESETS - same 3-row tail shape as MENU_STATE_MSNGR_MSG_DETAIL's Reply/Delete/BACK
+  #if HAS_BLE_HID_HOST == true
+    #define MENU_STATE_BLEKBD_LIST 60 // BLE Keyboard submenu - Enabled/Status/Scan for Keyboard/Forget Keyboard/Back, opened from MENU_STATE_BT_LIST's BT_ITEM_KEYBOARD row
+    #define MENU_STATE_BLEKBD_EDIT 61 // editing the Enabled field - the only editable row in MENU_STATE_BLEKBD_LIST, same shared-EDIT-state shape as MENU_STATE_BT_SETTINGS/_EDIT
+    #define MENU_STATE_BLEKBD_SCAN 62 // live-populated list of nearby HID-advertising keyboards (blekbd_discovered[], BLEKeyboardHost.h) - same scrollable-list shape as MENU_STATE_MSNGR_ANNOUNCES
+    #define MENU_STATE_BLEKBD_PAIR_CONFIRM 63 // PAIR/CANCEL list before esp_hidh_dev_open() actually fires against the selected MENU_STATE_BLEKBD_SCAN row - same pattern as MENU_STATE_FWUPD_CONFIRM
+    #define MENU_STATE_BLEKBD_PAIRING 64 // live status (Pairing.../Paired!/Failed) + BACK while waiting for ESP_HIDH_OPEN_EVENT, auto-dismisses on success - same "live status + BACK" shape as MENU_STATE_MSNGR_SEND_RESULT, polled via blekbd_pair_result_process() from loop()
+    #define MENU_STATE_BLEKBD_FORGET_CONFIRM 65 // FORGET/CANCEL list before the stored peer's EEPROM entry is erased and its bond deleted (ble_store_util_delete_peer(), NOT bt_debond_all()) - same pattern as MENU_STATE_BT_UNPAIR_CONFIRM
+    #define MENU_STATE_MSNGR_CHAT 66 // leaner BLE-keyboard-only chat view for an LXMF conversation - no title/footer chrome, last 5 messages (msngr_peer_cache) above a persistent compose box, Enter sends directly via msngr_chat_do_send(), opened from MENU_STATE_MSNGR_PEER's MSNGR_PEER_FIXED_ACTION_CHAT row
+  #endif
 
   // The Hardware page used to only exist when there was board-level info
   // worth showing (battery/voltage sensing via HAS_PMU, or an ESP32-S3's
@@ -739,7 +757,15 @@
       // the #else at BT_ITEM_MAC's own HAS_BLE check above instead.
       #define BT_ITEM_BONDS (BT_ITEM_SETTINGS + 1)
       #define BT_ITEM_UNPAIR (BT_ITEM_BONDS + 1)
-      #define BT_ITEM_BACK (BT_ITEM_UNPAIR + 1)
+      #if HAS_BLE_HID_HOST == true
+        // Opens MENU_STATE_BLEKBD_LIST - separate submenu, not folded into
+        // BT_SETTINGS, since it has its own multi-screen scan/pair/forget
+        // flow rather than a single toggle.
+        #define BT_ITEM_KEYBOARD (BT_ITEM_UNPAIR + 1)
+        #define BT_ITEM_BACK (BT_ITEM_KEYBOARD + 1)
+      #else
+        #define BT_ITEM_BACK (BT_ITEM_UNPAIR + 1)
+      #endif
     #else
       #define BT_ITEM_BACK (BT_ITEM_MAC + 1)
     #endif
@@ -775,6 +801,15 @@
       #endif
       #define BT_SETTINGS_ITEM_COUNT (BT_SETTINGS_ITEM_BACK + 1)
     #endif
+  #endif
+
+  #if HAS_BLE_HID_HOST == true
+    #define BLEKBD_ITEM_ENABLED 0 // toggle - staged like BT_SETTINGS_ITEM_BATTERY_SERVICE, opens MENU_STATE_BLEKBD_EDIT
+    #define BLEKBD_ITEM_STATUS  1 // read-only - "Disabled" / "Not Paired" / paired keyboard's name (or address if never reconnected since boot)
+    #define BLEKBD_ITEM_SCAN    2 // opens MENU_STATE_BLEKBD_SCAN; no-op with a brief popup hint if Enabled is currently off
+    #define BLEKBD_ITEM_FORGET  3 // opens MENU_STATE_BLEKBD_FORGET_CONFIRM; no-op if no peer stored
+    #define BLEKBD_ITEM_BACK    4
+    #define BLEKBD_ITEM_COUNT   5
   #endif
 
   #if HAS_URNS == true
@@ -815,10 +850,21 @@
     // Defaults OFF - matches RNS::Reticulum::probe_destination_enabled()'s
     // own library default (Reticulum.cpp).
     #define URNS_ITEM_PROBE_DEST (URNS_ITEM_REMOTE_MGMT + 1)
+    // Editable, but NOT a staged/commit-on-exit bool like every other item
+    // above - confirming this row immediately runs the full PIN-entry flow
+    // (vault_enroll_flow()/vault_disable_flow(), VaultUnlock.h/Vault.h),
+    // since it has real, immediate side effects (encrypting or decrypting
+    // the identity on disk) that don't fit the "flip a staged bool, apply
+    // everything on SAVE & EXIT" model the boot-only settings above use -
+    // there's no meaningful "staged but not yet saved" state for "the
+    // identity is now encrypted under a PIN the user just entered." See
+    // MENU_STATE_URNS_EDIT's own confirm-select handling for
+    // URNS_ITEM_VAULT.
+    #define URNS_ITEM_VAULT (URNS_ITEM_PROBE_DEST + 1)
     // Opens MENU_STATE_URNS_PATHS - a read-only, scrollable dump of
     // RNS::Transport's live path table (destination hash + hop count),
     // same "own submenu, only BACK does anything" shape as SENSORS_LIST.
-    #define URNS_ITEM_PATHS (URNS_ITEM_PROBE_DEST + 1)
+    #define URNS_ITEM_PATHS (URNS_ITEM_VAULT + 1)
     // Read-only info row - remaining free space on the "urns" LittleFS
     // partition (identity/path-table persistence + the LXMF MessageStore,
     // see MessageStore.h). LittleFS.usedBytes()/totalBytes() report for
@@ -880,9 +926,10 @@
     #define MSNGR_TOP_ITEM_BOOKMARKS     1
     #define MSNGR_TOP_ITEM_ANNOUNCES     2
     #define MSNGR_TOP_ITEM_ANNOUNCE_NODE 3 // sends our own LXMF delivery destination announce
-    #define MSNGR_TOP_ITEM_SETTINGS      4 // opens MENU_STATE_MSNGR_SETTINGS
-    #define MSNGR_TOP_ITEM_BACK          5
-    #define MSNGR_TOP_ITEM_COUNT         6
+    #define MSNGR_TOP_ITEM_SYNC_PROP     4 // manually syncs from the active propagation node bookmark (messenger_prop_node_set_active(), Messenger.h) - see msngr_sync_popup_process() below for the live "Syncing.../Synced N Msgs/Sync Failed" popup
+    #define MSNGR_TOP_ITEM_SETTINGS      5 // opens MENU_STATE_MSNGR_SETTINGS
+    #define MSNGR_TOP_ITEM_BACK          6
+    #define MSNGR_TOP_ITEM_COUNT         7
 
     // MENU_STATE_MSNGR_SETTINGS - just Retries + Back today, but its own
     // item-index space (mirrors MSNGR_TOP_ITEM_* above) so more Messenger
@@ -891,16 +938,42 @@
     #define MSNGR_SETTINGS_ITEM_RETRY_DELAY       1
     #define MSNGR_SETTINGS_ITEM_ANNOUNCE_START    2
     #define MSNGR_SETTINGS_ITEM_ANNOUNCE_INTERVAL 3
-    #define MSNGR_SETTINGS_ITEM_DISPLAY_NAME      4 // opens MENU_STATE_MSNGR_TEXT_ENTRY (reused from the message composer), not MSNGR_SETTINGS_EDIT
-    #define MSNGR_SETTINGS_ITEM_PRESETS           5 // opens MENU_STATE_MSNGR_PRESETS
-    #define MSNGR_SETTINGS_ITEM_BACK              6
-    #define MSNGR_SETTINGS_ITEM_COUNT             7
+    #define MSNGR_SETTINGS_ITEM_PROP_ON_FAIL      4 // ON/OFF - LXMRouter::set_fallback_to_propagation() (Messenger.h)
+    #define MSNGR_SETTINGS_ITEM_SYNC_INTERVAL     5 // stepped preset incl. Off - msngr_sync_interval_presets_s[] (Messenger.h)
+    #define MSNGR_SETTINGS_ITEM_SYNC_LIMIT        6 // stepped 0-254, 0=unlimited (Messenger.h)
+    #define MSNGR_SETTINGS_ITEM_STAMP_COST        7 // stepped 0-255, 0=disabled (Messenger.h)
+    #define MSNGR_SETTINGS_ITEM_DISPLAY_NAME      8 // opens MENU_STATE_MSNGR_TEXT_ENTRY (reused from the message composer), not MSNGR_SETTINGS_EDIT
+    #define MSNGR_SETTINGS_ITEM_PRESETS           9 // opens MENU_STATE_MSNGR_PRESETS
+    #define MSNGR_SETTINGS_ITEM_BACK              10
+    #define MSNGR_SETTINGS_ITEM_COUNT             11
 
     // "ANNOUNCED" has nothing to acknowledge (unlike "NOT READY", which
     // stays up until dismissed - same success/error asymmetry as NTP sync's
     // own popup, see NTP_SYNC_SUCCESS_POPUP_MS), so it auto-dismisses on
     // its own after this long.
     #define MSNGR_ANNOUNCE_POPUP_MS 10000
+
+    // MSNGR_TOP_ITEM_SYNC_PROP's own "Synced N Msg(s)" result popup -
+    // same auto-dismiss treatment as ACTION_POPUP_MS's other result
+    // banners (there's nothing to acknowledge on success). "Sync Failed"
+    // and "Prop Not Set" deliberately don't use this - same "errors stay
+    // up until dismissed" asymmetry as MSNGR_ANNOUNCE_POPUP_MS's own
+    // "NOT READY" comment above.
+    #define MSNGR_SYNC_POPUP_MS ACTION_POPUP_MS
+
+    // True from the moment MSNGR_TOP_ITEM_SYNC_PROP actually kicks off a
+    // sync (LXMRouter::request_messages_from_propagation_node()) until
+    // msngr_sync_popup_process() below observes it reach PR_COMPLETE/
+    // PR_FAILED and updates the still-open "Syncing..." popup with the
+    // real result - polled from loop() (RNode_Firmware.ino) the same way
+    // msngr_send_result_process() already is, since a propagation sync is
+    // a multi-second path-request/link/fetch sequence, not something that
+    // finishes within the single confirm_select() call that starts it.
+    // Left true (and silently dropped once seen) if the user manually
+    // dismisses the "Syncing..." popup before it resolves - see that
+    // function's own comment for why forcing the popup back open in that
+    // case would be more surprising than just not reporting the result.
+    bool msngr_sync_popup_pending = false;
 
     // Caps on-screen rows for the Inbox/Bookmarks/Announces lists, same
     // "bound iteration/stack, scrolling still reaches everything past this"
@@ -929,13 +1002,54 @@
     #define MSNGR_PEER_FIXED_ACTION_PING        1 // opens MENU_STATE_MSNGR_PING_RESULT
     #define MSNGR_PEER_FIXED_ACTION_BOOKMARK    2 // label switches Add/Remove Bookmark
     #define MSNGR_PEER_FIXED_ACTION_CLEAR       3 // opens MENU_STATE_MSNGR_CLEAR_CONFIRM
-    #define MSNGR_PEER_FIXED_ACTION_BACK        4
-    #define MSNGR_PEER_FIXED_ACTION_COUNT       5
+    #if HAS_BLE_HID_HOST == true
+      // Opens MENU_STATE_MSNGR_CHAT - leaner BLE-keyboard-only compose view
+      // (no on-screen grid, no title/footer chrome) - only meaningful on a
+      // board that can actually have a physical keyboard paired.
+      #define MSNGR_PEER_FIXED_ACTION_CHAT (MSNGR_PEER_FIXED_ACTION_CLEAR + 1)
+      #define MSNGR_PEER_FIXED_ACTION_BACK (MSNGR_PEER_FIXED_ACTION_CHAT + 1)
+    #else
+      #define MSNGR_PEER_FIXED_ACTION_BACK (MSNGR_PEER_FIXED_ACTION_CLEAR + 1)
+    #endif
+    #define MSNGR_PEER_FIXED_ACTION_COUNT (MSNGR_PEER_FIXED_ACTION_BACK + 1)
+
+    // MENU_STATE_MSNGR_PEER's entire action set when msngr_active_peer_hash
+    // is a Propagation-type bookmark instead of an LXMF one
+    // (messenger_bookmark_is_prop_node(), Messenger.h) - Compose/Ping/
+    // Clear Conversation/preset Send buttons all assume an LXMF delivery
+    // destination, which a propagation node isn't (it answers on "lxmf"/
+    // "propagation", not "lxmf"/"delivery" - no conversation ever exists
+    // to show either, so message rows/presets are skipped entirely too,
+    // not just these three). Replaces MSNGR_PEER_FIXED_ACTION_* wholesale
+    // rather than coexisting with it - see msngr_peer_row_count() and the
+    // draw/confirm handling's own is_prop_node branch for where the two
+    // action sets fork.
+    #define MSNGR_PEER_PROP_ACTION_SYNC       0 // manually syncs against THIS bookmark's node specifically, making it active first if it wasn't already - msngr_prop_sync_start()
+    #define MSNGR_PEER_PROP_ACTION_SHOW_HASH  1 // opens MENU_STATE_URNS_PATH_HASH_VIEW (reused as-is) against this bookmark's hash, same full two-line hex view URNS Path Table's own Hash row uses
+    #define MSNGR_PEER_PROP_ACTION_SET_ACTIVE 2 // label switches Set/Unset Active - messenger_prop_node_set_active()/_clear_active()
+    #define MSNGR_PEER_PROP_ACTION_REMOVE     3 // messenger_bookmark_remove() - same action MSNGR_PEER_FIXED_ACTION_BOOKMARK's "Remove Bookmark" wording does for an LXMF peer, just unconditional here (a Propagation-type bookmark is always bookmarked - that's the only way one exists)
+    #define MSNGR_PEER_PROP_ACTION_BACK       4
+    #define MSNGR_PEER_PROP_ACTION_COUNT      5
+
     // Worst-case row count for MENU_STATE_MSNGR_PEER's local draw arrays -
     // message rows + every preset slot filled + all fixed actions, even
     // though msngr_peer_row_count() (the *actual* count for any given
     // peer/preset configuration) is almost always smaller.
     #define MSNGR_PEER_MAX_ROWS (MSNGR_PEER_MAX_MSG_ROWS + MSNGR_MAX_PRESETS + MSNGR_PEER_FIXED_ACTION_COUNT)
+
+    // Marquee-scroll timing for MENU_STATE_MSNGR_PEER's currently-selected
+    // message row (msngr_peer_scroll_*, Messenger.h) - see that draw
+    // block's own comment (this file, below) for the full mechanism.
+    #define MSNGR_PEER_SCROLL_STEP_MS 250
+    #define MSNGR_PEER_SCROLL_WINDOW  23 // label_bufs[]/valbufs[] are char[24] (draw_menu_list_disp()'s own fixed signature)
+    // Per user request, a fully-scrolled marquee doesn't just stop at the
+    // end - it holds there for this long, then loops back to the start and
+    // scrolls again, for as long as the row stays selected/visible.
+    #define MSNGR_PEER_SCROLL_LOOP_PAUSE_MS 2000
+    // Per user request, a fresh loop back to the start also pauses here
+    // before actually scrolling again, so the beginning of the message is
+    // actually readable rather than immediately sliding away.
+    #define MSNGR_PEER_SCROLL_START_PAUSE_MS 1000
 
     // MENU_STATE_MSNGR_MSG_DETAIL - a message's content, word-wrapped
     // across up to this many rows, plus one DELETE row (opens
@@ -961,6 +1075,32 @@
     // no point composing a message longer than what the detail screen can
     // ever show back.
     #define MSNGR_TEXT_ENTRY_MAX_LEN 140
+
+    // MENU_STATE_MSNGR_TEXT_ENTRY is reused for editing the LXMF display
+    // name (RNode Settings > Messenger > Settings > Display Name), adding/
+    // editing a preset message (RNode Settings > Messenger > Settings >
+    // Preset Messages), composing a message, and typing a bookmark's raw
+    // destination hash (RNode Settings > Messenger > Bookmarks > Add by
+    // Hash) - this tracks which, since the Send key's actual action, the
+    // exit/discard target, and (for BOOKMARK_HASH) the active keyboard
+    // layout itself all differ. All the actual typing mechanics (grid
+    // cursor/shift/buffer, declared further down) are identical regardless
+    // of purpose, only specific branches care. Declared up here, before
+    // MSNGR_KB_LAYOUT below, so msngr_kb_active_layout()/msngr_kb_active_
+    // rows() (and every hold-gesture poller that needs to know which
+    // layout is live right now) can reference it.
+    #define MSNGR_TEXT_ENTRY_PURPOSE_MESSAGE       0
+    #define MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME  1
+    #define MSNGR_TEXT_ENTRY_PURPOSE_PRESET        2
+    #define MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH 3 // MSNGR_BOOKMARKS' "Add by Hash" row - typing an arbitrary peer's destination hash directly, not learned from an announce/message
+    uint8_t msngr_text_entry_purpose = MSNGR_TEXT_ENTRY_PURPOSE_MESSAGE;
+
+    // Which kind of bookmark MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH's SAVE
+    // key will create - toggled via the Type cell on MSNGR_KB_LAYOUT_HEX's
+    // own row 2 (MSNGR_KB_TYPE_TOGGLE below). Reset to LXMF every time the
+    // Add by Hash screen is (re-)opened (MENU_STATE_MSNGR_BOOKMARKS' row-
+    // select handler), same as msngr_kb_cursor/shift/lang_ru are.
+    uint8_t msngr_kb_bookmark_type = MSNGR_BOOKMARK_TYPE_LXMF;
 
     // Sentinel chars double as both the grid's stored key and the dispatch
     // tag msngr_kb_key_type() below switches on - same trick meshtastic's
@@ -1010,19 +1150,66 @@
       {'\xC1', '\xB9', '\xB3', '\xAE', '\xAA', '\xB4', '\xBE', '.', ',', '?', '\x1b'},
     };
 
+    // MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH's own restricted grid - a
+    // destination hash is only ever 0-9/A-F, so the full EN/RU keyboard is
+    // unnecessary friction to navigate for a 32-char hash (confirmed
+    // annoying on hardware before this existed). Reuses the exact same
+    // per-cell pixel grid every other layout gets - draw_menu_msngr_
+    // keyboard_disp()'s col_x/col_w split (10 narrow digit-width columns +
+    // 1 wide action column) is shared unchanged by every row here too, so
+    // '0'-'9' lines up with 'A'-'F' column-for-column (both start at
+    // col_x[0]) and DEL/SAVE/BACK all sit in the exact same rightmost
+    // column - not custom-fitted per row.
+    //
+    // Row 0: 10 digits + DEL, same shape as every other layout's own rows.
+    // Row 1: 6 hex letters (cols 0-5, unused past that) + SAVE in the
+    // shared action column (col 10) - "SAVE", not "SEND", since this
+    // bookmarks a hash locally, nothing goes out over the air
+    // (draw_menu_msngr_keyboard_disp()'s own hex_mode label override).
+    // Row 2: a Type toggle (col 0, spans the same 10 narrow columns '0'-'9'/
+    // 'A'-'F' sit in above it - see draw_menu_msngr_keyboard_disp()'s own
+    // MSNGR_KB_TYPE_TOGGLE handling) + BACK in the action column - not
+    // sharing row 1's narrow cells (illegible) and not left out of the
+    // grid entirely either (unreachable on a tap-only board otherwise -
+    // menu_button_press() has no long-hold-to-leave path, only "hold to
+    // press the highlighted key" the same as every other key, so BACK
+    // needs a real cell here same as everywhere else) - an extra row
+    // spent on what was originally just a single button, on request,
+    // rather than trying to squeeze BACK in elsewhere. Type picks which
+    // kind of bookmark SAVE (row 1) creates - LXMF (default) or
+    // Propagation (RNode Settings > Messenger > Bookmarks > <a
+    // Propagation-type bookmark> > Set/Unset Active) - see
+    // MSNGR_BOOKMARK_TYPE_LXMF/_PROPAGATION (Messenger.h).
+    //
+    // '\0' cells are genuinely unused - draw_menu_msngr_keyboard_disp()
+    // skips drawing them entirely (MSNGR_KB_NONE below) and msngr_kb_
+    // cursor_rc()/msngr_kb_active_key_count() build cursor navigation by
+    // scanning for non-'\0' cells, so they're never reachable either -
+    // not dead placeholder buttons, just blank canvas.
+    #define MSNGR_KB_HEX_ROWS 3
+    static const char MSNGR_KB_LAYOUT_HEX[MSNGR_KB_HEX_ROWS][MSNGR_KB_COLS] = {
+      {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '\b'},
+      {'A', 'B', 'C', 'D', 'E', 'F', '\0', '\0', '\0', '\0', '\n'},
+      {'\x04', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\x1b'},
+    };
+
     #define MSNGR_KB_CHAR      0
     #define MSNGR_KB_BACKSPACE 1
     #define MSNGR_KB_SEND      2
     #define MSNGR_KB_SPACE     3
     #define MSNGR_KB_SHIFT     4
     #define MSNGR_KB_BACK      5
+    #define MSNGR_KB_NONE      6 // unused cell (MSNGR_KB_LAYOUT_HEX's '\0' entries) - never reachable by cursor navigation (msngr_kb_cursor_rc()/msngr_kb_active_key_count() both skip these) or drawn (draw_menu_msngr_keyboard_disp() skips them too), but msngr_kb_key_type() still needs a safe classification for '\0' so nothing ever mistakes it for a literal character to insert.
+    #define MSNGR_KB_TYPE_TOGGLE 7 // MSNGR_KB_LAYOUT_HEX row 2's Type cell ('\x04') - cycles msngr_kb_bookmark_type between MSNGR_BOOKMARK_TYPE_LXMF/_PROPAGATION on press, same "press to change" shape as Shift, not a left/right stepper (this screen's rotation is spoken for as cursor movement, same as every other MSNGR_TEXT_ENTRY purpose).
 
     uint8_t msngr_kb_key_type(char ch) {
+      if (ch == '\0') return MSNGR_KB_NONE;
       if (ch == '\b') return MSNGR_KB_BACKSPACE;
       if (ch == '\n') return MSNGR_KB_SEND;
       if (ch == ' ')  return MSNGR_KB_SPACE;
       if (ch == '\x02') return MSNGR_KB_SHIFT;
       if (ch == '\x1b') return MSNGR_KB_BACK;
+      if (ch == '\x04') return MSNGR_KB_TYPE_TOGGLE;
       return MSNGR_KB_CHAR;
     }
 
@@ -1624,6 +1811,41 @@
         #endif
       }
     }
+
+    #if HAS_BLE_HID_HOST == true
+      // Ambient "keyboard connected/disconnected" notice - same draw_menu_
+      // status_rect() primitive draw_button_hold_overlay() just used above,
+      // superimposed directly on top of WHATEVER is currently on screen
+      // (idle main screen, an open Settings/Messenger submenu, Chat, ...)
+      // and redrawn every cycle for as long as it's armed - not routed
+      // through the menu-open popup machinery (MENU_STATE_STATUS_POPUP),
+      // which is a real state transition (see blekbd_notice_process()'s own
+      // comment, this file, below) draw_menu_status_rect() itself has
+      // already proven safe to call regardless of menu-open state (that's
+      // exactly what MENU_STATE_STATUS_POPUP's own draw case does, via
+      // menu_draw_popup()). 0 = inactive. Per user request: shown
+      // everywhere, not just while idle - a keyboard dropping/reconnecting
+      // mid-navigation is exactly when this is most useful to notice.
+      unsigned long blekbd_notice_until_ms = 0;
+      char blekbd_notice_text[20] = {0};
+
+      // Called every cycle from update_display() (Display.h), both the
+      // menu-open and menu-closed paths - same "redraw every cycle or the
+      // next ordinary refresh wipes it" reason as draw_button_hold_
+      // overlay()'s own comment.
+      void draw_blekbd_notice_overlay() {
+        if (blekbd_notice_until_ms == 0 || (int32_t)(millis() - blekbd_notice_until_ms) >= 0) {
+          if (blekbd_notice_until_ms != 0) {
+            blekbd_notice_until_ms = 0;
+            #if BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1 || BOARD_MODEL == BOARD_HELTEC_T114
+              menu_status_rect_clear();
+            #endif
+          }
+          return;
+        }
+        draw_menu_status_rect(blekbd_notice_text);
+      }
+    #endif
   #endif
 
   // Used to be gated behind HAS_WIFI || HAS_ETHERNET || (HAS_GPS && HAS_RTC)
@@ -1820,8 +2042,20 @@
     // a path row is clicked in MENU_STATE_URNS_PATHS - MENU_STATE_URNS_PATH_
     // DETAIL looks this back up via new_path_table().get() on every draw
     // call rather than caching the DestinationEntry itself, same "always
-    // show live state" convention as the list it was opened from.
+    // show live state" convention as the list it was opened from. Also the
+    // hash MENU_STATE_URNS_PATH_HASH_VIEW's draw_menu_urns_path_hash_disp()
+    // actually renders - reused as-is (not renamed/duplicated) by
+    // MSNGR_PEER_PROP_ACTION_SHOW_HASH below, which is the same "just show
+    // the full hash, dismiss on any input" need against a different hash.
     RNS::Bytes urns_path_detail_hash;
+
+    // Where MENU_STATE_URNS_PATH_HASH_VIEW returns to on dismiss - set at
+    // each entry point right before switching menu_state to it, same
+    // "explicit return target" shape as menu_open_popup()'s own return_
+    // state parameter. Defaults to its original sole caller (URNS Path
+    // Detail's Hash row) so nothing else needs to set it if a future call
+    // site forgets to.
+    uint8_t menu_hash_view_return_state = MENU_STATE_URNS_PATH_DETAIL;
 
     // Row count for MENU_STATE_URNS_PATHS: path entries (capped at
     // MENU_URNS_PATH_MAX_ROWS) plus one BACK row, or a single inert
@@ -1871,6 +2105,10 @@
     uint8_t staged_msngr_retry_delay_s = MSNGR_RETRY_DELAY_DEFAULT;
     bool staged_msngr_announce_at_start = true;
     uint8_t staged_msngr_announce_interval_idx = 0;
+    bool staged_msngr_propagate_on_fail = false;
+    uint8_t staged_msngr_sync_interval_idx = 0;
+    uint8_t staged_msngr_sync_limit = MSNGR_SYNC_LIMIT_DEFAULT;
+    uint8_t staged_msngr_stamp_cost = MSNGR_STAMP_COST_DEFAULT;
 
     // Which peer MENU_STATE_MSNGR_PEER/MSG_DETAIL are currently showing -
     // set whenever a row is confirmed in Inbox/Bookmarks/Announces (or a
@@ -1902,6 +2140,150 @@
     bool msngr_kb_lang_ru = false;
     char msngr_text_entry_buf[MSNGR_TEXT_ENTRY_MAX_LEN + 1] = {0};
 
+    // Centralizes which layout table is "live" right now - the restricted
+    // hex grid for MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH, EN/RU otherwise -
+    // so every call site that indexes [kb_row][kb_col] does it through
+    // here instead of duplicating the purpose check. Returns a row-array
+    // pointer (decays to the same char(*)[MSNGR_KB_COLS] type no matter
+    // which table's actual row count is, since only MSNGR_KB_COLS - shared
+    // by all three tables - affects that pointer type) so callers don't
+    // need to know or care that MSNGR_KB_LAYOUT_HEX has fewer rows.
+    const char (*msngr_kb_active_layout())[MSNGR_KB_COLS] {
+      if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH) return MSNGR_KB_LAYOUT_HEX;
+      return msngr_kb_lang_ru ? MSNGR_KB_LAYOUT_RU : MSNGR_KB_LAYOUT;
+    }
+
+    // Row count of whichever layout msngr_kb_active_layout() would return
+    // right now - MSNGR_KB_HEX_ROWS for hash entry, MSNGR_KB_ROWS
+    // otherwise. Bounds the keyboard grid's own row-drawing loop so hash
+    // entry never draws (or leaves visible click-through space for) the
+    // extra row a straight MSNGR_KB_ROWS would otherwise leave underneath
+    // it - cursor navigation itself is bounded separately, by msngr_kb_
+    // active_key_count() below, since MSNGR_KB_LAYOUT_HEX's real cells
+    // aren't evenly spread across every row.
+    uint8_t msngr_kb_active_rows() {
+      return msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH ? MSNGR_KB_HEX_ROWS : MSNGR_KB_ROWS;
+    }
+
+    // Every other layout is a uniform MSNGR_KB_ROWS x MSNGR_KB_COLS
+    // rectangle, so a linear cursor maps to (row, col) with plain
+    // division/modulo, which also happens to visit cells in reading order
+    // (left-to-right, top-to-bottom). MSNGR_KB_LAYOUT_HEX's own reading
+    // order would visit DEL (row 0's last cell) before 'A'-'F' (row 1),
+    // which isn't the tab order that's actually wanted - digits, then
+    // letters, then DEL/SAVE/BACK last - so hash entry gets an explicit
+    // per-cursor-value (row, col) table instead of computing one.
+    static const uint8_t MSNGR_KB_HEX_ORDER[20][2] = {
+      {0,0}, {0,1}, {0,2}, {0,3}, {0,4}, {0,5}, {0,6}, {0,7}, {0,8}, {0,9}, // 0-9
+      {1,0}, {1,1}, {1,2}, {1,3}, {1,4}, {1,5}, // A-F
+      {0,10}, // DEL
+      {1,10}, // SAVE
+      {2,0},  // Type (LXMF/Propagation)
+      {2,10}, // BACK
+    };
+    #define MSNGR_KB_HEX_KEY_COUNT 20
+
+    // Maps a linear cursor value to (row, col) for whichever layout is
+    // active - MSNGR_KB_HEX_ORDER above for hash entry, plain division/
+    // modulo for every other (uniform-grid) purpose. Shared by every call
+    // site that used to do the division/modulo itself, so none of them
+    // need their own purpose check.
+    void msngr_kb_cursor_rc(uint8_t cursor, uint8_t &row, uint8_t &col) {
+      if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH) {
+        row = MSNGR_KB_HEX_ORDER[cursor][0];
+        col = MSNGR_KB_HEX_ORDER[cursor][1];
+        return;
+      }
+      row = cursor / MSNGR_KB_COLS;
+      col = cursor % MSNGR_KB_COLS;
+    }
+
+    // Total selectable cells for whichever layout is active right now -
+    // bounds cursor navigation (menu_encoder_rotate()'s MENU_STATE_MSNGR_
+    // TEXT_ENTRY branch). MSNGR_KB_KEY_COUNT (rows*cols) for every normal
+    // purpose; MSNGR_KB_HEX_KEY_COUNT (MSNGR_KB_HEX_ORDER's own length)
+    // for hash entry - not msngr_kb_active_rows()*MSNGR_KB_COLS, which
+    // would let the cursor wander onto cells MSNGR_KB_HEX_ORDER doesn't
+    // have entries for.
+    uint8_t msngr_kb_active_key_count() {
+      if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH) return MSNGR_KB_HEX_KEY_COUNT;
+      return MSNGR_KB_KEY_COUNT;
+    }
+
+    // Real 2D grid navigation for a BLE keyboard's Left/Right/Up/Down
+    // (blekbd_key_event(), below) - per user request, distinct from the
+    // single linear cursor step menu_encoder_rotate()'s own MENU_STATE_
+    // MSNGR_TEXT_ENTRY branch does (dir=+-1 on msngr_kb_cursor directly),
+    // which for MSNGR_KB_LAYOUT_HEX's deliberately non-reading-order tab
+    // sequence (MSNGR_KB_HEX_ORDER's own comment) doesn't reliably
+    // correspond to "move right" or "move down" at all - e.g. one linear
+    // step from '9' (row 0) lands on 'A' (row 1), neither a same-row nor
+    // a same-column move. A real encoder/the single button still use the
+    // linear step (unchanged - rotation only, no separate Left/Right
+    // input to give it), so this is BLE-keyboard-specific.
+    //
+    // msngr_kb_nav_col: moves to the nearest valid cell strictly left/
+    // right of the current one WITHIN THE SAME ROW ONLY, clamped at the
+    // row's own first/last real cell (never spills into an adjacent row,
+    // unlike msngr_kb_nav_row below). O(active key count) linear scan -
+    // at most 44 cells (normal 4x11 layout), negligible.
+    void msngr_kb_nav_col(int8_t dir) {
+      uint8_t row, col;
+      msngr_kb_cursor_rc(msngr_kb_cursor, row, col);
+      uint8_t count = msngr_kb_active_key_count();
+      bool found = false;
+      int16_t best_col = 0;
+      uint8_t best_cursor = msngr_kb_cursor;
+      for (uint8_t i = 0; i < count; i++) {
+        uint8_t r, c;
+        msngr_kb_cursor_rc(i, r, c);
+        if (r != row) continue;
+        if (dir < 0) {
+          if ((int16_t)c < (int16_t)col && (!found || (int16_t)c > best_col)) { best_col = c; best_cursor = i; found = true; }
+        } else {
+          if ((int16_t)c > (int16_t)col && (!found || (int16_t)c < best_col)) { best_col = c; best_cursor = i; found = true; }
+        }
+      }
+      if (found) msngr_kb_cursor = best_cursor;
+    }
+
+    // msngr_kb_nav_row: moves to the row above/below, landing on whichever
+    // cell in that row is closest to the current column (exact match
+    // preferred) - rows don't all have the same active columns (MSNGR_KB_
+    // LAYOUT_HEX especially: row 2 only has cells at columns 0 and 10),
+    // so this is a nearest-column search, not a fixed offset. Clamped at
+    // the grid's own first/last row - no wrap, same as this screen's
+    // existing Up/Down (menu_encoder_rotate(dir, false)'s own wrap=false).
+    void msngr_kb_nav_row(int8_t dir) {
+      uint8_t row, col;
+      msngr_kb_cursor_rc(msngr_kb_cursor, row, col);
+      int16_t target_row = (int16_t)row + dir;
+      if (target_row < 0 || target_row >= (int16_t)msngr_kb_active_rows()) return;
+      uint8_t count = msngr_kb_active_key_count();
+      bool found = false;
+      int16_t best_dist = 0;
+      uint8_t best_cursor = msngr_kb_cursor;
+      for (uint8_t i = 0; i < count; i++) {
+        uint8_t r, c;
+        msngr_kb_cursor_rc(i, r, c);
+        if (r != (uint8_t)target_row) continue;
+        int16_t dist = (int16_t)c - (int16_t)col;
+        if (dist < 0) dist = -dist;
+        if (!found || dist < best_dist) { best_dist = dist; best_cursor = i; found = true; }
+      }
+      if (found) msngr_kb_cursor = best_cursor;
+    }
+
+    // Shared by the on-screen keyboard's own confirm gesture (menu_
+    // confirm_select()'s MSNGR_KB_TYPE_TOGGLE branch) and a BLE keyboard's
+    // Space (while the highlight is on this cell)/Tab (from anywhere on
+    // this screen) shortcuts (blekbd_key_event(), below) - all three
+    // "press" the Type cell the same way.
+    void msngr_kb_toggle_bookmark_type() {
+      msngr_kb_bookmark_type = (msngr_kb_bookmark_type == MSNGR_BOOKMARK_TYPE_PROPAGATION)
+        ? MSNGR_BOOKMARK_TYPE_LXMF : MSNGR_BOOKMARK_TYPE_PROPAGATION;
+    }
+
     // The EN/RU switch fires live, the instant a Shift hold crosses
     // MSNGR_KB_ALT_HOLD_MS, rather than waiting for release - polled
     // every loop() tick (menu_button_process() below for the main
@@ -1927,9 +2309,9 @@
     // gives meaning to, so it's left alone.
     void msngr_kb_lang_hold_try(unsigned long held_ms, bool &fired_flag) {
       if (menu_state != MENU_STATE_MSNGR_TEXT_ENTRY || fired_flag || held_ms < MSNGR_KB_ALT_HOLD_MS) return;
-      uint8_t kb_row = msngr_kb_cursor / MSNGR_KB_COLS;
-      uint8_t kb_col = msngr_kb_cursor % MSNGR_KB_COLS;
-      char key_ch = (msngr_kb_lang_ru ? MSNGR_KB_LAYOUT_RU : MSNGR_KB_LAYOUT)[kb_row][kb_col];
+      uint8_t kb_row, kb_col;
+      msngr_kb_cursor_rc(msngr_kb_cursor, kb_row, kb_col);
+      char key_ch = msngr_kb_active_layout()[kb_row][kb_col];
       if (msngr_kb_key_type(key_ch) != MSNGR_KB_SHIFT) return;
       msngr_kb_lang_ru = !msngr_kb_lang_ru;
       msngr_kb_shift_on = false;
@@ -1937,18 +2319,6 @@
       fired_flag = true;
     }
 
-    // MENU_STATE_MSNGR_TEXT_ENTRY is reused for editing the LXMF display
-    // name (RNode Settings > Messenger > Settings > Display Name), adding/
-    // editing a preset message (RNode Settings > Messenger > Settings >
-    // Preset Messages), and composing a message - this tracks which,
-    // since the Send key's actual action and the exit/discard target
-    // differ. All the actual typing mechanics (grid cursor/shift/buffer
-    // above) are identical regardless of purpose, only these three
-    // branch on it.
-    #define MSNGR_TEXT_ENTRY_PURPOSE_MESSAGE      0
-    #define MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME 1
-    #define MSNGR_TEXT_ENTRY_PURPOSE_PRESET        2
-    uint8_t msngr_text_entry_purpose = MSNGR_TEXT_ENTRY_PURPOSE_MESSAGE;
     // Which msngr_presets[] slot PURPOSE_PRESET is editing -
     // MSNGR_MAX_PRESETS itself (one past the last real slot) is the
     // sentinel for "adding a new preset" rather than editing an existing
@@ -1980,15 +2350,17 @@
     // behavior (Shift's language switch, BACK, etc).
     void msngr_kb_alt_hold_try(unsigned long held_ms, bool &fired_flag) {
       if (menu_state != MENU_STATE_MSNGR_TEXT_ENTRY || fired_flag || held_ms < MSNGR_KB_ALT_HOLD_MS) return;
-      uint8_t kb_row = msngr_kb_cursor / MSNGR_KB_COLS;
-      uint8_t kb_col = msngr_kb_cursor % MSNGR_KB_COLS;
-      char key_ch = (msngr_kb_lang_ru ? MSNGR_KB_LAYOUT_RU : MSNGR_KB_LAYOUT)[kb_row][kb_col];
+      uint8_t kb_row, kb_col;
+      msngr_kb_cursor_rc(msngr_kb_cursor, kb_row, kb_col);
+      char key_ch = msngr_kb_active_layout()[kb_row][kb_col];
       char alt = msngr_kb_alt_pair(key_ch);
       if (alt == 0) return;
       alt = msngr_kb_apply_shift(alt, msngr_kb_shift_on);
-      size_t max_len = (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME ||
-                         msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_PRESET)
-        ? MSNGR_NAME_MAX_LEN : MSNGR_TEXT_ENTRY_MAX_LEN;
+      size_t max_len = msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH
+        ? (size_t)(LXMF::PEER_HASH_SIZE * 2)
+        : (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME ||
+           msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_PRESET)
+          ? MSNGR_NAME_MAX_LEN : MSNGR_TEXT_ENTRY_MAX_LEN;
       size_t text_len = strlen(msngr_text_entry_buf);
       if (text_len < max_len) {
         msngr_text_entry_buf[text_len] = alt;
@@ -2030,9 +2402,9 @@
     // triggered early instead of waiting for release.
     void msngr_kb_del_hold_try(unsigned long held_ms, bool &fired_flag, unsigned long &last_repeat_ms) {
       if (menu_state != MENU_STATE_MSNGR_TEXT_ENTRY || held_ms < MSNGR_KB_DEL_REPEAT_START_MS) return;
-      uint8_t kb_row = msngr_kb_cursor / MSNGR_KB_COLS;
-      uint8_t kb_col = msngr_kb_cursor % MSNGR_KB_COLS;
-      char key_ch = (msngr_kb_lang_ru ? MSNGR_KB_LAYOUT_RU : MSNGR_KB_LAYOUT)[kb_row][kb_col];
+      uint8_t kb_row, kb_col;
+      msngr_kb_cursor_rc(msngr_kb_cursor, kb_row, kb_col);
+      char key_ch = msngr_kb_active_layout()[kb_row][kb_col];
       if (msngr_kb_key_type(key_ch) != MSNGR_KB_BACKSPACE) return;
       unsigned long now = millis();
       if (last_repeat_ms != 0 && now - last_repeat_ms < MSNGR_KB_DEL_REPEAT_INTERVAL_MS) return;
@@ -2049,6 +2421,13 @@
     // as msngr_delete_confirm_cursor/msngr_clear_confirm_cursor above
     // (0 = DISCARD, 1 = CANCEL).
     uint8_t msngr_discard_confirm_cursor = 1;
+    // Which screen opened this confirm dialog (MENU_STATE_MSNGR_TEXT_ENTRY
+    // or, once MENU_STATE_MSNGR_CHAT exists, that instead) - CANCEL returns
+    // here. Set by menu_msngr_text_entry_leave() right before it opens this
+    // dialog; DISCARD doesn't need this at all (it already goes through
+    // msngr_text_entry_return_state() below, which is purpose-based and
+    // already correct for both callers).
+    uint8_t msngr_discard_confirm_return_state = MENU_STATE_MSNGR_TEXT_ENTRY;
 
     // Where leaving MENU_STATE_MSNGR_TEXT_ENTRY (Send/BACK/discard alike)
     // lands, based on why it was opened - shared by menu_msngr_text_
@@ -2058,6 +2437,7 @@
     uint8_t msngr_text_entry_return_state() {
       if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME) return MENU_STATE_MSNGR_SETTINGS;
       if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_PRESET) return MENU_STATE_MSNGR_PRESETS;
+      if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH) return MENU_STATE_MSNGR_BOOKMARKS;
       return MENU_STATE_MSNGR_PEER;
     }
 
@@ -2075,6 +2455,7 @@
         menu_state = return_state;
       } else {
         msngr_discard_confirm_cursor = 1; // default CANCEL
+        msngr_discard_confirm_return_state = menu_state; // CANCEL comes back here - see this var's own declaration
         menu_state = MENU_STATE_MSNGR_DISCARD_CONFIRM;
       }
     }
@@ -2088,6 +2469,368 @@
     // MENU_STATE_MSNGR_SEND_RESULT - same fixed 2-row shape as
     // MSNGR_PING_RESULT above, default cursor on BACK.
     uint8_t msngr_send_result_cursor = 1;
+
+    // Appends an already-shift-resolved character to msngr_text_entry_buf,
+    // respecting the same per-purpose length cap the on-screen keyboard's
+    // own MSNGR_KB_CHAR/_SPACE dispatch enforces (menu_confirm_select()) -
+    // extracted so the BLE keyboard path (blekbd_key_event(), below) can
+    // reuse it instead of duplicating the cap logic. Silently drops the
+    // character once the cap is hit, same as the on-screen keyboard always
+    // has - no truncation warning, just stops accepting more input.
+    void msngr_kb_insert_char(char c) {
+      size_t max_len = msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH
+        ? (size_t)(LXMF::PEER_HASH_SIZE * 2)
+        : (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME ||
+           msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_PRESET)
+          ? MSNGR_NAME_MAX_LEN : MSNGR_TEXT_ENTRY_MAX_LEN;
+      size_t text_len = strlen(msngr_text_entry_buf);
+      if (text_len < max_len) {
+        msngr_text_entry_buf[text_len] = c;
+        msngr_text_entry_buf[text_len + 1] = 0;
+      }
+    }
+
+    // Trims the last character off msngr_text_entry_buf - extracted from
+    // the on-screen keyboard's own MSNGR_KB_BACKSPACE dispatch (menu_
+    // confirm_select()) for the same reuse reason as msngr_kb_insert_char()
+    // above. No-ops on an already-empty buffer.
+    void msngr_kb_do_backspace() {
+      size_t text_len = strlen(msngr_text_entry_buf);
+      if (text_len > 0) msngr_text_entry_buf[text_len - 1] = 0;
+    }
+
+    #if HAS_BLE_HID_HOST == true
+      // MENU_STATE_MSNGR_CHAT's own text-editing cursor - a byte offset
+      // into msngr_text_entry_buf (0..strlen(buf)), separate from the on-
+      // screen keyboard's msngr_kb_insert_char()/_do_backspace() above,
+      // which only ever operate at the end of the buffer (no cursor concept
+      // at all - nothing in that grid-based flow needs one). Chat has a
+      // physical keyboard's own Left/Right keys available, so real in-place
+      // editing (insert/delete anywhere, not just append/trim-the-tail)
+      // is worth supporting there specifically. Reset to 0 (buffer's start,
+      // same as "empty") wherever msngr_text_entry_buf itself gets reset
+      // for Chat - MSNGR_PEER_FIXED_ACTION_CHAT's own entry point and
+      // msngr_chat_do_send() after a successful send (both below).
+      uint8_t msngr_chat_cursor = 0;
+
+      // Persisted horizontal scroll position for draw_msngr_compose_box()'s
+      // cursor-aware path (this file, below) - a byte offset into msngr_
+      // text_entry_buf, kept across redraws so the visible slice only
+      // slides when msngr_chat_cursor actually moves out of it (minimal-
+      // scroll, same idiom every real text field uses), not recomputed
+      // from scratch every frame. Reset at the same two points as msngr_
+      // chat_cursor itself, immediately below.
+      size_t msngr_chat_compose_win_start = 0;
+
+      // Mirrors msngr_kb_insert_char()'s own length cap (MSNGR_TEXT_ENTRY_
+      // MAX_LEN - Chat's msngr_text_entry_purpose is always MESSAGE, never
+      // the other three purposes that function has to branch on), but
+      // inserts at msngr_chat_cursor instead of always appending, shifting
+      // everything from the cursor onward one slot to the right first.
+      void msngr_chat_insert_char(char c) {
+        size_t text_len = strlen(msngr_text_entry_buf);
+        if (text_len >= MSNGR_TEXT_ENTRY_MAX_LEN) return;
+        if (msngr_chat_cursor > text_len) msngr_chat_cursor = (uint8_t)text_len;
+        for (size_t i = text_len + 1; i > msngr_chat_cursor; i--) {
+          msngr_text_entry_buf[i] = msngr_text_entry_buf[i - 1];
+        }
+        msngr_text_entry_buf[msngr_chat_cursor] = c;
+        msngr_chat_cursor++;
+      }
+
+      // Deletes the character immediately before the cursor (standard
+      // Backspace semantics) and shifts the remainder left - unlike msngr_
+      // kb_do_backspace() above, which only ever trims the buffer's own
+      // last character. No-ops at the start of the buffer (cursor == 0),
+      // same "nothing to delete" convention as that function's own no-op
+      // on an already-empty buffer.
+      void msngr_chat_backspace() {
+        if (msngr_chat_cursor == 0) return;
+        size_t text_len = strlen(msngr_text_entry_buf);
+        for (size_t i = msngr_chat_cursor - 1; i < text_len; i++) {
+          msngr_text_entry_buf[i] = msngr_text_entry_buf[i + 1];
+        }
+        msngr_chat_cursor--;
+      }
+
+      void msngr_chat_cursor_left() {
+        if (msngr_chat_cursor > 0) msngr_chat_cursor--;
+      }
+
+      void msngr_chat_cursor_right() {
+        size_t text_len = strlen(msngr_text_entry_buf);
+        if (msngr_chat_cursor < text_len) msngr_chat_cursor++;
+      }
+
+      // MENU_STATE_MSNGR_CHAT's message-list browsing - Up/Down/PgUp/PgDn/
+      // Home/End (blekbd_key_event(), below) move between the compose box
+      // (msngr_chat_sel == 0xFF, Messenger.h - the default/normal focus)
+      // and a selected message in the history (msngr_chat_cache, Messenger.
+      // h). Selecting a message is what makes Backspace open the DELETE
+      // MESSAGE? mini-dialog below instead of editing compose text; typing/
+      // Left/Right always return focus to the compose box first (their own
+      // dispatch, below).
+      #define MSNGR_CHAT_PAGE_ROWS 4 // PgUp/PgDn step - leaves 1 row as a reference/overlap, per user request
+      // Per user request, browsing auto-deselects back to the compose box
+      // after this long with no navigation activity - same effect as
+      // pressing Esc. Checked every redraw (Chat's own draw block, below).
+      #define MSNGR_CHAT_SEL_TIMEOUT_MS 10000
+
+      // True while the DELETE MESSAGE? confirm mini-dialog (draw block,
+      // below) is up - intercepts Enter/Esc/Backspace exclusively while
+      // set, same "nothing else does anything" idiom MENU_STATE_STATUS_
+      // POPUP uses elsewhere, just Chat-local instead of a real menu_state
+      // change (Chat's own menu_state never leaves MENU_STATE_MSNGR_CHAT
+      // for this - simpler than reusing MENU_STATE_MSNGR_DELETE_CONFIRM,
+      // which is a cursor-based DELETE/CANCEL list screen built around
+      // menu_confirm_select() - a different interaction shape than "Enter
+      // confirms, Esc/Backspace cancel" with no list to navigate).
+      bool msngr_chat_delete_confirm_pending = false;
+
+      void msngr_chat_enter_browsing() {
+        if (msngr_chat_sel != 0xFF) return;
+        // Selects the bottom-most (most recent) currently-visible row -
+        // the natural first stop coming from the compose box, which sits
+        // visually right below it.
+        if (msngr_chat_cache_count > 0) msngr_chat_sel = msngr_chat_cache_count - 1;
+      }
+
+      void msngr_chat_exit_browsing() {
+        msngr_chat_sel = 0xFF;
+      }
+
+      void msngr_chat_nav_up() {
+        msngr_chat_sel_last_activity_ms = millis();
+        if (msngr_chat_sel == 0xFF) { msngr_chat_enter_browsing(); return; }
+        if (msngr_chat_sel > 0) { msngr_chat_sel--; return; }
+        if (msngr_chat_window_start > 0) {
+          messenger_refresh_chat_window(msngr_active_peer_hash, msngr_chat_window_start - 1);
+          msngr_chat_sel = 0;
+        }
+      }
+
+      void msngr_chat_nav_down() {
+        msngr_chat_sel_last_activity_ms = millis();
+        if (msngr_chat_sel == 0xFF) { msngr_chat_enter_browsing(); return; }
+        if ((size_t)(msngr_chat_sel + 1) < msngr_chat_cache_count) { msngr_chat_sel++; return; }
+        if (msngr_chat_window_start + msngr_chat_cache_count < msngr_chat_total_count) {
+          messenger_refresh_chat_window(msngr_active_peer_hash, msngr_chat_window_start + 1);
+          msngr_chat_sel = msngr_chat_cache_count > 0 ? (uint8_t)(msngr_chat_cache_count - 1) : 0;
+        }
+      }
+
+      void msngr_chat_nav_page_up() {
+        msngr_chat_sel_last_activity_ms = millis();
+        msngr_chat_enter_browsing();
+        size_t new_start = (msngr_chat_window_start > MSNGR_CHAT_PAGE_ROWS) ? (msngr_chat_window_start - MSNGR_CHAT_PAGE_ROWS) : 0;
+        messenger_refresh_chat_window(msngr_active_peer_hash, new_start);
+        msngr_chat_sel = 0;
+      }
+
+      void msngr_chat_nav_page_down() {
+        msngr_chat_sel_last_activity_ms = millis();
+        msngr_chat_enter_browsing();
+        messenger_refresh_chat_window(msngr_active_peer_hash, msngr_chat_window_start + MSNGR_CHAT_PAGE_ROWS);
+        msngr_chat_sel = msngr_chat_cache_count > 0 ? (uint8_t)(msngr_chat_cache_count - 1) : 0;
+      }
+
+      void msngr_chat_nav_home() {
+        msngr_chat_sel_last_activity_ms = millis();
+        messenger_refresh_chat_window(msngr_active_peer_hash, 0);
+        msngr_chat_sel = 0;
+      }
+
+      void msngr_chat_nav_end() {
+        msngr_chat_sel_last_activity_ms = millis();
+        messenger_refresh_chat_window(msngr_active_peer_hash, (size_t)-1);
+        msngr_chat_sel = msngr_chat_cache_count > 0 ? (uint8_t)(msngr_chat_cache_count - 1) : (uint8_t)0xFF;
+      }
+
+    #endif
+
+    // Whatever's currently in msngr_text_entry_buf, dispatched by purpose
+    // (message/display-name/bookmark-hash/preset) - extracted verbatim
+    // from the on-screen keyboard's own MSNGR_KB_SEND dispatch (menu_
+    // confirm_select()) so the BLE keyboard's Enter key can trigger the
+    // exact same save/send flow instead of re-implementing four separate
+    // purpose-specific paths.
+    void msngr_kb_do_send() {
+      size_t text_len = strlen(msngr_text_entry_buf);
+      if (text_len > 0 && msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME) {
+        // No result screen needed - unlike an LXMF send, this can't fail
+        // in a way worth reporting (a local file write), so it's save-
+        // and-return rather than save-and-show-status. Expanded to real
+        // UTF-8 first (msngr_kb_expand_utf8()) - the announce this name
+        // goes out in is read by other Reticulum clients, not just this
+        // device's own Org_01 glyph table.
+        char name_utf8[MSNGR_NAME_MAX_LEN * 2 + 1];
+        msngr_kb_expand_utf8(msngr_text_entry_buf, name_utf8, sizeof(name_utf8));
+        msngr_display_name_conf_save(name_utf8);
+        msngr_text_entry_buf[0] = 0;
+        menu_state = MENU_STATE_MSNGR_SETTINGS;
+      } else if (text_len > 0 && msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH) {
+        // Manually-entered destination hash - no identity/keys yet (those
+        // only ever arrive via an announce), but bookmarking it is enough:
+        // opening the resulting peer screen and sending already runs
+        // through messenger_send_process()'s existing Identity::recall()/
+        // Transport::request_path() pending-send path (Messenger.h) the
+        // same way replying to an unknown sender does, so no separate
+        // "request keys" step is needed here - Send just resolves once an
+        // announce comes back.
+        uint8_t raw_hash[LXMF::PEER_HASH_SIZE];
+        if (messenger_hash_from_hex(msngr_text_entry_buf, raw_hash)) {
+          RNS::Bytes hash(raw_hash, LXMF::PEER_HASH_SIZE);
+          if (messenger_bookmark_find(hash) < 0) {
+            // Empty name, not messenger_peer_display_name(hash) - at this
+            // point nothing is known about the peer yet, so that would
+            // just resolve to the truncated-hex fallback and pin it as the
+            // bookmark's name forever (messenger_peer_display_name()'s own
+            // bookmark-name check short-circuits before ever reaching its
+            // live Identity::recall_app_data() backfill check below, once
+            // the bookmark has ANY non-empty name stored) - confirmed on
+            // hardware: a hash-only bookmark's name never self-healed
+            // until Remove+re-Add cleared the pinned hex and let the live
+            // check run. Leaving it empty here keeps every future lookup
+            // falling through to that live check until a real name
+            // actually resolves.
+            messenger_bookmark_add(hash, "", msngr_kb_bookmark_type);
+          }
+          msngr_text_entry_buf[0] = 0;
+          menu_state = MENU_STATE_MSNGR_BOOKMARKS;
+        } else {
+          menu_open_popup("INVALID HASH", MENU_STATE_MSNGR_TEXT_ENTRY);
+          menu_popup_auto_dismiss_at = millis() + ACTION_POPUP_MS;
+        }
+      } else if (text_len > 0 && msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_PRESET) {
+        // No UTF-8 expansion needed here unlike the display-name/message
+        // branches - this text never leaves the device, same reasoning
+        // bookmark names already get away with storing as typed
+        // (Messenger.h). msngr_preset_edit_index == msngr_preset_count
+        // (set when MENU_STATE_MSNGR_PRESETS' own "Add Preset" row opened
+        // this screen) means append a new one; anything less is an
+        // existing slot being edited in place - same "index == count
+        // means append" sentinel messenger_preset_add() itself uses.
+        if (msngr_preset_edit_index >= msngr_preset_count) {
+          messenger_preset_add(msngr_text_entry_buf);
+        } else {
+          messenger_preset_update(msngr_preset_edit_index, msngr_text_entry_buf);
+        }
+        msngr_text_entry_buf[0] = 0;
+        menu_state = MENU_STATE_MSNGR_PRESETS;
+      } else if (text_len > 0) {
+        // Only actually clear the composed text on a confirmed send - a
+        // failure leaves it in place so the user can retry instead of
+        // having to retype it. Same MENU_STATE_MSNGR_SEND_RESULT hand-off
+        // as the preset Send: Hi/Bye/SOS actions - see that branch's own
+        // comment. Expanded to real UTF-8 first, same reasoning as the
+        // display-name save above.
+        char msg_utf8[MSNGR_TEXT_ENTRY_MAX_LEN * 2 + 1];
+        msngr_kb_expand_utf8(msngr_text_entry_buf, msg_utf8, sizeof(msg_utf8));
+        msngr_last_send_result = messenger_send_lxmf(msngr_active_peer_hash, msg_utf8);
+        if (msngr_last_send_result == URNS_LXMF_SEND_OK || msngr_last_send_result == URNS_LXMF_SEND_RESOLVING) {
+          // RESOLVING already has its own copy of this text (msngr_send_
+          // pending_content, Messenger.h) independent of this buffer -
+          // clear it here same as OK, since the send has meaningfully
+          // started either way (see the preset-Send branch's own comment
+          // above for why cache refresh isn't called directly here).
+          msngr_text_entry_buf[0] = 0;
+          msngr_send_result_cursor = 1; // default BACK - see its own declaration
+          menu_state = MENU_STATE_MSNGR_SEND_RESULT;
+        } else {
+          menu_open_popup(urns_lxmf_send_result_text(msngr_last_send_result), MENU_STATE_MSNGR_TEXT_ENTRY);
+          menu_popup_auto_dismiss_at = millis() + ACTION_POPUP_MS;
+        }
+      }
+    }
+
+    #if HAS_BLE_HID_HOST == true
+      // Set by msngr_chat_do_send() right after a successful (OK/
+      // RESOLVING) send, consumed by msngr_chat_send_watch_process()
+      // below once msngr_send_state (Messenger.h) actually reaches a
+      // terminal outcome (Delivered/No Confirmation/Unknown Destination/
+      // Delivery Failed) - the second, later popup this drives. Same
+      // "don't yank the user into a popup for a screen they've since
+      // navigated away from" judgment call msngr_sync_popup_process()'s
+      // own comment already makes for its analogous case.
+      bool msngr_chat_watching_send = false;
+
+      // MENU_STATE_MSNGR_CHAT's own Enter-to-send - a leaner sibling of
+      // msngr_kb_do_send() above rather than a reuse of it: Chat only ever
+      // sends real messages (msngr_text_entry_purpose is always MESSAGE
+      // there), so it doesn't need that function's other 3 purpose
+      // branches, and it wants popup-only feedback (menu_open_popup(),
+      // fixed ~1.5s auto-dismiss back into Chat) instead of the full
+      // MENU_STATE_MSNGR_SEND_RESULT screen with its own Resolving/
+      // Delivered/Failed state tracking - confirmed as the wanted shape.
+      // This first popup is just the immediate "SENT"/"RESOLVING"/error
+      // echo - msngr_chat_send_watch_process() below fires a second one
+      // later, once real delivery confirmation (or a terminal failure)
+      // actually arrives. History refresh needs no new plumbing: msngr_
+      // send_result_process() (below) already refreshes msngr_peer_cache
+      // whenever msngr_send_needs_cache_refresh is set, unconditionally on
+      // menu_state - the sent message shows up in Chat's own 5-line view
+      // on its own once the send actually lands (immediately for OK,
+      // asynchronously for RESOLVING).
+      void msngr_chat_do_send() {
+        size_t text_len = strlen(msngr_text_entry_buf);
+        if (text_len == 0) return;
+        char msg_utf8[MSNGR_TEXT_ENTRY_MAX_LEN * 2 + 1];
+        msngr_kb_expand_utf8(msngr_text_entry_buf, msg_utf8, sizeof(msg_utf8));
+        msngr_last_send_result = messenger_send_lxmf(msngr_active_peer_hash, msg_utf8);
+        if (msngr_last_send_result == URNS_LXMF_SEND_OK || msngr_last_send_result == URNS_LXMF_SEND_RESOLVING) {
+          msngr_text_entry_buf[0] = 0;
+          msngr_chat_cursor = 0;
+          msngr_chat_compose_win_start = 0;
+          msngr_chat_watching_send = true;
+        }
+        menu_open_popup(urns_lxmf_send_result_text(msngr_last_send_result), MENU_STATE_MSNGR_CHAT);
+        menu_popup_auto_dismiss_at = millis() + ACTION_POPUP_MS;
+      }
+
+      // Polled from loop() (RNode_Firmware.ino) right alongside msngr_
+      // send_result_process() - that function only ever acts while sitting
+      // on MENU_STATE_MSNGR_SEND_RESULT, so it does nothing useful for
+      // Chat's own send flow, which never opens that screen. Watches the
+      // exact same msngr_send_state (Messenger.h) transitions that
+      // screen's own draw block turns into "Delivered"/"No Confirmation"/
+      // "Unknown Destination"/"Delivery Failed" text, and shows that as a
+      // second popup here instead - only while still actually looking at
+      // Chat (or the first "SENT"/"RESOLVING" popup that's about to return
+      // to it - see below), matching msngr_sync_popup_process()'s own
+      // precedent for not interrupting whatever the user's since moved on
+      // to.
+      //
+      // FIXED: the "still looking at Chat" check used to be a plain
+      // menu_state == MENU_STATE_MSNGR_CHAT, which silently dropped the
+      // Delivered popup entirely on a fast/local link - msngr_chat_do_
+      // send()'s own first popup (SENT/RESOLVING) holds menu_state at
+      // MENU_STATE_STATUS_POPUP for up to ACTION_POPUP_MS (5s) before
+      // returning to MENU_STATE_MSNGR_CHAT, and real delivery confirmation
+      // regularly lands well within that window - msngr_chat_watching_send
+      // was already consumed (cleared) the instant that happened, so by the
+      // time the first popup auto-dismissed back to Chat there was nothing
+      // left to show. Now also accepts "still on that first popup, which
+      // will return to Chat" as in-scope - menu_open_popup() below just
+      // replaces its text in place (SENT -> DELIVERED) and restarts its
+      // auto-dismiss timer, rather than waiting to be replaced.
+      void msngr_chat_send_watch_process() {
+        if (!msngr_chat_watching_send) return;
+        if (msngr_send_state != MSNGR_SEND_DELIVERED && msngr_send_state != MSNGR_SEND_TIMEOUT &&
+            msngr_send_state != MSNGR_SEND_UNRESOLVED && msngr_send_state != MSNGR_SEND_FAILED) return;
+        msngr_chat_watching_send = false;
+        const char *text =
+          (msngr_send_state == MSNGR_SEND_DELIVERED)  ? "DELIVERED" :
+          (msngr_send_state == MSNGR_SEND_TIMEOUT)    ? "NO CONFIRMATION" :
+          (msngr_send_state == MSNGR_SEND_UNRESOLVED) ? "UNKNOWN DESTINATION" : "DELIVERY FAILED";
+        msngr_send_state = MSNGR_SEND_IDLE;
+        bool still_in_chat_flow = menu_state == MENU_STATE_MSNGR_CHAT ||
+          (menu_state == MENU_STATE_STATUS_POPUP && menu_popup_return_state == MENU_STATE_MSNGR_CHAT);
+        if (still_in_chat_flow) {
+          menu_open_popup(text, MENU_STATE_MSNGR_CHAT);
+          menu_popup_auto_dismiss_at = millis() + ACTION_POPUP_MS;
+        }
+      }
+    #endif
 
     // Polled from loop() (RNode_Firmware.ino, alongside messenger_send_
     // process() itself) - auto-returns to MENU_STATE_MSNGR_PEER once a
@@ -2114,6 +2857,63 @@
       }
     }
 
+    // Polled from loop() (RNode_Firmware.ino, alongside msngr_send_result_
+    // process() itself) - watches a manual sync (MSNGR_TOP_ITEM_SYNC_PROP
+    // or MSNGR_PEER_PROP_ACTION_SYNC, both via msngr_prop_sync_start()
+    // below) through to completion and updates the still-open "Syncing..."
+    // popup with the real result. Only touches the screen if it's still
+    // showing that popup - if the user already dismissed it (button press
+    // while "Syncing..." was up, which this popup allows same as any
+    // other), silently drops the result instead of yanking them back into
+    // a popup for a screen they've since navigated away from.
+    void msngr_sync_popup_process() {
+      if (!msngr_sync_popup_pending || !urns_lxmf_router) return;
+
+      LXMF::LXMRouter::PropagationSyncState state = urns_lxmf_router->get_sync_state();
+      if (state != LXMF::LXMRouter::PR_COMPLETE && state != LXMF::LXMRouter::PR_FAILED) return;
+
+      msngr_sync_popup_pending = false;
+      if (menu_state != MENU_STATE_STATUS_POPUP) return;
+
+      if (state == LXMF::LXMRouter::PR_COMPLETE) {
+        char buf[24];
+        snprintf(buf, sizeof(buf), "Synced %u Msg%s", (unsigned)msngr_sync_last_count, msngr_sync_last_count == 1 ? "" : "s");
+        menu_draw_popup_timed(buf, MSNGR_SYNC_POPUP_MS);
+      } else { // PR_FAILED - stays up until dismissed, same as "NOT READY"
+        menu_draw_popup("Sync Failed");
+      }
+    }
+
+    // Shared by MSNGR_TOP_ITEM_SYNC_PROP (Messenger main menu) and
+    // MSNGR_PEER_PROP_ACTION_SYNC (a Propagation-type bookmark's own peer
+    // screen) - kicks off a manual sync against `hash` specifically.
+    // LXMRouter only ever tracks one outbound propagation node at a time,
+    // so if `hash` isn't already the active one this makes it active
+    // first (messenger_prop_node_set_active()) - there's no way to sync a
+    // *different* node without that, and pressing Sync on a specific
+    // bookmark is a reasonable, expected way to switch which one is
+    // active. Caller is responsible for the "no hash at all" case (empty/
+    // Prop Not Set) - this function always has a real hash to work with.
+    void msngr_prop_sync_start(const RNS::Bytes &hash, uint8_t return_state) {
+      if (!urns_lxmf_router) {
+        menu_open_popup("NOT READY", return_state);
+        return;
+      }
+      if (!messenger_prop_node_is_active(hash)) {
+        messenger_prop_node_set_active(hash);
+      }
+      LXMF::LXMRouter::PropagationSyncState state = urns_lxmf_router->get_sync_state();
+      if (state != LXMF::LXMRouter::PR_IDLE && state != LXMF::LXMRouter::PR_COMPLETE && state != LXMF::LXMRouter::PR_FAILED) {
+        menu_open_popup("Already Syncing", return_state);
+        menu_popup_auto_dismiss_at = millis() + ACTION_POPUP_MS;
+        return;
+      }
+      msngr_sync_last_count = 0;
+      urns_lxmf_router->request_messages_from_propagation_node();
+      msngr_sync_popup_pending = true;
+      menu_open_popup("Syncing...", return_state);
+    }
+
     uint8_t msngr_inbox_row_count() {
       size_t n = urns_message_store ? urns_message_store->get_conversation_count() : 0;
       if (n > MENU_MSNGR_LIST_MAX_ROWS) n = MENU_MSNGR_LIST_MAX_ROWS;
@@ -2121,10 +2921,14 @@
       return (uint8_t)(n + 1);
     }
 
+    // One row per saved bookmark, plus an "Add by Hash" row (hidden once
+    // MSNGR_MAX_BOOKMARKS is full), plus BACK - same "always something
+    // actionable, no dead placeholder label" shape as msngr_presets_row_
+    // count()'s own "Add Preset" row.
     uint8_t msngr_bookmarks_row_count() {
       uint8_t n = msngr_bookmark_count;
-      if (n == 0) return 2; // "No Bookmarks" + BACK
-      return (uint8_t)(n + 1);
+      if (msngr_bookmark_count < MSNGR_MAX_BOOKMARKS) n++; // "Add by Hash"
+      return (uint8_t)(n + 1); // + BACK
     }
 
     // One row per configured preset, plus an "Add Preset" row (only
@@ -2160,13 +2964,21 @@
     }
 
     uint8_t msngr_peer_row_count() {
+      if (messenger_bookmark_is_prop_node(msngr_active_peer_hash)) return MSNGR_PEER_PROP_ACTION_COUNT;
       return (uint8_t)(msngr_peer_msg_row_count() + msngr_preset_count + MSNGR_PEER_FIXED_ACTION_COUNT);
     }
 
-    // Chars-per-row for MENU_STATE_MSNGR_MSG_DETAIL's word-wrap - tuned for
-    // MENU_CONTENT_W/MENU_FONT's generic (non-T096/T114) 120px/Org_01
-    // combination, same font every HAS_URNS board uses today.
-    #define MSNGR_MSG_DETAIL_CHARS_PER_LINE 20
+    // Chars-per-row for MENU_STATE_MSNGR_MSG_DETAIL's word-wrap. Per user
+    // request, this screen's content-preview rows now use the "same
+    // message fitting logic" as the Full Message view (MSNGR_MSG_VIEW_
+    // CHARS_PER_LINE's own comment - the real average Org_01 glyph width
+    // is narrower than a naive full-width/20 estimate assumed) - matches
+    // that constant's value exactly rather than deriving a separate one,
+    // now that this screen's own content rows also lose their previous
+    // 8px left-padding (draw_settings_menu_disp()'s MSG_DETAIL draw
+    // block, text_dx below) and so have essentially the same ~128px
+    // usable width available.
+    #define MSNGR_MSG_DETAIL_CHARS_PER_LINE 23
 
     // Reads msngr_msg_detail_cache_content (Messenger.h) - same "cache
     // once per screen-entry, don't re-read flash per call" reasoning as
@@ -2177,7 +2989,94 @@
       size_t lines = (len + MSNGR_MSG_DETAIL_CHARS_PER_LINE - 1) / MSNGR_MSG_DETAIL_CHARS_PER_LINE;
       if (lines == 0) lines = 1;
       if (lines > MSNGR_MSG_DETAIL_MAX_LINES) lines = MSNGR_MSG_DETAIL_MAX_LINES;
-      return (uint8_t)(lines + 3); // content lines + REPLY + DELETE + BACK
+      return (uint8_t)(lines + 4); // content lines + REPLY + DELETE + FULL MESSAGE + BACK
+    }
+
+    // Full-screen, ornament-free single-message view, real word-wrap
+    // (unlike MENU_STATE_MSNGR_MSG_DETAIL's own naive fixed-width substr()
+    // chop above, which can and does split words mid-letter and never
+    // scrolls past its own MSNGR_MSG_DETAIL_MAX_LINES cap). Shared by two
+    // entry points, per user request ("it should actually use the same
+    // function"): MENU_STATE_MSNGR_MSG_DETAIL's own "Full Message" row
+    // (menu_confirm_select(), below) and MENU_STATE_MSNGR_CHAT's Enter-
+    // while-browsing (blekbd_key_event(), further below, HAS_BLE_HID_HOST
+    // boards only) - msngr_msg_view_return_state records which of the two
+    // to land back on when the view closes. Deliberately NOT gated behind
+    // HAS_BLE_HID_HOST (unlike the CHAT entry point) - MSG_DETAIL is core
+    // Messenger functionality, reachable via a real encoder/single button
+    // on every HAS_LXMF board, keyboard or not. Reuses msngr_msg_detail_
+    // cache_content (Messenger.h, messenger_refresh_msg_detail_cache())
+    // for the actual fetch either way - the same full-content cache
+    // MSG_DETAIL itself already populates, not msngr_chat_cache[]'s own
+    // capped-length snippet.
+    bool msngr_msg_view_active = false;
+    // Which wrapped line is at the top of the screen - Up/Down (keyboard),
+    // encoder rotation, and single-button short-tap/double-tap (matching
+    // MENU_BTN_DOUBLE_TAP_WINDOW's own forward/backward split, same as any
+    // other list-nav screen - see menu_encoder_rotate()'s own msngr_msg_
+    // view_active branch) all move this, clamped in the draw block once
+    // the real wrapped line count for the current message is known.
+    uint8_t msngr_msg_view_scroll_line = 0;
+    // MENU_STATE_MSNGR_MSG_DETAIL or MENU_STATE_MSNGR_CHAT - whichever
+    // opened the view, so Esc/long-press/encoder-long-click closes back to
+    // the right screen (menu_encoder_rotate()/menu_confirm_select()/
+    // menu_encoder_button(), below).
+    uint8_t msngr_msg_view_return_state = MENU_STATE_MSNGR_MSG_DETAIL;
+
+    // Org_01 at MENU_CONTENT_W=128, minus the scrollbar's own reserved
+    // ~7px on the right (4px track + 1px gap + 1px margin,
+    // draw_msngr_msg_view_scrollbar() below) - per user request, this
+    // space is always reserved regardless of whether a given message
+    // actually needs to scroll, so the wrap width never changes message
+    // to message.
+    //
+    // Kept at 23 (unreduced from the pre-scrollbar value) rather than
+    // scaled proportionally down to ~21 - a first attempt at 21 was
+    // confirmed too conservative on real hardware ("plenty of room left").
+    // Checking Org_01's own glyph table (Fonts/Org_01.h GFXglyph xAdvance)
+    // explains why: the implied per-char width behind "23 fits 128px" is
+    // ~5.57px, but the font's *real* average glyph width is only ~4.8px
+    // for lowercase+space (realistic prose) and ~5.0px across the whole
+    // printable set - i.e. the original 23 already carried ~12-15% slack
+    // beyond typical text, comfortably absorbing the scrollbar's ~5.5%
+    // width cut (7px of 128) without actually needing to drop the count.
+    // Same per-char-width estimate MSNGR_PEER_SCROLL_WINDOW/MSG_DETAIL_
+    // CHARS_PER_LINE (both 20-23) already use for this font/width
+    // combination elsewhere in this file.
+    //
+    // MAX_LINES must still "comfortably cover the full MSNGR_CONTENT_
+    // DECODE_BUF_LEN-1 (255 char) decode cap even in the pathological
+    // all-one-giant-word case with zero break points" (original guarantee)
+    // - ceil(255/23) = 12, unchanged.
+    #define MSNGR_MSG_VIEW_CHARS_PER_LINE 23
+    #define MSNGR_MSG_VIEW_MAX_LINES 12
+
+    // Real word-wrap (breaks at the last space that still fits, falling
+    // back to a hard character break only when a single word itself
+    // exceeds a whole line).
+    uint8_t msngr_msg_view_wrap(const std::string &content, std::string out_lines[], uint8_t max_lines) {
+      uint8_t n = 0;
+      size_t pos = 0;
+      size_t len = content.size();
+      while (pos < len && n < max_lines) {
+        while (pos < len && content[pos] == ' ') pos++;
+        if (pos >= len) break;
+        size_t remaining = len - pos;
+        if (remaining <= MSNGR_MSG_VIEW_CHARS_PER_LINE) {
+          out_lines[n++] = content.substr(pos, remaining);
+          break;
+        }
+        size_t window_end = pos + MSNGR_MSG_VIEW_CHARS_PER_LINE; // exclusive
+        size_t last_space = content.rfind(' ', window_end - 1);
+        if (last_space != std::string::npos && last_space > pos) {
+          out_lines[n++] = content.substr(pos, last_space - pos);
+          pos = last_space + 1;
+        } else {
+          out_lines[n++] = content.substr(pos, MSNGR_MSG_VIEW_CHARS_PER_LINE);
+          pos += MSNGR_MSG_VIEW_CHARS_PER_LINE;
+        }
+      }
+      return n;
     }
   #endif
   #endif
@@ -2206,6 +3105,112 @@
       // HAS_BLUETOOTH (Bluedroid SPP) boards never reach BT_ITEM_UNPAIR.
       uint8_t bt_unpair_confirm_cursor = 1;
     #endif
+  #endif
+  #if HAS_BLE_HID_HOST == true
+    // MENU_STATE_BLEKBD_* cursor/context state (BLEKeyboardHost.h drives
+    // the actual scan/pair/persist logic).
+    uint8_t blekbd_menu_cursor = 0;
+    bool staged_blekbd_enabled = false;
+    uint8_t blekbd_scan_cursor = 0;
+    // 0 = PAIR/FORGET, 1 = CANCEL - same defaulting-to-CANCEL convention as
+    // bt_unpair_confirm_cursor above.
+    uint8_t blekbd_pair_confirm_cursor = 1;
+    uint8_t blekbd_forget_confirm_cursor = 1;
+    // Row 0 (status) is read-only, row 1 is BACK - same shape as
+    // msngr_send_result_cursor.
+    uint8_t blekbd_pairing_cursor = 1;
+    // Stashed from the selected MENU_STATE_BLEKBD_SCAN row while
+    // MENU_STATE_BLEKBD_PAIR_CONFIRM is open, consumed by
+    // blekbd_connect_start() if the user confirms PAIR.
+    uint8_t blekbd_pending_addr[6];
+    uint8_t blekbd_pending_addr_type;
+    char blekbd_pending_name[BLEKBD_NAME_MAX_LEN + 1] = {0};
+
+    // Same shape as msngr_announces_row_count().
+    uint8_t blekbd_scan_row_count() {
+      uint8_t n = 0;
+      for (uint8_t i = 0; i < BLEKBD_MAX_DISCOVERED; i++) if (blekbd_discovered[i].in_use) n++;
+      if (n == 0) return 2; // "Scanning..." + BACK
+      return (uint8_t)(n + 1);
+    }
+
+    // Definition for the declaration in BLEKeyboardHost.h - lives here since
+    // it touches menu_state/MENU_STATE_BLEKBD_*, not yet declared at that
+    // file's own point in the include order (same reason msngr_send_result_
+    // process() lives in Menu.h instead of Messenger.h). Polled from loop()
+    // (RNode_Firmware.ino) right after blekbd_loop() - advances
+    // MENU_STATE_BLEKBD_PAIRING once a result is available. Only touches
+    // menu_state while that screen is actually open, so it can't interfere
+    // with unrelated menu navigation.
+    void blekbd_pair_result_process() {
+      if (menu_state != MENU_STATE_BLEKBD_PAIRING) return;
+      if (blekbd_pair_result == BLEKBD_PAIR_OK && (int32_t)(millis() - blekbd_pair_result_at_ms) > BLEKBD_PAIR_RESULT_POPUP_MS) {
+        blekbd_pair_result = BLEKBD_PAIR_NONE;
+        menu_state = MENU_STATE_BLEKBD_LIST;
+      }
+      // FAILED stays up until the user presses BACK from the menu itself -
+      // same "errors wait for real input" convention used elsewhere in Menu.h.
+    }
+
+    // Definition for the declaration in BLEKeyboardHost.h - same reason as
+    // blekbd_pair_result_process() above. Polled from loop() right
+    // alongside it. Per user request, arms the notice unconditionally,
+    // regardless of what's currently on screen (Settings, Messenger, Chat,
+    // idle main screen, ...) - a keyboard dropping/reconnecting is exactly
+    // as worth noticing mid-navigation as while idle, and the overlay
+    // itself (draw_blekbd_notice_overlay(), above) is a pure superimposed
+    // redraw that never touches menu_state/navigation, so there's nothing
+    // to "hijack" the way the very first implementation attempt (menu_open_
+    // popup()/MENU_STATE_STATUS_POPUP, see draw_blekbd_notice_overlay()'s
+    // own comment) actually did.
+    void blekbd_notice_process() {
+      if (blekbd_connected_popup_pending) {
+        blekbd_connected_popup_pending = false;
+        snprintf(blekbd_notice_text, sizeof(blekbd_notice_text), "KBD CONNECTED");
+        blekbd_notice_until_ms = millis() + ACTION_POPUP_MS;
+      }
+      if (blekbd_disconnected_popup_pending) {
+        blekbd_disconnected_popup_pending = false;
+        snprintf(blekbd_notice_text, sizeof(blekbd_notice_text), "KBD DISCONNECTED");
+        blekbd_notice_until_ms = millis() + ACTION_POPUP_MS;
+      }
+    }
+
+    // Definition for the declaration in BLEKeyboardHost.h - same reason as
+    // blekbd_pair_result_process() above. Fires repeated presses of
+    // whatever key is currently held (blekbd_held_active/_char,
+    // BLEKeyboardHost.h - Backspace, Up/Down/Left/Right, or any plain
+    // typed character), matching the on-screen keyboard's own DEL hold-
+    // to-repeat timing exactly (MSNGR_KB_DEL_REPEAT_START_MS/_INTERVAL_MS).
+    //
+    // Two different scopes, per user request:
+    //   - Backspace and plain typed characters only repeat while actually
+    //     composing/editing text (MENU_STATE_MSNGR_TEXT_ENTRY/_CHAT) -
+    //     letting Backspace repeat elsewhere would cascade through
+    //     multiple menu levels via blekbd_backspace_as_back() on a single
+    //     held press, which nobody asked for.
+    //   - Up/Down/Left/Right never have that risk (they only ever move
+    //     within the CURRENT screen/level - list cursor, or a value up/
+    //     down/left/right in an EDIT-style submenu - never jump between
+    //     menu levels), so their repeat is allowed in ANY open menu
+    //     screen, covering general RNode Settings list/edit navigation as
+    //     well as composing (where Left/Right already move the Chat text
+    //     cursor, Up/Down already browse Chat's own message list).
+    // Enter/Escape/shortcuts never set blekbd_held_active at all
+    // (BLEKeyboardHost.h's own comment on it) so this never fires for
+    // those regardless of state.
+    void blekbd_key_repeat_process() {
+      if (!blekbd_held_active) return;
+      bool composing = (menu_state == MENU_STATE_MSNGR_TEXT_ENTRY || menu_state == MENU_STATE_MSNGR_CHAT);
+      bool nav_repeat_key = (blekbd_held_char == BLEKBD_CH_UP || blekbd_held_char == BLEKBD_CH_DOWN ||
+                              blekbd_held_char == BLEKBD_CH_LEFT || blekbd_held_char == BLEKBD_CH_RIGHT);
+      if (!composing && !(nav_repeat_key && menu_state != MENU_STATE_CLOSED)) return;
+      unsigned long now = millis();
+      if ((int32_t)(now - blekbd_held_press_ms) < BLEKBD_KEY_REPEAT_START_MS) return;
+      if (blekbd_held_last_repeat_ms != 0 && (int32_t)(now - blekbd_held_last_repeat_ms) < BLEKBD_KEY_REPEAT_INTERVAL_MS) return;
+      blekbd_key_queue_push(blekbd_held_char);
+      blekbd_held_last_repeat_ms = now;
+    }
   #endif
   #if HAS_WIFI == true
     uint8_t wifi_menu_cursor = 0;
@@ -2518,6 +3523,80 @@
     }
   #endif
 
+  #if HAS_BLE_HID_HOST == true
+    // BLE keyboard Brightness Up/Down keys (BLEKBD_CH_BRIGHTNESS_UP/_DOWN,
+    // BLEKeyboardHost.h) - unlike step_brightness() above (which only ever
+    // touches staged_display_brightness, deferred to menu_commit_and_exit()
+    // like every other settings-menu field), this is a direct hardware-
+    // button-style shortcut: steps and applies display_intensity (the LIVE
+    // value the render path actually reads) immediately. Per user request,
+    // a pure runtime adjustment, not persisted to EEPROM at all - reverts
+    // to whatever's actually saved on the next boot, unlike the CMD_DISP_
+    // INT KISS handler's own instant-set-AND-persist shape for the same
+    // field, which this deliberately does NOT mirror. Reuses the same
+    // discrete step tables (oled_brightness_index()/OLED_BRIGHTNESS_* or
+    // backlight_brightness_index()/backlight_brightness_values, above)
+    // rather than a raw 0-255 sweep, for the same "no perceptually useful
+    // continuous range on OLED, tedious one-detent-at-a-time sweep on
+    // backlight boards" reasons those exist - but on OLED specifically,
+    // clamped to DIM/BRIGHT only (never OFF, index 0) per user request:
+    // these are brightness keys, not a screen power toggle, so they should
+    // never leave the display effectively switched off as a side effect.
+    void blekbd_step_display_brightness(int8_t dir) {
+      #if DISPLAY_IS_OLED == true
+        static const uint8_t values[] = { OLED_BRIGHTNESS_OFF, OLED_BRIGHTNESS_DIM, OLED_BRIGHTNESS_BRIGHT };
+        int8_t idx = (int8_t)oled_brightness_index(display_intensity) + (dir > 0 ? 1 : -1);
+        if (idx < 1) idx = 1;
+        if (idx > 2) idx = 2;
+        display_intensity = values[idx];
+        // Per user request - a brief on-screen confirmation, same overlay
+        // primitive the KBD CONNECTED/DISCONNECTED notice uses (draw_
+        // blekbd_notice_overlay(), above - superimposed on top of
+        // whatever's currently on screen, not a real menu_state change).
+        snprintf(blekbd_notice_text, sizeof(blekbd_notice_text), idx == 2 ? "BRIGHT" : "DIM");
+      #else
+        int8_t idx = (int8_t)backlight_brightness_index(display_intensity) + (dir > 0 ? 1 : -1);
+        if (idx < 0) idx = 0;
+        if (idx > 4) idx = 4;
+        display_intensity = backlight_brightness_values[idx];
+        format_brightness(display_intensity, blekbd_notice_text);
+      #endif
+      blekbd_notice_until_ms = millis() + ACTION_POPUP_MS;
+    }
+
+    #if HAS_BUZZER == true
+      // BLE keyboard Volume Up/Down keys (BLEKBD_CH_SOUND_ENABLE/_DISABLE,
+      // BLEKeyboardHost.h) - repurposed to enable/disable the buzzer, per
+      // user request (this device has no analog volume for these to
+      // otherwise adjust). Same "direct hardware-button shortcut, live
+      // effect, no staged EEPROM session" shape as blekbd_step_display_
+      // brightness() above - sound_enabled is checked directly by every
+      // buzzer call (Utilities.h), so this takes effect immediately with
+      // no further wiring needed.
+      void blekbd_set_sound_enabled(bool enabled) {
+        sound_enabled = enabled;
+        snprintf(blekbd_notice_text, sizeof(blekbd_notice_text), enabled ? "SOUND ON" : "SOUND OFF");
+        blekbd_notice_until_ms = millis() + ACTION_POPUP_MS;
+      }
+    #endif
+
+    // On/off switch for MENU_STATE_MSNGR_CHAT's own "other rows" marquee
+    // (draw block, below) - per user request, the cursor-highlighted
+    // row's own scroll is always on regardless of this flag, both here
+    // and in MSNGR_PEER's own marquee (which has no "other rows" concept
+    // at all - only ever the one selected row - so it never reads this
+    // flag in the first place). Only a BLE keyboard's Play/Pause key
+    // (below) ever changes it, so unlike MSNGR_PEER's marquee code this
+    // can safely live inside the HAS_BLE_HID_HOST guard - MENU_STATE_
+    // MSNGR_CHAT only exists on boards that have one anyway.
+    bool blekbd_marquee_enabled = true;
+    void blekbd_toggle_marquee() {
+      blekbd_marquee_enabled = !blekbd_marquee_enabled;
+      snprintf(blekbd_notice_text, sizeof(blekbd_notice_text), blekbd_marquee_enabled ? "MARQUEE ON" : "MARQUEE OFF");
+      blekbd_notice_until_ms = millis() + ACTION_POPUP_MS;
+    }
+  #endif
+
   // Display Timeout also only offers a curated set of stops rather than a
   // raw seconds dial - same reasoning as the brightness pickers above. See
   // display_timeout_decode_seconds()/display_timeout_codes() (Display.h)
@@ -2691,6 +3770,43 @@
         if (v < 0) v = 0;
         if (v > MSNGR_ANNOUNCE_INTERVAL_PRESET_COUNT - 1) v = MSNGR_ANNOUNCE_INTERVAL_PRESET_COUNT - 1;
         staged_msngr_announce_interval_idx = (uint8_t)v;
+      }
+
+      // Messenger Settings > Periodic Sync (MENU_STATE_MSNGR_SETTINGS_EDIT) -
+      // steps through msngr_sync_interval_presets_s's index range
+      // (Messenger.h: Off/15m/30m/1h/2h/6h/12h/24h). Same "always clamped,
+      // never wraps" reasoning as Auto Announce above.
+      void step_msngr_sync_interval(int8_t dir, bool wrap = false) {
+        int8_t v = (int8_t)staged_msngr_sync_interval_idx + (dir > 0 ? 1 : -1);
+        if (v < 0) v = 0;
+        if (v > MSNGR_SYNC_INTERVAL_PRESET_COUNT - 1) v = MSNGR_SYNC_INTERVAL_PRESET_COUNT - 1;
+        staged_msngr_sync_interval_idx = (uint8_t)v;
+      }
+
+      // Messenger Settings > Sync Limit (MENU_STATE_MSNGR_SETTINGS_EDIT) -
+      // 0-254 range (see ADDR_CONF_MSNGR_SYNC_LIMIT's own comment, ROM.h,
+      // for why 255 is deliberately excluded), 1 message per step. Always
+      // clamped, never wraps - same reasoning as Retries (wrapping 254
+      // back to 0 would silently mean "unlimited", the opposite of what
+      // turning the encoder further past 254 means).
+      void step_msngr_sync_limit(int8_t dir, bool wrap = false) {
+        int16_t v = (int16_t)staged_msngr_sync_limit + (dir > 0 ? 1 : -1);
+        if (v < 0) v = 0;
+        if (v > MSNGR_SYNC_LIMIT_MAX) v = MSNGR_SYNC_LIMIT_MAX;
+        staged_msngr_sync_limit = (uint8_t)v;
+      }
+
+      // Messenger Settings > Required Stamp Cost (MENU_STATE_MSNGR_
+      // SETTINGS_EDIT) - 0-254 range (see ADDR_CONF_MSNGR_STAMP_COST's own
+      // comment, ROM.h, for why 255 is deliberately excluded, same as Sync
+      // Limit above), 1 bit per step. Always clamped, never wraps -
+      // wrapping 254 back to 0 would silently disable enforcement, the
+      // opposite of what turning the encoder further past 254 means.
+      void step_msngr_stamp_cost(int8_t dir, bool wrap = false) {
+        int16_t v = (int16_t)staged_msngr_stamp_cost + (dir > 0 ? 1 : -1);
+        if (v < 0) v = 0;
+        if (v > MSNGR_STAMP_COST_MAX) v = MSNGR_STAMP_COST_MAX;
+        staged_msngr_stamp_cost = (uint8_t)v;
       }
     #endif
 
@@ -3104,11 +4220,18 @@
       #endif
       staged_bt_battery_service_enabled = bt_battery_service_enabled;
     #endif
+    #if HAS_BLE_HID_HOST == true
+      staged_blekbd_enabled = blekbd_enabled;
+    #endif
     #if HAS_LXMF == true
       staged_msngr_max_retries = msngr_max_retries;
       staged_msngr_retry_delay_s = msngr_retry_delay_s;
       staged_msngr_announce_at_start = msngr_announce_at_start;
       staged_msngr_announce_interval_idx = msngr_announce_interval_idx;
+      staged_msngr_propagate_on_fail = msngr_propagate_on_fail;
+      staged_msngr_sync_interval_idx = msngr_sync_interval_idx;
+      staged_msngr_sync_limit = msngr_sync_limit;
+      staged_msngr_stamp_cost = msngr_stamp_cost;
     #endif
     // display_rotation itself is only a local variable inside display_init(),
     // applied once at boot - not a persisted global - so read the actual
@@ -3361,6 +4484,13 @@
         bt_battery_service_conf_save(staged_bt_battery_service_enabled);
       }
     #endif
+    #if HAS_BLE_HID_HOST == true
+      if (staged_blekbd_enabled != blekbd_enabled) {
+        bool blekbd_now_disabled = !staged_blekbd_enabled;
+        blekbd_enabled_conf_save(staged_blekbd_enabled);
+        if (blekbd_now_disabled) blekbd_stop();
+      }
+    #endif
     #if HAS_WIFI == true
       bool wifi_changed = false;
       if (staged_wifi_mode != wifi_mode) {
@@ -3599,6 +4729,18 @@
         return;
       }
     #endif
+    #if HAS_BLE_HID_HOST == true
+      // Same exemption, same reasoning as GNSS Diagnostics above - a paused
+      // thought mid-message (composing with a physical keyboard, easy to
+      // sit for a while between keystrokes) shouldn't get kicked back to
+      // the main screen just because nothing's been pressed in a bit; this
+      // is a live conversation view, not a screen this codebase's usual
+      // "walked away from the settings menu" idle-close assumption fits.
+      if (menu_state == MENU_STATE_MSNGR_CHAT) {
+        display_unblank();
+        return;
+      }
+    #endif
     if (millis() - menu_last_activity_ms > (unsigned long)SETTINGS_MENU_TIMEOUT * 1000UL) {
       menu_close_without_saving();
     }
@@ -3615,6 +4757,24 @@
       menu_state = menu_popup_return_state;
       return;
     }
+    #if HAS_LXMF == true
+      // Full Message view is open, on top of whatever menu_state it was
+      // opened from - per user request, rotation (real encoder, or the
+      // single-button's own short-tap/double-tap forward/backward split,
+      // menu_button_press()/menu_button_process() below, which already
+      // calls this with dir=+1/-1 exactly like any other list-nav screen)
+      // scrolls the message one line at a time instead of whatever the
+      // underlying menu_state's own branch further down would do.
+      // Clamped against the real wrapped line count in the draw block,
+      // not here - msngr_msg_view_active's own declaration has the full
+      // reasoning for why this lives outside HAS_BLE_HID_HOST.
+      if (msngr_msg_view_active) {
+        buzzer_encoder_tick_melody();
+        if (dir > 0) msngr_msg_view_scroll_line++;
+        else if (msngr_msg_view_scroll_line > 0) msngr_msg_view_scroll_line--;
+        return;
+      }
+    #endif
     if (menu_state == MENU_STATE_LIST) {
       buzzer_encoder_tick_melody();
       menu_cursor = menu_clamp_cursor(menu_cursor, dir, MENU_ITEM_COUNT, wrap);
@@ -3807,7 +4967,7 @@
         // Nothing to move a cursor across - any rotation just dismisses
         // it too, same as a confirm (see menu_confirm_select()).
         buzzer_encoder_tick_melody();
-        menu_state = MENU_STATE_URNS_PATH_DETAIL;
+        menu_state = menu_hash_view_return_state;
       }
       #if HAS_LXMF == true
       else if (menu_state == MENU_STATE_MSNGR_LIST) {
@@ -3835,11 +4995,16 @@
         buzzer_encoder_tick_melody();
         msngr_clear_confirm_cursor = menu_clamp_cursor(msngr_clear_confirm_cursor, dir, 2, wrap);
       } else if (menu_state == MENU_STATE_MSNGR_TEXT_ENTRY) {
-        // Steps one key at a time through the flattened MSNGR_KB_LAYOUT
-        // grid, row-major, wrapping at both ends - see its own declaration
-        // for why this is a single linear cursor rather than real 2D nav.
+        // Steps one key at a time through the flattened active-layout
+        // grid, row-major, wrapping at both ends - see msngr_kb_cursor's
+        // own declaration for why this is a single linear cursor rather
+        // than real 2D nav. Bounded by msngr_kb_active_key_count(), not
+        // the flat MSNGR_KB_KEY_COUNT - MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_
+        // HASH's hex grid has far fewer real cells than the normal 4-row
+        // keyboard (msngr_kb_cursor_rc()'s own comment), and would
+        // otherwise wrap through nonexistent cells past the end of it.
         buzzer_encoder_tick_melody();
-        msngr_kb_cursor = menu_clamp_cursor(msngr_kb_cursor, dir, MSNGR_KB_KEY_COUNT, wrap);
+        msngr_kb_cursor = menu_clamp_cursor(msngr_kb_cursor, dir, msngr_kb_active_key_count(), wrap);
       } else if (menu_state == MENU_STATE_MSNGR_DISCARD_CONFIRM) {
         buzzer_encoder_tick_melody();
         msngr_discard_confirm_cursor = menu_clamp_cursor(msngr_discard_confirm_cursor, dir, 2, wrap);
@@ -3864,6 +5029,10 @@
         else if (msngr_settings_cursor == MSNGR_SETTINGS_ITEM_RETRY_DELAY) step_msngr_retry_delay(dir, wrap);
         else if (msngr_settings_cursor == MSNGR_SETTINGS_ITEM_ANNOUNCE_START) staged_msngr_announce_at_start = !staged_msngr_announce_at_start;
         else if (msngr_settings_cursor == MSNGR_SETTINGS_ITEM_ANNOUNCE_INTERVAL) step_msngr_announce_interval(dir, wrap);
+        else if (msngr_settings_cursor == MSNGR_SETTINGS_ITEM_PROP_ON_FAIL) staged_msngr_propagate_on_fail = !staged_msngr_propagate_on_fail;
+        else if (msngr_settings_cursor == MSNGR_SETTINGS_ITEM_SYNC_INTERVAL) step_msngr_sync_interval(dir, wrap);
+        else if (msngr_settings_cursor == MSNGR_SETTINGS_ITEM_SYNC_LIMIT) step_msngr_sync_limit(dir, wrap);
+        else if (msngr_settings_cursor == MSNGR_SETTINGS_ITEM_STAMP_COST) step_msngr_stamp_cost(dir, wrap);
       } else if (menu_state == MENU_STATE_MSNGR_PRESETS) {
         buzzer_encoder_tick_melody();
         msngr_presets_cursor = menu_clamp_cursor(msngr_presets_cursor, dir, msngr_presets_row_count(), wrap);
@@ -3871,7 +5040,46 @@
         buzzer_encoder_tick_melody();
         msngr_preset_detail_cursor = menu_clamp_cursor(msngr_preset_detail_cursor, dir, 3, wrap);
       }
+      #if HAS_BLE_HID_HOST == true
+        // Per user request: a real encoder (or the single-button's own
+        // forward/backward split, menu_button_press()/menu_button_process(),
+        // which already calls this with dir=+1/-1 exactly like any other
+        // list-nav screen) should be able to select messages here too, not
+        // just a BLE keyboard's Up/Down (blekbd_key_event(), below) - both
+        // now call the exact same msngr_chat_nav_up()/_down() (Messenger.h/
+        // this file, above), which already handles first-rotate-enters-
+        // browsing the same way Up/Down always have. msngr_msg_view_active's
+        // own check, above, takes priority while the Full Message view is
+        // open on top of this screen.
+        else if (menu_state == MENU_STATE_MSNGR_CHAT) {
+          buzzer_encoder_tick_melody();
+          if (dir > 0) msngr_chat_nav_down(); else msngr_chat_nav_up();
+        }
       #endif
+      #endif
+    #endif
+    #if HAS_BLE_HID_HOST == true
+      else if (menu_state == MENU_STATE_BLEKBD_LIST) {
+        buzzer_encoder_tick_melody();
+        blekbd_menu_cursor = menu_clamp_cursor(blekbd_menu_cursor, dir, BLEKBD_ITEM_COUNT, wrap);
+      } else if (menu_state == MENU_STATE_BLEKBD_EDIT) {
+        buzzer_encoder_tick_melody();
+        // Only row here is Enabled - same "single boolean toggle" shape as
+        // GNSS_EDIT's staged_gnss_enabled.
+        staged_blekbd_enabled = !staged_blekbd_enabled;
+      } else if (menu_state == MENU_STATE_BLEKBD_SCAN) {
+        buzzer_encoder_tick_melody();
+        blekbd_scan_cursor = menu_clamp_cursor(blekbd_scan_cursor, dir, blekbd_scan_row_count(), wrap);
+      } else if (menu_state == MENU_STATE_BLEKBD_PAIR_CONFIRM) {
+        buzzer_encoder_tick_melody();
+        blekbd_pair_confirm_cursor = menu_clamp_cursor(blekbd_pair_confirm_cursor, dir, 2, wrap);
+      } else if (menu_state == MENU_STATE_BLEKBD_FORGET_CONFIRM) {
+        buzzer_encoder_tick_melody();
+        blekbd_forget_confirm_cursor = menu_clamp_cursor(blekbd_forget_confirm_cursor, dir, 2, wrap);
+      } else if (menu_state == MENU_STATE_BLEKBD_PAIRING) {
+        buzzer_encoder_tick_melody();
+        blekbd_pairing_cursor = menu_clamp_cursor(blekbd_pairing_cursor, dir, 2, wrap);
+      }
     #endif
       else if (menu_state == MENU_STATE_URNS_RADIO_LIST) {
         buzzer_encoder_tick_melody();
@@ -3969,9 +5177,9 @@
     #if HAS_LXMF == true
       if (menu_state == MENU_STATE_MSNGR_TEXT_ENTRY) {
         msngr_kb_chord_used = true;
-        uint8_t kb_row = msngr_kb_cursor / MSNGR_KB_COLS;
-        uint8_t kb_col = msngr_kb_cursor % MSNGR_KB_COLS;
-        char key_ch = (msngr_kb_lang_ru ? MSNGR_KB_LAYOUT_RU : MSNGR_KB_LAYOUT)[kb_row][kb_col];
+        uint8_t kb_row, kb_col;
+        msngr_kb_cursor_rc(msngr_kb_cursor, kb_row, kb_col);
+        char key_ch = msngr_kb_active_layout()[kb_row][kb_col];
         if (msngr_kb_key_type(key_ch) == MSNGR_KB_CHAR) {
           size_t text_len = strlen(msngr_text_entry_buf);
           // Letters get their uppercase form; punctuation has no
@@ -4111,6 +5319,35 @@
           menu_msngr_text_entry_leave();
           return;
         }
+        // Full Message view is open (checked BEFORE the MENU_STATE_MSNGR_
+        // CHAT check below - menu_state stays MENU_STATE_MSNGR_CHAT the
+        // whole time the view is open on top of it, so checking CHAT
+        // first would exit Dialog Mode entirely on a long-press instead
+        // of just closing the view) - a real encoder's long-press
+        // otherwise means "commit & exit the WHOLE menu" (below), which
+        // would be a surprising overreach while just viewing a message;
+        // treat it the same as the single-button/short-click "leave the
+        // view" gesture instead (menu_confirm_select()'s own matching
+        // check) - msngr_msg_view_active's own declaration has the full
+        // reasoning.
+        if (msngr_msg_view_active) {
+          buzzer_encoder_click_melody();
+          msngr_msg_view_active = false;
+          menu_state = msngr_msg_view_return_state;
+          return;
+        }
+        #if HAS_BLE_HID_HOST == true
+          // Per user request: leaves Dialog Mode, same as the single-
+          // button's own long-press (menu_confirm_select()'s matching
+          // check) - otherwise a real encoder's long-press would fall
+          // through to "commit & exit the WHOLE menu" below, a bigger
+          // overreach than just leaving this one screen.
+          if (menu_state == MENU_STATE_MSNGR_CHAT) {
+            buzzer_encoder_click_melody();
+            menu_msngr_text_entry_leave();
+            return;
+          }
+        #endif
       #endif
       // Long-press: identical from anywhere inside the menu - commit & exit.
       // Text entry no longer needs an exception here - SAVE is a wheel
@@ -4139,6 +5376,35 @@
     #else
       bool msngr_kb_alt_already_beeped = false;
     #endif
+    #if HAS_BLE_HID_HOST == true
+      // Per user request: the encoder's own press/click (as opposed to
+      // rotating it, which only navigates - menu_encoder_rotate()'s own
+      // MENU_STATE_MSNGR_CHAT check) opens the currently-selected
+      // message's Full Message view, mirroring a BLE keyboard's Enter-
+      // while-browsing exactly (blekbd_key_event(), below) - same cache
+      // fetch, same msngr_msg_view_active/_scroll_line/_return_state
+      // setup. While composing (nothing selected) it instead sends, again
+      // mirroring Enter there. Checked before falling through to the
+      // shared menu_confirm_select() (which would otherwise always leave
+      // Dialog Mode here, the same unconditional action the single-
+      // button's own long-press uses, its own comment) - but only when
+      // NOT already viewing a message, so a click there still reaches
+      // menu_confirm_select()'s own msngr_msg_view_active check first and
+      // closes the view instead.
+      if (menu_state == MENU_STATE_MSNGR_CHAT && !msngr_msg_view_active) {
+        buzzer_encoder_click_melody();
+        if (msngr_chat_sel != 0xFF) {
+          RNS::Bytes msg_hash(msngr_chat_cache[msngr_chat_sel].hash, LXMF::MESSAGE_HASH_SIZE);
+          messenger_refresh_msg_detail_cache(msg_hash);
+          msngr_msg_view_active = true;
+          msngr_msg_view_scroll_line = 0;
+          msngr_msg_view_return_state = MENU_STATE_MSNGR_CHAT;
+        } else {
+          msngr_chat_do_send();
+        }
+        return;
+      }
+    #endif
     if (menu_state != MENU_STATE_CLOSED && !msngr_kb_alt_already_beeped) buzzer_encoder_click_melody();
     menu_confirm_select(duration);
   }
@@ -4152,6 +5418,36 @@
   // as before this parameter existed. Defaults to 0 at the declaration
   // for any future call site that has no meaningful duration to give it.
   void menu_confirm_select(unsigned long duration) {
+    #if HAS_LXMF == true
+      // Full Message view (msngr_msg_view_active) is open, on top of
+      // whatever menu_state it was opened from - a click/confirm gesture
+      // here always means "leave the view", same as the physical single-
+      // button's long-press (menu_button_press()) and the real encoder's
+      // long-press (menu_encoder_button(), its own matching check) both
+      // already route through this same function. See msngr_msg_view_
+      // active's own declaration for the full reasoning.
+      if (msngr_msg_view_active) {
+        msngr_msg_view_active = false;
+        menu_state = msngr_msg_view_return_state;
+        return;
+      }
+      #if HAS_BLE_HID_HOST == true
+        // Per user request: the single-button's long-press (menu_button_
+        // press()) and the real encoder's own short-click both already
+        // route here - in Dialog Mode this should leave the whole screen,
+        // not just deselect a browsed message (unconditional, regardless
+        // of the composing/browsing sub-state). Reuses menu_msngr_text_
+        // entry_leave() - the exact same "discard unsent text?" check a
+        // keyboard's own Esc-while-composing already goes through
+        // (blekbd_key_event(), below), since msngr_chat_insert_char()/
+        // _backspace() write into the same msngr_text_entry_buf that
+        // function already checks.
+        if (menu_state == MENU_STATE_MSNGR_CHAT) {
+          menu_msngr_text_entry_leave();
+          return;
+        }
+      #endif
+    #endif
     if (menu_state == MENU_STATE_LIST) {
       if (menu_cursor == MENU_ITEM_SAVE_EXIT) {
         menu_commit_and_exit();
@@ -4408,6 +5704,12 @@
             menu_state = MENU_STATE_BT_UNPAIR_CONFIRM;
           }
         #endif
+        #if HAS_BLE_HID_HOST == true
+          else if (bt_menu_cursor == BT_ITEM_KEYBOARD) {
+            blekbd_menu_cursor = 0;
+            menu_state = MENU_STATE_BLEKBD_LIST;
+          }
+        #endif
         // MAC/Bonds are read-only - same shape as ESP-NOW's Channel row, no
         // edit state, selecting them does nothing.
       }
@@ -4436,6 +5738,91 @@
           menu_state = MENU_STATE_BT_LIST;
         }
       #endif
+    #endif
+    #if HAS_BLE_HID_HOST == true
+      else if (menu_state == MENU_STATE_BLEKBD_LIST) {
+        if (blekbd_menu_cursor == BLEKBD_ITEM_ENABLED) {
+          menu_state = MENU_STATE_BLEKBD_EDIT;
+        } else if (blekbd_menu_cursor == BLEKBD_ITEM_SCAN) {
+          if (!staged_blekbd_enabled) {
+            menu_open_popup("ENABLE FIRST", MENU_STATE_BLEKBD_LIST);
+            menu_popup_auto_dismiss_at = millis() + ACTION_POPUP_MS;
+          } else {
+            blekbd_discovery_start();
+            blekbd_scan_cursor = 0;
+            menu_state = MENU_STATE_BLEKBD_SCAN;
+          }
+        } else if (blekbd_menu_cursor == BLEKBD_ITEM_FORGET) {
+          if (!blekbd_peer_stored) {
+            menu_open_popup("NOT PAIRED", MENU_STATE_BLEKBD_LIST);
+            menu_popup_auto_dismiss_at = millis() + ACTION_POPUP_MS;
+          } else {
+            blekbd_forget_confirm_cursor = 1; // default CANCEL
+            menu_state = MENU_STATE_BLEKBD_FORGET_CONFIRM;
+          }
+        } else if (blekbd_menu_cursor == BLEKBD_ITEM_BACK) {
+          menu_state = MENU_STATE_BT_LIST;
+        }
+        // STATUS is read-only, same shape as BT_LIST's MAC/Bonds rows.
+      }
+      else if (menu_state == MENU_STATE_BLEKBD_EDIT) {
+        menu_state = MENU_STATE_BLEKBD_LIST; // confirms staged value, no write yet
+      }
+      else if (menu_state == MENU_STATE_BLEKBD_SCAN) {
+        uint8_t row_count = blekbd_scan_row_count();
+        bool have_rows = false;
+        for (uint8_t i = 0; i < BLEKBD_MAX_DISCOVERED; i++) if (blekbd_discovered[i].in_use) { have_rows = true; break; }
+        if (blekbd_scan_cursor == row_count - 1) {
+          blekbd_scan_stop();
+          menu_state = MENU_STATE_BLEKBD_LIST;
+        } else if (have_rows) {
+          uint8_t vis = 0;
+          for (uint8_t i = 0; i < BLEKBD_MAX_DISCOVERED; i++) {
+            if (!blekbd_discovered[i].in_use) continue;
+            if (vis == blekbd_scan_cursor) {
+              memcpy(blekbd_pending_addr, blekbd_discovered[i].addr, 6);
+              blekbd_pending_addr_type = blekbd_discovered[i].addr_type;
+              strncpy(blekbd_pending_name, blekbd_discovered[i].name, BLEKBD_NAME_MAX_LEN);
+              blekbd_pending_name[BLEKBD_NAME_MAX_LEN] = 0;
+              blekbd_pair_confirm_cursor = 1; // default CANCEL
+              menu_state = MENU_STATE_BLEKBD_PAIR_CONFIRM;
+              break;
+            }
+            vis++;
+          }
+        }
+        // Row 0 with no discovered devices yet ("Scanning...") is read-only.
+      }
+      else if (menu_state == MENU_STATE_BLEKBD_PAIR_CONFIRM) {
+        if (blekbd_pair_confirm_cursor == 0) { // PAIR
+          blekbd_scan_stop();
+          blekbd_connect_start(blekbd_pending_addr, blekbd_pending_addr_type);
+          blekbd_pairing_cursor = 1;
+          menu_state = MENU_STATE_BLEKBD_PAIRING;
+        } else { // CANCEL - resume scanning
+          menu_state = MENU_STATE_BLEKBD_SCAN;
+        }
+      }
+      else if (menu_state == MENU_STATE_BLEKBD_PAIRING) {
+        // Row 0 (status) is read-only - only BACK does anything, same shape
+        // as MENU_STATE_MSNGR_SEND_RESULT.
+        if (blekbd_pairing_cursor == 1) {
+          blekbd_pair_result = BLEKBD_PAIR_NONE;
+          menu_state = MENU_STATE_BLEKBD_LIST;
+        }
+      }
+      else if (menu_state == MENU_STATE_BLEKBD_FORGET_CONFIRM) {
+        if (blekbd_forget_confirm_cursor == 0) { // FORGET
+          if (blekbd_open_dev) esp_hidh_dev_close(blekbd_open_dev);
+          ble_addr_t peer_addr;
+          memcpy(peer_addr.val, blekbd_peer_addr, 6);
+          peer_addr.type = blekbd_peer_addr_type;
+          ble_store_util_delete_peer(&peer_addr);
+          blekbd_peer_conf_forget();
+        }
+        // CANCEL: leave the stored peer/bond untouched.
+        menu_state = MENU_STATE_BLEKBD_LIST;
+      }
     #endif
     #if HAS_ETHERNET == true
       else if (menu_state == MENU_STATE_ETH_LIST) {
@@ -4782,6 +6169,17 @@
           // a user can still turn both on together in one menu session
           // before SAVE & EXIT reboots into the new state.
           if (staged_urns_transport_enabled) { menu_state = MENU_STATE_URNS_EDIT; }
+        } else if (urns_menu_cursor == URNS_ITEM_VAULT) {
+          // Immediate action, not a staged toggle - see URNS_ITEM_VAULT's
+          // own comment for why. Blocking (VaultUnlock.h takes over
+          // encoder/button dispatch and the whole screen for the duration)
+          // - menu_state stays MENU_STATE_URNS_LIST throughout, so the
+          // list redraws normally once this returns.
+          if (vault_enabled) {
+            vault_disable_flow();
+          } else {
+            vault_enroll_flow();
+          }
         } else if (urns_menu_cursor == URNS_ITEM_ENABLED || urns_menu_cursor == URNS_ITEM_TRANSPORT ||
                    #if HAS_ESPNOW == true
                    urns_menu_cursor == URNS_ITEM_INTERFACE ||
@@ -4837,12 +6235,13 @@
         if (urns_path_detail_cursor == URNS_PATH_DETAIL_ITEM_BACK) {
           menu_state = MENU_STATE_URNS_PATHS;
         } else if (urns_path_detail_cursor == URNS_PATH_DETAIL_ITEM_HASH) {
+          menu_hash_view_return_state = MENU_STATE_URNS_PATH_DETAIL;
           menu_state = MENU_STATE_URNS_PATH_HASH_VIEW;
         }
       } else if (menu_state == MENU_STATE_URNS_PATH_HASH_VIEW) {
         // A single fixed view, nothing to select - any confirm just
         // dismisses it, same as MENU_STATE_STATUS_POPUP.
-        menu_state = MENU_STATE_URNS_PATH_DETAIL;
+        menu_state = menu_hash_view_return_state;
       }
       #if HAS_LXMF == true
       else if (menu_state == MENU_STATE_MSNGR_LIST) {
@@ -4870,6 +6269,12 @@
           } else {
             menu_open_popup("NOT READY", MENU_STATE_MSNGR_LIST);
           }
+        } else if (msngr_menu_cursor == MSNGR_TOP_ITEM_SYNC_PROP) {
+          if (msngr_active_prop_node_hash.size() != LXMF::PEER_HASH_SIZE) {
+            menu_open_popup("Prop Not Set", MENU_STATE_MSNGR_LIST);
+          } else {
+            msngr_prop_sync_start(msngr_active_prop_node_hash, MENU_STATE_MSNGR_LIST);
+          }
         } else if (msngr_menu_cursor == MSNGR_TOP_ITEM_SETTINGS) {
           menu_state = MENU_STATE_MSNGR_SETTINGS;
           msngr_settings_cursor = 0;
@@ -4878,7 +6283,11 @@
         if (msngr_settings_cursor == MSNGR_SETTINGS_ITEM_RETRIES ||
             msngr_settings_cursor == MSNGR_SETTINGS_ITEM_RETRY_DELAY ||
             msngr_settings_cursor == MSNGR_SETTINGS_ITEM_ANNOUNCE_START ||
-            msngr_settings_cursor == MSNGR_SETTINGS_ITEM_ANNOUNCE_INTERVAL) {
+            msngr_settings_cursor == MSNGR_SETTINGS_ITEM_ANNOUNCE_INTERVAL ||
+            msngr_settings_cursor == MSNGR_SETTINGS_ITEM_PROP_ON_FAIL ||
+            msngr_settings_cursor == MSNGR_SETTINGS_ITEM_SYNC_INTERVAL ||
+            msngr_settings_cursor == MSNGR_SETTINGS_ITEM_SYNC_LIMIT ||
+            msngr_settings_cursor == MSNGR_SETTINGS_ITEM_STAMP_COST) {
           menu_state = MENU_STATE_MSNGR_SETTINGS_EDIT;
         } else if (msngr_settings_cursor == MSNGR_SETTINGS_ITEM_DISPLAY_NAME) {
           // Pre-populated with the current live name (custom or computed
@@ -4912,6 +6321,18 @@
           }
           if (staged_msngr_announce_interval_idx != msngr_announce_interval_idx) {
             msngr_announce_interval_conf_save(staged_msngr_announce_interval_idx);
+          }
+          if (staged_msngr_propagate_on_fail != msngr_propagate_on_fail) {
+            msngr_propagate_on_fail_conf_save(staged_msngr_propagate_on_fail);
+          }
+          if (staged_msngr_sync_interval_idx != msngr_sync_interval_idx) {
+            msngr_sync_interval_conf_save(staged_msngr_sync_interval_idx);
+          }
+          if (staged_msngr_sync_limit != msngr_sync_limit) {
+            msngr_sync_limit_conf_save(staged_msngr_sync_limit);
+          }
+          if (staged_msngr_stamp_cost != msngr_stamp_cost) {
+            msngr_stamp_cost_conf_save(staged_msngr_stamp_cost);
           }
           menu_state = MENU_STATE_MSNGR_LIST;
         }
@@ -4979,8 +6400,19 @@
         }
       } else if (menu_state == MENU_STATE_MSNGR_BOOKMARKS) {
         uint8_t row_count = msngr_bookmarks_row_count();
+        bool has_add_row = msngr_bookmark_count < MSNGR_MAX_BOOKMARKS;
         if (msngr_bookmarks_cursor == row_count - 1) {
           menu_state = MENU_STATE_MSNGR_LIST;
+        } else if (has_add_row && msngr_bookmarks_cursor == msngr_bookmark_count) {
+          // "Add by Hash" row - same reset-and-open sequence Presets' own
+          // "Add Preset" row uses (MENU_STATE_MSNGR_PRESETS above).
+          msngr_text_entry_purpose = MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH;
+          msngr_text_entry_buf[0] = 0;
+          msngr_kb_cursor = 0;
+          msngr_kb_shift_on = false;
+          msngr_kb_lang_ru = false;
+          msngr_kb_bookmark_type = MSNGR_BOOKMARK_TYPE_LXMF;
+          menu_state = MENU_STATE_MSNGR_TEXT_ENTRY;
         } else if (msngr_bookmark_count > 0) {
           uint8_t vis = 0;
           for (uint8_t i = 0; i < MSNGR_MAX_BOOKMARKS; i++) {
@@ -5016,6 +6448,25 @@
             }
             vis++;
           }
+        }
+      } else if (menu_state == MENU_STATE_MSNGR_PEER && messenger_bookmark_is_prop_node(msngr_active_peer_hash)) {
+        if (msngr_peer_cursor == MSNGR_PEER_PROP_ACTION_SYNC) {
+          msngr_prop_sync_start(msngr_active_peer_hash, MENU_STATE_MSNGR_PEER);
+        } else if (msngr_peer_cursor == MSNGR_PEER_PROP_ACTION_SHOW_HASH) {
+          urns_path_detail_hash = msngr_active_peer_hash;
+          menu_hash_view_return_state = MENU_STATE_MSNGR_PEER;
+          menu_state = MENU_STATE_URNS_PATH_HASH_VIEW;
+        } else if (msngr_peer_cursor == MSNGR_PEER_PROP_ACTION_SET_ACTIVE) {
+          if (messenger_prop_node_is_active(msngr_active_peer_hash)) {
+            messenger_prop_node_clear_active();
+          } else {
+            messenger_prop_node_set_active(msngr_active_peer_hash);
+          }
+        } else if (msngr_peer_cursor == MSNGR_PEER_PROP_ACTION_REMOVE) {
+          messenger_bookmark_remove(msngr_active_peer_hash);
+          menu_state = msngr_peer_return_state;
+        } else { // MSNGR_PEER_PROP_ACTION_BACK
+          menu_state = msngr_peer_return_state;
         }
       } else if (menu_state == MENU_STATE_MSNGR_PEER) {
         uint8_t msg_rows = msngr_peer_msg_row_count();
@@ -5080,18 +6531,51 @@
               msngr_text_entry_buf[0] = 0;
               menu_state = MENU_STATE_MSNGR_TEXT_ENTRY;
             }
+            #if HAS_BLE_HID_HOST == true
+              else if (fixed_action == MSNGR_PEER_FIXED_ACTION_CHAT) {
+                // Same purpose/buffer reset as Compose message above. No
+                // on-screen-keyboard state to reset (msngr_kb_cursor/
+                // shift_on/lang_ru) - this screen never reads them.
+                // msngr_chat_cache (Messenger.h) is Chat's own, separate
+                // from msngr_peer_cache - freshly windowed to the most
+                // recent page here (jump-to-end, same as Enter/End would),
+                // not just left however it was after a previous Chat
+                // session.
+                msngr_text_entry_purpose = MSNGR_TEXT_ENTRY_PURPOSE_MESSAGE;
+                msngr_text_entry_buf[0] = 0;
+                msngr_chat_cursor = 0;
+                msngr_chat_compose_win_start = 0;
+                msngr_chat_sel = 0xFF;
+                msngr_chat_delete_confirm_pending = false;
+                msngr_msg_view_active = false;
+                messenger_refresh_chat_window(msngr_active_peer_hash, (size_t)-1);
+                menu_state = MENU_STATE_MSNGR_CHAT;
+              }
+            #endif
           }
         }
       } else if (menu_state == MENU_STATE_MSNGR_MSG_DETAIL) {
         // Content lines are read-only - only the trailing REPLY/DELETE/
-        // BACK rows do anything.
+        // FULL MESSAGE/BACK rows do anything.
         uint8_t row_count = msngr_msg_detail_row_count();
         if (msngr_msg_detail_cursor == row_count - 1) {
           menu_state = MENU_STATE_MSNGR_PEER;
         } else if (msngr_msg_detail_cursor == row_count - 2) {
+          // Full Message - per user request, right under Delete, above
+          // BACK. menu_state deliberately stays MENU_STATE_MSNGR_MSG_
+          // DETAIL (mirrors MENU_STATE_MSNGR_CHAT's own viewing-message
+          // sub-mode, which never leaves MENU_STATE_MSNGR_CHAT either) -
+          // the draw block (below) and the msngr_msg_view_active checks in
+          // menu_encoder_rotate()/menu_confirm_select()/menu_encoder_
+          // button() (their own comments) take over from here until the
+          // view closes back to msngr_msg_view_return_state.
+          msngr_msg_view_active = true;
+          msngr_msg_view_scroll_line = 0;
+          msngr_msg_view_return_state = MENU_STATE_MSNGR_MSG_DETAIL;
+        } else if (msngr_msg_detail_cursor == row_count - 3) {
           msngr_delete_confirm_cursor = 1; // default CANCEL - see its own declaration
           menu_state = MENU_STATE_MSNGR_DELETE_CONFIRM;
-        } else if (msngr_msg_detail_cursor == row_count - 3) {
+        } else if (msngr_msg_detail_cursor == row_count - 4) {
           // Same reset sequence MSNGR_PEER_FIXED_ACTION_SEND_CUSTOM uses to
           // open the keyboard fresh - msngr_active_peer_hash is already
           // this message's own peer (set on entering MENU_STATE_MSNGR_
@@ -5156,11 +6640,10 @@
         // simplification meshtastic's own VirtualKeyboard makes). Shift is a
         // persistent toggle here rather than meshtastic's one-shot long-press,
         // since confirm_select() is already spoken for as "press this key".
-        uint8_t kb_row = msngr_kb_cursor / MSNGR_KB_COLS;
-        uint8_t kb_col = msngr_kb_cursor % MSNGR_KB_COLS;
-        char key_ch = (msngr_kb_lang_ru ? MSNGR_KB_LAYOUT_RU : MSNGR_KB_LAYOUT)[kb_row][kb_col];
+        uint8_t kb_row, kb_col;
+        msngr_kb_cursor_rc(msngr_kb_cursor, kb_row, kb_col);
+        char key_ch = msngr_kb_active_layout()[kb_row][kb_col];
         uint8_t key_type = msngr_kb_key_type(key_ch);
-        size_t text_len = strlen(msngr_text_entry_buf);
 
         if (key_type == MSNGR_KB_CHAR || key_type == MSNGR_KB_SPACE) {
           if (msngr_kb_alt_hold_fired_btn || msngr_kb_alt_hold_fired_enc) {
@@ -5172,22 +6655,8 @@
             msngr_kb_alt_hold_fired_btn = false;
             msngr_kb_alt_hold_fired_enc = false;
           } else {
-            // Display Name uses the same practical cap as bookmark/announce
-            // names elsewhere in this file (MSNGR_NAME_MAX_LEN=31) - the
-            // protocol's own single-announce-packet ceiling is much higher
-            // (~274-280 bytes, derived from Type::Reticulum::MTU/HEADER_
-            // MAXSIZE/IFAC_MIN_SIZE minus the announce's fixed identity/
-            // signature/ratchet fields), but that's not a sane UI limit for
-            // a name field. Message composing keeps the higher MSNGR_TEXT_
-            // ENTRY_MAX_LEN (140) unchanged.
-            size_t max_len = (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME ||
-                               msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_PRESET)
-              ? MSNGR_NAME_MAX_LEN : MSNGR_TEXT_ENTRY_MAX_LEN;
-            if (text_len < max_len) {
-              char c = (key_type == MSNGR_KB_SPACE) ? ' ' : msngr_kb_apply_shift(key_ch, msngr_kb_shift_on);
-              msngr_text_entry_buf[text_len] = c;
-              msngr_text_entry_buf[text_len + 1] = 0;
-            }
+            char c = (key_type == MSNGR_KB_SPACE) ? ' ' : msngr_kb_apply_shift(key_ch, msngr_kb_shift_on);
+            msngr_kb_insert_char(c);
           }
         } else if (key_type == MSNGR_KB_BACKSPACE) {
           if (msngr_kb_del_hold_fired_btn || msngr_kb_del_hold_fired_enc) {
@@ -5197,8 +6666,8 @@
             // shouldn't also delete one more character on top of it.
             msngr_kb_del_hold_fired_btn = false;
             msngr_kb_del_hold_fired_enc = false;
-          } else if (text_len > 0) {
-            msngr_text_entry_buf[text_len - 1] = 0;
+          } else {
+            msngr_kb_do_backspace();
           }
         } else if (key_type == MSNGR_KB_SHIFT) {
           // A quick press still just toggles case (unchanged). A
@@ -5222,69 +6691,19 @@
           } else {
             msngr_kb_shift_on = !msngr_kb_shift_on;
           }
+        } else if (key_type == MSNGR_KB_TYPE_TOGGLE) {
+          msngr_kb_toggle_bookmark_type();
         } else if (key_type == MSNGR_KB_BACK) {
           menu_msngr_text_entry_leave();
         } else if (key_type == MSNGR_KB_SEND) {
-          if (text_len > 0 && msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME) {
-            // No result screen needed - unlike an LXMF send, this can't
-            // fail in a way worth reporting (a local file write), so it's
-            // save-and-return rather than save-and-show-status. Expanded
-            // to real UTF-8 first (msngr_kb_expand_utf8()) - the announce
-            // this name goes out in is read by other Reticulum clients,
-            // not just this device's own Org_01 glyph table.
-            char name_utf8[MSNGR_NAME_MAX_LEN * 2 + 1];
-            msngr_kb_expand_utf8(msngr_text_entry_buf, name_utf8, sizeof(name_utf8));
-            msngr_display_name_conf_save(name_utf8);
-            msngr_text_entry_buf[0] = 0;
-            menu_state = MENU_STATE_MSNGR_SETTINGS;
-          } else if (text_len > 0 && msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_PRESET) {
-            // No UTF-8 expansion needed here unlike the display-name/
-            // message branches - this text never leaves the device, same
-            // reasoning bookmark names already get away with storing as
-            // typed (Messenger.h). msngr_preset_edit_index == msngr_
-            // preset_count (set when MENU_STATE_MSNGR_PRESETS' own "Add
-            // Preset" row opened this screen) means append a new one;
-            // anything less is an existing slot being edited in place -
-            // same "index == count means append" sentinel messenger_
-            // preset_add() itself uses.
-            if (msngr_preset_edit_index >= msngr_preset_count) {
-              messenger_preset_add(msngr_text_entry_buf);
-            } else {
-              messenger_preset_update(msngr_preset_edit_index, msngr_text_entry_buf);
-            }
-            msngr_text_entry_buf[0] = 0;
-            menu_state = MENU_STATE_MSNGR_PRESETS;
-          } else if (text_len > 0) {
-            // Only actually clear the composed text on a confirmed send -
-            // a failure leaves it in place so the user can retry instead
-            // of having to retype it. Same MENU_STATE_MSNGR_SEND_RESULT
-            // hand-off as the preset Send: Hi/Bye/SOS actions - see that
-            // branch's own comment. Expanded to real UTF-8 first, same
-            // reasoning as the display-name save above.
-            char msg_utf8[MSNGR_TEXT_ENTRY_MAX_LEN * 2 + 1];
-            msngr_kb_expand_utf8(msngr_text_entry_buf, msg_utf8, sizeof(msg_utf8));
-            msngr_last_send_result = messenger_send_lxmf(msngr_active_peer_hash, msg_utf8);
-            if (msngr_last_send_result == URNS_LXMF_SEND_OK || msngr_last_send_result == URNS_LXMF_SEND_RESOLVING) {
-              // RESOLVING already has its own copy of this text (msngr_send_
-              // pending_content, Messenger.h) independent of this buffer -
-              // clear it here same as OK, since the send has meaningfully
-              // started either way (see the preset-Send branch's own comment
-              // above for why cache refresh isn't called directly here).
-              msngr_text_entry_buf[0] = 0;
-              msngr_send_result_cursor = 1; // default BACK - see its own declaration
-              menu_state = MENU_STATE_MSNGR_SEND_RESULT;
-            } else {
-              menu_open_popup(urns_lxmf_send_result_text(msngr_last_send_result), MENU_STATE_MSNGR_TEXT_ENTRY);
-              menu_popup_auto_dismiss_at = millis() + ACTION_POPUP_MS;
-            }
-          }
+          msngr_kb_do_send();
         }
       } else if (menu_state == MENU_STATE_MSNGR_DISCARD_CONFIRM) {
         if (msngr_discard_confirm_cursor == 0) { // DISCARD
           msngr_text_entry_buf[0] = 0;
           menu_state = msngr_text_entry_return_state();
         } else { // CANCEL - resume typing, buffer/cursor/shift untouched
-          menu_state = MENU_STATE_MSNGR_TEXT_ENTRY;
+          menu_state = msngr_discard_confirm_return_state;
         }
       } else if (menu_state == MENU_STATE_MSNGR_PING_RESULT) {
         // Row 0 (status) is read-only - only BACK does anything, and it
@@ -5521,6 +6940,558 @@
     // menu_state == MENU_STATE_CLOSED + short click: no-op (reserved).
   }
 
+  #if HAS_BLE_HID_HOST == true
+    // Backspace, outside MENU_STATE_MSNGR_TEXT_ENTRY (blekbd_key_event()
+    // handles that screen separately - Backspace stays character-delete
+    // there), scoped to the Bluetooth/BLE Keyboard/Messenger screens - see
+    // this file's own plan (purrfect-baking-candle.md) for why: this
+    // firmware's menu system has no single generic "go back one level"
+    // primitive, so covering every one of the ~65 MENU_STATE_* screens
+    // would mean auditing all of them; this bounded, reviewable set covers
+    // what a paired BLE keyboard user actually navigates through.
+    //
+    // Every list/status/confirm-dialog screen in this codebase puts its
+    // BACK (or CANCEL) row at the *last* valid cursor index - a completely
+    // consistent convention (verified directly against menu_encoder_
+    // rotate()'s own per-state clamp calls, and BACK-row dispatch sites
+    // like MSNGR_MSG_DETAIL's own "cursor == row_count - 1" check and
+    // MSNGR_PEER_FIXED_ACTION_BACK being the last of MSNGR_PEER_FIXED_
+    // ACTION_COUNT). So this never needs to know *where* Back leads, only
+    // each screen's own cursor variable and row count - jump straight to
+    // that last index and press it through the exact same menu_confirm_
+    // select() path a real click would take, rather than duplicating each
+    // screen's own destination logic (which would drift out of sync with
+    // it over time).
+    void blekbd_backspace_as_back() {
+      // EDIT-shaped screens: any confirm_select() press already returns to
+      // the parent unconditionally (e.g. MENU_STATE_BT_SETTINGS_EDIT ->
+      // BT_SETTINGS regardless of the staged value) - jumping the cursor
+      // first would only risk corrupting whatever field is being edited
+      // (rotating/stepping an EDIT state's own value, not moving a list
+      // cursor - there's no "last row" concept here at all).
+      bool is_edit = (menu_state == MENU_STATE_BT_SETTINGS_EDIT ||
+                      menu_state == MENU_STATE_BLEKBD_EDIT ||
+                      menu_state == MENU_STATE_MSNGR_SETTINGS_EDIT);
+      if (!is_edit) {
+        // Jump straight to the last row rather than stepping there one
+        // menu_encoder_rotate() call at a time, which would also spam a
+        // tick sound per step for what should read as a single Back press.
+             if (menu_state == MENU_STATE_BT_LIST)                bt_menu_cursor = BT_ITEM_COUNT - 1;
+        else if (menu_state == MENU_STATE_BT_SETTINGS)            bt_settings_cursor = BT_SETTINGS_ITEM_COUNT - 1;
+        else if (menu_state == MENU_STATE_BT_UNPAIR_CONFIRM)      bt_unpair_confirm_cursor = 1;
+        else if (menu_state == MENU_STATE_BLEKBD_LIST)            blekbd_menu_cursor = BLEKBD_ITEM_COUNT - 1;
+        else if (menu_state == MENU_STATE_BLEKBD_SCAN)            blekbd_scan_cursor = blekbd_scan_row_count() - 1;
+        else if (menu_state == MENU_STATE_BLEKBD_PAIR_CONFIRM)    blekbd_pair_confirm_cursor = 1;
+        else if (menu_state == MENU_STATE_BLEKBD_PAIRING)         blekbd_pairing_cursor = 1;
+        else if (menu_state == MENU_STATE_BLEKBD_FORGET_CONFIRM)  blekbd_forget_confirm_cursor = 1;
+        else if (menu_state == MENU_STATE_MSNGR_LIST)             msngr_menu_cursor = MSNGR_TOP_ITEM_COUNT - 1;
+        else if (menu_state == MENU_STATE_MSNGR_INBOX)            msngr_inbox_cursor = msngr_inbox_row_count() - 1;
+        else if (menu_state == MENU_STATE_MSNGR_BOOKMARKS)        msngr_bookmarks_cursor = msngr_bookmarks_row_count() - 1;
+        else if (menu_state == MENU_STATE_MSNGR_ANNOUNCES)        msngr_announces_cursor = msngr_announces_row_count() - 1;
+        else if (menu_state == MENU_STATE_MSNGR_PEER)             msngr_peer_cursor = msngr_peer_row_count() - 1;
+        else if (menu_state == MENU_STATE_MSNGR_MSG_DETAIL)       msngr_msg_detail_cursor = msngr_msg_detail_row_count() - 1;
+        else if (menu_state == MENU_STATE_MSNGR_DELETE_CONFIRM)   msngr_delete_confirm_cursor = 1;
+        else if (menu_state == MENU_STATE_MSNGR_CLEAR_CONFIRM)    msngr_clear_confirm_cursor = 1;
+        else if (menu_state == MENU_STATE_MSNGR_DISCARD_CONFIRM)  msngr_discard_confirm_cursor = 1;
+        else if (menu_state == MENU_STATE_MSNGR_PING_RESULT)      msngr_ping_result_cursor = 1;
+        else if (menu_state == MENU_STATE_MSNGR_SEND_RESULT)      msngr_send_result_cursor = 1;
+        else if (menu_state == MENU_STATE_MSNGR_SETTINGS)         msngr_settings_cursor = MSNGR_SETTINGS_ITEM_COUNT - 1;
+        else if (menu_state == MENU_STATE_MSNGR_PRESETS)          msngr_presets_cursor = msngr_presets_row_count() - 1;
+        else if (menu_state == MENU_STATE_MSNGR_PRESET_DETAIL)    msngr_preset_detail_cursor = 2;
+        else return; // out of scope for Backspace-as-Back - dropped, same as every other key outside the covered screens
+      }
+      buzzer_encoder_click_melody();
+      menu_confirm_select(0);
+    }
+
+    // Definition for the declaration in BLEKeyboardHost.h - same include-
+    // order reason as blekbd_pair_result_process() (this file, above):
+    // this needs menu_state/MENU_STATE_MSNGR_TEXT_ENTRY, the msngr_kb_*
+    // helpers, and (for general navigation outside text entry) menu_
+    // encoder_rotate()/menu_confirm_select()/menu_commit_and_exit()/menu_
+    // open_from_closed()/messenger_open_from_closed() themselves - none of
+    // which exist yet either at BLEKeyboardHost.h's point in the include
+    // order, or (for these) this early in Menu.h itself, hence this living
+    // all the way down here rather than next to blekbd_pair_result_
+    // process(). Called from blekbd_loop() for every queued key, already
+    // translated to a plain char, one of '\n'/'\b'/'\x1b' for Enter/
+    // Backspace/Escape, BLEKBD_CH_UP/_DOWN for the arrow keys, or BLEKBD_
+    // CH_OPEN_SETTINGS/_MESSENGER for WinKey/Alt+Tab.
+    // Quick-open Dialog Mode shortcut (Ctrl+A or F2, blekbd_key_event(),
+    // below) - per user request, jumps straight into MENU_STATE_MSNGR_
+    // CHAT for whichever contact is currently relevant, from three
+    // different starting screens:
+    //   - MENU_STATE_MSNGR_INBOX, with a conversation row selected
+    //     (msngr_inbox_cursor) - resolves the peer hash exactly the way
+    //     that screen's own Enter/confirm handler does (menu_confirm_
+    //     select(), above), just skipping the intermediate MENU_STATE_
+    //     MSNGR_PEER screen entirely instead of landing there.
+    //   - MENU_STATE_MSNGR_BOOKMARKS, with a contact row selected
+    //     (msngr_bookmarks_cursor) - same idea, mirrors that screen's
+    //     own confirm handler.
+    //   - MENU_STATE_MSNGR_PEER itself ("within the Inbox message
+    //     list") - msngr_active_peer_hash is already correct, nothing
+    //     to resolve.
+    // Silently does nothing from any other screen, or from INBOX/
+    // BOOKMARKS with the cursor sitting on a non-contact row (BACK, Add
+    // by Hash, ...) - same "not applicable here" restraint the other
+    // keyboard shortcuts in this file already use rather than acting on
+    // a row that isn't actually a contact.
+    void blekbd_quick_open_dialog_mode() {
+      RNS::Bytes peer_hash;
+      bool have_peer = false;
+
+      if (menu_state == MENU_STATE_MSNGR_PEER) {
+        peer_hash = msngr_active_peer_hash;
+        have_peer = true;
+      } else if (menu_state == MENU_STATE_MSNGR_INBOX) {
+        uint8_t row_count = msngr_inbox_row_count();
+        if (msngr_inbox_cursor < row_count - 1 && urns_message_store && urns_message_store->get_conversation_count() > 0) {
+          std::vector<RNS::Bytes> convs = urns_message_store->get_conversations();
+          if (msngr_inbox_cursor < convs.size()) {
+            peer_hash = convs[msngr_inbox_cursor];
+            urns_message_store->mark_conversation_read(peer_hash);
+            msngr_peer_return_state = MENU_STATE_MSNGR_INBOX;
+            have_peer = true;
+          }
+        }
+      } else if (menu_state == MENU_STATE_MSNGR_BOOKMARKS) {
+        uint8_t row_count = msngr_bookmarks_row_count();
+        bool has_add_row = msngr_bookmark_count < MSNGR_MAX_BOOKMARKS;
+        bool on_contact_row = msngr_bookmarks_cursor < row_count - 1 &&
+          !(has_add_row && msngr_bookmarks_cursor == msngr_bookmark_count) &&
+          msngr_bookmark_count > 0;
+        if (on_contact_row) {
+          uint8_t vis = 0;
+          for (uint8_t i = 0; i < MSNGR_MAX_BOOKMARKS; i++) {
+            if (!msngr_bookmarks[i].in_use) continue;
+            if (vis == msngr_bookmarks_cursor) {
+              peer_hash = RNS::Bytes(msngr_bookmarks[i].hash, LXMF::PEER_HASH_SIZE);
+              msngr_peer_return_state = MENU_STATE_MSNGR_BOOKMARKS;
+              have_peer = true;
+              break;
+            }
+            vis++;
+          }
+        }
+      }
+
+      if (!have_peer) return;
+
+      msngr_active_peer_hash = peer_hash;
+      msngr_peer_cursor = 0;
+      msngr_last_send_result = 0xFF;
+      msngr_text_entry_purpose = MSNGR_TEXT_ENTRY_PURPOSE_MESSAGE;
+      msngr_text_entry_buf[0] = 0;
+      msngr_chat_cursor = 0;
+      msngr_chat_compose_win_start = 0;
+      msngr_chat_sel = 0xFF;
+      msngr_chat_delete_confirm_pending = false;
+      msngr_msg_view_active = false;
+      messenger_refresh_chat_window(msngr_active_peer_hash, (size_t)-1);
+      menu_state = MENU_STATE_MSNGR_CHAT;
+      buzzer_encoder_click_melody(); // same confirm sound a real Enter-to-select would play
+    }
+
+    // True for "value select" submenus - screens where menu_encoder_
+    // rotate()'s dir argument steps a single field's value (its *_EDIT
+    // branches, above) - as opposed to a plain list/multi-line screen
+    // where dir moves a cursor between several rows. Per user request:
+    // the BLE keyboard's Left/Right cursor keys should only act here,
+    // and Up/Down only in the list-shaped states - a small keyboard's
+    // four arrow keys would otherwise do the exact same thing twice,
+    // which is confusing rather than useful.
+    //
+    // Matches every MENU_STATE_* whose own name contains "EDIT" - the
+    // dispatch in menu_encoder_rotate() bears out that this naming is
+    // completely consistent: every state listed there under an "_EDIT"
+    // name steps ONE field's value with dir, no exceptions. (MENU_STATE_
+    // MSNGR_TEXT_ENTRY is deliberately not listed here despite being a
+    // single on-screen-keyboard cursor - it never reaches this check,
+    // blekbd_key_event() below has its own dedicated block for it that
+    // always returns first.)
+    bool blekbd_menu_state_is_value_edit() {
+      return menu_state == MENU_STATE_EDIT ||
+             menu_state == MENU_STATE_WIFI_EDIT ||
+             menu_state == MENU_STATE_WIFI_TEXT_EDIT ||
+             menu_state == MENU_STATE_HW_EDIT ||
+             menu_state == MENU_STATE_GPIO_PIN_EDIT ||
+             menu_state == MENU_STATE_ETH_EDIT ||
+             menu_state == MENU_STATE_ETH_ADDR_EDIT ||
+             menu_state == MENU_STATE_WIFI_ADDR_EDIT ||
+             menu_state == MENU_STATE_RTC_EDIT ||
+             menu_state == MENU_STATE_RTC_TZ_EDIT ||
+             menu_state == MENU_STATE_GNSS_EDIT ||
+             menu_state == MENU_STATE_ESPNOW_EDIT ||
+             menu_state == MENU_STATE_URNS_EDIT ||
+             menu_state == MENU_STATE_URNS_RADIO_EDIT ||
+             menu_state == MENU_STATE_MSNGR_SETTINGS_EDIT ||
+             menu_state == MENU_STATE_BT_SETTINGS_EDIT
+             #if HAS_BLE_HID_HOST == true
+               || menu_state == MENU_STATE_BLEKBD_EDIT
+             #endif
+             ;
+    }
+
+    void blekbd_key_event(char ch) {
+      // Same activity-refresh/display-wake every other real input path
+      // already does at its own top (menu_encoder_rotate(), menu_confirm_
+      // select() via menu_encoder_button()/menu_button_press()) - BLE
+      // keystrokes bypass all of those entirely (this function is the
+      // physical keyboard's own dispatch, called from blekbd_loop()), so
+      // without this, typing never reset the idle-close clock or woke a
+      // blanked/dimmed screen - confirmed on hardware as a real gap, not
+      // just a Chat-specific one.
+      menu_last_activity_ms = millis();
+      display_unblank();
+
+      // Global shortcuts - reachable from any state, including
+      // MENU_STATE_CLOSED (that's the whole point - WinKey/Alt+Tab open
+      // something from nothing else being open), EXCEPT while actively
+      // composing/editing text (MENU_STATE_MSNGR_TEXT_ENTRY, or MENU_STATE_
+      // MSNGR_CHAT once HAS_BLE_HID_HOST exists): menu_open_from_closed()/
+      // messenger_open_from_closed() are unconditional state jumps (same as
+      // the physical long-press-from-closed/BUTTON_HOLD_TIER_MESSENGER hold
+      // gestures they mirror) with no discard-confirm involved, so an
+      // accidental hit while typing would silently lose unsent text.
+      bool blekbd_composing =
+        #if HAS_BLE_HID_HOST == true
+          menu_state == MENU_STATE_MSNGR_TEXT_ENTRY || menu_state == MENU_STATE_MSNGR_CHAT;
+        #else
+          menu_state == MENU_STATE_MSNGR_TEXT_ENTRY;
+        #endif
+      if (!blekbd_composing) {
+        // Toggle, not just open: pressed again while the menu is already
+        // open (Settings, Messenger, or anywhere else in the tree - both
+        // roots share the same menu_state), it closes back to the main
+        // screen the same way Escape already does (menu_commit_and_exit(),
+        // see its own use for '\x1b' further down) rather than jumping back
+        // to the Settings top list a second time.
+        if (ch == BLEKBD_CH_OPEN_SETTINGS) {
+          if (menu_state == MENU_STATE_CLOSED) menu_open_from_closed();
+          else {
+            // Per user request: the lower-pitched rotate/tick sound, not
+            // the confirm-click one - closing via a keyboard shortcut
+            // shouldn't sound like a confirm/select action, just an
+            // audible cue that something happened.
+            buzzer_encoder_tick_melody();
+            menu_commit_and_exit();
+          }
+          return;
+        }
+        #if HAS_LXMF == true
+          if (ch == BLEKBD_CH_OPEN_MESSENGER) {
+            if (menu_state == MENU_STATE_CLOSED) messenger_open_from_closed();
+            else {
+              buzzer_encoder_tick_melody();
+              menu_commit_and_exit();
+            }
+            return;
+          }
+        #endif
+      }
+
+      // Brightness keys (Consumer Control usage page, BLEKeyboardHost.h) -
+      // a real hardware-button-style shortcut, so always active regardless
+      // of composing/menu state (including MENU_STATE_CLOSED, unlike
+      // everything below this point) - no text-loss risk the way WinKey/
+      // Alt+Tab's own composing exclusion above guards against.
+      if (ch == BLEKBD_CH_BRIGHTNESS_UP) { blekbd_step_display_brightness(1); return; }
+      if (ch == BLEKBD_CH_BRIGHTNESS_DOWN) { blekbd_step_display_brightness(-1); return; }
+      #if HAS_BUZZER == true
+        // Volume keys (Consumer Control usage page) - repurposed to
+        // enable/disable the buzzer, same always-active shortcut shape as
+        // Brightness above.
+        if (ch == BLEKBD_CH_SOUND_ENABLE) { blekbd_set_sound_enabled(true); return; }
+        if (ch == BLEKBD_CH_SOUND_DISABLE) { blekbd_set_sound_enabled(false); return; }
+      #endif
+      // Play/Pause key - toggles marquee scrolling, same always-active
+      // shortcut shape as Brightness/Volume above.
+      if (ch == BLEKBD_CH_TOGGLE_MARQUEE) { blekbd_toggle_marquee(); return; }
+      // Quick-open Dialog Mode (Ctrl+A/F2) - only actually does anything
+      // from MSNGR_INBOX/_PEER/_BOOKMARKS with a real contact resolvable
+      // (see blekbd_quick_open_dialog_mode()'s own comment); silently
+      // no-ops everywhere else, same restraint as every other screen-
+      // specific shortcut in this file.
+      if (ch == BLEKBD_CH_OPEN_DIALOG_MODE) { blekbd_quick_open_dialog_mode(); return; }
+
+      if (menu_state == MENU_STATE_CLOSED) return; // nothing else to navigate/close
+
+      if (menu_state == MENU_STATE_MSNGR_TEXT_ENTRY) {
+        // Enter still Sends, Backspace still deletes a character (not
+        // Back - Escape is the only physical-keyboard way to leave this
+        // screen, confirmed). Alt+Shift/Ctrl+Shift toggle EN/RU - only
+        // meaningful here (msngr_kb_lang_ru only affects this screen's own
+        // character mapping/rendering) - mirrors exactly what a deliberate
+        // hold on the on-screen keyboard's own Shift key already does
+        // (msngr_kb_lang_hold_try(), above). Also mirrors the new value
+        // into blekbd_lang_ru (BLEKeyboardHost.h) - that's the flag the
+        // physical keyboard's own keycode->character resolution actually
+        // reads (blekbd_translate_report()), since msngr_kb_lang_ru itself
+        // isn't visible yet at that file's point in the include order.
+        //
+        // Up/Down/Left/Right: per user request, real 2D grid navigation
+        // (msngr_kb_nav_row()/_col(), above) rather than aliasing the
+        // single linear-cursor step menu_encoder_rotate() uses for a real
+        // encoder/the single button - see those functions' own comments
+        // for why the linear step alone isn't "proper" navigation,
+        // especially for MSNGR_KB_LAYOUT_HEX's tab order.
+        bool hex_mode = (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH);
+        if (ch == '\n') msngr_kb_do_send();
+        else if (ch == '\b') msngr_kb_do_backspace();
+        else if (ch == '\x1b') menu_msngr_text_entry_leave();
+        else if (ch == BLEKBD_CH_UP)    { buzzer_encoder_tick_melody(); msngr_kb_nav_row(-1); }
+        else if (ch == BLEKBD_CH_DOWN)  { buzzer_encoder_tick_melody(); msngr_kb_nav_row(1); }
+        else if (ch == BLEKBD_CH_LEFT)  { buzzer_encoder_tick_melody(); msngr_kb_nav_col(-1); }
+        else if (ch == BLEKBD_CH_RIGHT) { buzzer_encoder_tick_melody(); msngr_kb_nav_col(1); }
+        else if (ch == BLEKBD_CH_TOGGLE_LANG) {
+          msngr_kb_lang_ru = !msngr_kb_lang_ru;
+          blekbd_lang_ru = msngr_kb_lang_ru;
+          msngr_kb_shift_on = false;
+          buzzer_encoder_tick_melody();
+        }
+        else if (hex_mode && ch == '\t') {
+          // Tab - per user request, toggles LXMF/Propagation from
+          // anywhere on this screen, regardless of cursor position
+          // (BLEKeyboardHost.h pushes plain Tab as literal '\t' - see its
+          // own comment on why no new BLEKBD_CH_* sentinel was needed).
+          buzzer_encoder_tick_melody();
+          msngr_kb_toggle_bookmark_type();
+        }
+        else if (hex_mode && ch == ' ') {
+          // Spacebar - per user request, only meaningful while the
+          // highlight is actually on the Type cell (mirrors "pressing"
+          // it, same as Enter/confirm would via menu_confirm_select());
+          // otherwise silently ignored rather than inserted, same as any
+          // other non-hex-digit character below - space was never a
+          // valid hash character anyway, this is just an explicit,
+          // documented case of that same rule.
+          uint8_t row, col;
+          msngr_kb_cursor_rc(msngr_kb_cursor, row, col);
+          if (msngr_kb_key_type(msngr_kb_active_layout()[row][col]) == MSNGR_KB_TYPE_TOGGLE) {
+            buzzer_encoder_tick_melody();
+            msngr_kb_toggle_bookmark_type();
+          }
+        }
+        else if (hex_mode && ch != 0) {
+          // Per user request: only 0-9/A-F are valid hash characters - no
+          // letters past F, no symbols, no space (handled separately,
+          // above). Lowercase a-f normalized to uppercase, matching
+          // MSNGR_KB_LAYOUT_HEX's own row 1 ('A'-'F', never lowercase) -
+          // anything else is silently dropped rather than inserted.
+          char up = (ch >= 'a' && ch <= 'f') ? (char)(ch - 'a' + 'A') : ch;
+          if ((up >= '0' && up <= '9') || (up >= 'A' && up <= 'F')) msngr_kb_insert_char(up);
+        }
+        else if (!hex_mode && ch != 0) msngr_kb_insert_char(ch);
+        return;
+      }
+
+      #if HAS_BLE_HID_HOST == true
+        if (menu_state == MENU_STATE_MSNGR_CHAT) {
+          // Two focuses share this one screen/menu_state (no separate
+          // sub-state - see msngr_chat_sel's own declaration, Messenger.h):
+          // composing (the default - Left/Right move the text cursor,
+          // Backspace/typing edit msngr_text_entry_buf in place) and
+          // browsing the message history (Up/Down/PgUp/PgDn/Home/End move
+          // a selected row, msngr_chat_sel != 0xFF - Backspace there opens
+          // the DELETE MESSAGE? mini-dialog below instead). Typing/Left/
+          // Right always return focus to composing first - the most
+          // natural, least-surprising way back given none of Up/Down/PgUp/
+          // PgDn/Home/End were ever meaningful in Chat before browsing
+          // existed.
+          //
+          // The delete-confirm mini-dialog takes over Enter/Esc/Backspace
+          // exclusively while pending - checked first, before either focus
+          // gets a turn.
+          if (msngr_chat_delete_confirm_pending) {
+            // Counts as browsing activity too - resets the same idle
+            // timeout the selection itself uses (MSNGR_CHAT_SEL_TIMEOUT_MS,
+            // above), so a slow decision here doesn't get preempted out
+            // from under the user mid-dialog.
+            msngr_chat_sel_last_activity_ms = millis();
+            // Enter or Y confirms, Backspace/Esc/N cancels - per user
+            // request, Y/N work as plain shortcuts alongside the original
+            // Enter/Backspace-or-Esc bindings. Case-insensitive since
+            // Shift/Caps Lock both flip which case actually arrives here
+            // (blekbd_translate_report(), BLEKeyboardHost.h).
+            if (ch == '\n' || ch == 'y' || ch == 'Y') {
+              msngr_chat_delete_confirm_pending = false;
+              if (msngr_chat_sel != 0xFF && msngr_chat_sel < msngr_chat_cache_count) {
+                RNS::Bytes msg_hash(msngr_chat_cache[msngr_chat_sel].hash, LXMF::MESSAGE_HASH_SIZE);
+                // Masked for the whole delete+refresh sequence - both do
+                // LittleFS I/O, same real, confirmed DIO0-ISR-vs-flash-I/O
+                // crash hazard as MENU_STATE_MSNGR_DELETE_CONFIRM's own
+                // DELETE branch (above) - see that branch's own comment.
+                LoRa->maskDio0();
+                if (urns_message_store) urns_message_store->delete_message(msg_hash);
+                messenger_refresh_chat_window(msngr_active_peer_hash, msngr_chat_window_start);
+                LoRa->unmaskDio0();
+                msngr_chat_sel = (msngr_chat_cache_count > 0)
+                  ? (msngr_chat_sel < msngr_chat_cache_count ? msngr_chat_sel : (uint8_t)(msngr_chat_cache_count - 1))
+                  : (uint8_t)0xFF;
+                // The message just deleted is exactly the one the full-
+                // screen view (if open) was showing - nothing left to view.
+                msngr_msg_view_active = false;
+              }
+            } else if (ch == '\b' || ch == '\x1b' || ch == 'n' || ch == 'N') {
+              msngr_chat_delete_confirm_pending = false; // CANCEL
+            }
+            return;
+          }
+
+          if (msngr_msg_view_active) {
+            // Full-screen, ornament-free single-message view (opened by
+            // Enter while browsing, below) - per user request, no text-
+            // entry box exists in this sub-mode at all, so Up/Down are
+            // repurposed as pure line-scroll here instead of message-list
+            // navigation, and everything else (Left/Right/typing/Home/End/
+            // PgUp/PgDn) is silently ignored rather than falling through
+            // to compose-box or message-list handling that doesn't apply.
+            // Same shared msngr_msg_view_active this view also uses when
+            // opened from MENU_STATE_MSNGR_MSG_DETAIL (menu_confirm_
+            // select(), its own comment) - msngr_msg_view_return_state is
+            // already MENU_STATE_MSNGR_CHAT here (set below, where this
+            // view is opened), so exiting just lands back in Chat as
+            // before.
+            if (ch == BLEKBD_CH_UP) {
+              if (msngr_msg_view_scroll_line > 0) msngr_msg_view_scroll_line--;
+            } else if (ch == BLEKBD_CH_DOWN) {
+              msngr_msg_view_scroll_line++; // clamped against real line count in the draw block, below
+            } else if (ch == '\x1b') {
+              // Esc or AC Home (BLEKeyboardHost.h pushes AC Home as a
+              // literal '\x1b' too, so this already covers both per user
+              // request with no extra dispatch needed).
+              msngr_msg_view_active = false;
+            } else if (ch == '\b') {
+              msngr_chat_delete_confirm_pending = true; // same DELETE MESSAGE? dialog as browsing uses
+            }
+            return;
+          }
+
+          if (ch == BLEKBD_CH_UP) { msngr_chat_nav_up(); return; }
+          if (ch == BLEKBD_CH_DOWN) { msngr_chat_nav_down(); return; }
+          if (ch == BLEKBD_CH_PAGE_UP) { msngr_chat_nav_page_up(); return; }
+          if (ch == BLEKBD_CH_PAGE_DOWN) { msngr_chat_nav_page_down(); return; }
+          if (ch == BLEKBD_CH_HOME) { msngr_chat_nav_home(); return; }
+          if (ch == BLEKBD_CH_END) { msngr_chat_nav_end(); return; }
+
+          if (msngr_chat_sel != 0xFF) {
+            // Browsing a selected message - Enter opens the full-screen
+            // view above, Backspace opens the delete confirm, Esc
+            // deselects (back to composing). Per user request, typing any
+            // real character (space/letter/digit/symbol - anything that
+            // would otherwise insert into the compose box) does the exact
+            // same thing as Esc: just deselects, without also inserting -
+            // same condition set the composing branch's own final insert-
+            // eligibility check uses, minus the keys already handled here/
+            // above (Left/Right/lang-toggle stay silently ignored while
+            // browsing, unchanged).
+            if (ch == '\b') msngr_chat_delete_confirm_pending = true;
+            else if (ch == '\x1b') msngr_chat_exit_browsing();
+            else if (ch == '\n') {
+              // Reuses the exact same full-content fetch MENU_STATE_MSNGR_
+              // MSG_DETAIL uses (messenger_refresh_msg_detail_cache(),
+              // Messenger.h) rather than msngr_chat_cache[]'s own capped-
+              // length snippet - the whole point is showing more than that
+              // snippet ever could.
+              RNS::Bytes msg_hash(msngr_chat_cache[msngr_chat_sel].hash, LXMF::MESSAGE_HASH_SIZE);
+              messenger_refresh_msg_detail_cache(msg_hash);
+              msngr_msg_view_active = true;
+              msngr_msg_view_scroll_line = 0;
+              msngr_msg_view_return_state = MENU_STATE_MSNGR_CHAT;
+            }
+            else if (ch != 0 && ch != BLEKBD_CH_LEFT && ch != BLEKBD_CH_RIGHT &&
+                     ch != BLEKBD_CH_TOGGLE_LANG && ch != BLEKBD_CH_OPEN_MESSENGER && ch != BLEKBD_CH_OPEN_SETTINGS) {
+              msngr_chat_exit_browsing();
+            }
+            return;
+          }
+
+          // Composing (the default/normal focus) - same shape as before
+          // browsing existed. Backspace/insert use the cursor-aware msngr_
+          // chat_* functions (above), not the on-screen keyboard's own
+          // append/trim-the-tail-only msngr_kb_* ones - real in-place
+          // editing (Left/Right move the cursor, typing/Backspace act
+          // wherever it currently is), per user request.
+          if (ch == '\n') msngr_chat_do_send();
+          else if (ch == '\b') msngr_chat_backspace();
+          else if (ch == '\x1b') menu_msngr_text_entry_leave();
+          else if (ch == BLEKBD_CH_LEFT) msngr_chat_cursor_left();
+          else if (ch == BLEKBD_CH_RIGHT) msngr_chat_cursor_right();
+          else if (ch == BLEKBD_CH_TOGGLE_LANG) {
+            msngr_kb_lang_ru = !msngr_kb_lang_ru;
+            blekbd_lang_ru = msngr_kb_lang_ru;
+            buzzer_encoder_tick_melody();
+          }
+          else if (ch != 0 && ch != BLEKBD_CH_OPEN_MESSENGER && ch != BLEKBD_CH_OPEN_SETTINGS) {
+            msngr_chat_insert_char(ch);
+          }
+          return;
+        }
+      #endif
+
+      // Every other open screen: Up/Down = encoder rotate, Enter = confirm/
+      // select, Esc = close the whole menu - general, not scoped to
+      // Bluetooth/Messenger, since this just reuses the exact same trusted
+      // per-state dispatch the real encoder/a real long-press already goes
+      // through (menu_encoder_rotate(), Encoder.h:153; menu_commit_and_
+      // exit(), the same action a physical long-press takes from any state
+      // - this codebase has no separate "discard and close" mechanic to
+      // reach for instead) rather than any new per-state code. wrap=false
+      // matches the real encoder's own default (stop at the ends) rather
+      // than the button-only board's double-tap wrap=true convention.
+      #if HAS_LXMF == true
+        // Full Message view, opened from MENU_STATE_MSNGR_MSG_DETAIL (the
+        // only way to reach this general fallback while msngr_msg_view_
+        // active is true - MENU_STATE_MSNGR_CHAT's own dedicated block,
+        // above, always returns before ever reaching here). Esc here
+        // would otherwise fall into the branch just below and close the
+        // WHOLE menu (menu_commit_and_exit()) - it should only back out
+        // of the view instead, same as every other exit path
+        // (menu_confirm_select()'s own matching check).
+        if (msngr_msg_view_active && ch == '\x1b') {
+          buzzer_encoder_tick_melody();
+          msngr_msg_view_active = false;
+          menu_state = msngr_msg_view_return_state;
+          return;
+        }
+      #endif
+      if (ch == '\x1b') {
+        // Per user request: the lower-pitched rotate/tick sound, not the
+        // confirm-click one - closing via a keyboard shortcut shouldn't
+        // sound like a confirm/select action, just an audible cue that
+        // something happened.
+        buzzer_encoder_tick_melody();
+        menu_commit_and_exit();
+        return;
+      }
+      if (ch == BLEKBD_CH_UP || ch == BLEKBD_CH_DOWN || ch == BLEKBD_CH_LEFT || ch == BLEKBD_CH_RIGHT) {
+        // Per user request, on a small keyboard Up/Down and Left/Right
+        // shouldn't both do the same thing: Up/Down only navigate plain
+        // list/multi-line screens, Left/Right only step a value in
+        // "value select" submenus (blekbd_menu_state_is_value_edit(),
+        // above) - a mismatched key (e.g. Left on a list screen) is a
+        // silent no-op rather than falling back to acting like the other
+        // pair. menu_encoder_rotate() itself still branches internally
+        // on menu_state exactly like a real encoder turn would.
+        bool is_lr = (ch == BLEKBD_CH_LEFT || ch == BLEKBD_CH_RIGHT);
+        if (is_lr != blekbd_menu_state_is_value_edit()) return;
+        int8_t dir = (ch == BLEKBD_CH_DOWN || ch == BLEKBD_CH_RIGHT) ? 1 : -1;
+        menu_encoder_rotate(dir, false);
+        return;
+      }
+      if (ch == '\n') {
+        // Mirrors exactly what menu_encoder_button() does for a short
+        // click - the buzzer click isn't inside menu_confirm_select()
+        // itself, its callers each play it first.
+        buzzer_encoder_click_melody();
+        menu_confirm_select(0);
+        return;
+      }
+      if (ch == '\b') blekbd_backspace_as_back();
+    }
+  #endif
+
   // The main button drives the menu everywhere except WIFI_TEXT_EDIT (which
   // keeps it as a dedicated backspace key - see menu_main_button_del(),
   // called separately by button_event() for that one state). On boards
@@ -5637,13 +7608,25 @@
   // list too - e.g. MESSENGER's Inbox row, whose bm_menu_icon_inbox glyph
   // (Graphics.h) reads visually wider than MENU_ICON_W_INBOX gives it
   // credit for. Default nullptr/0, same opt-in pattern as icon_dx.
-  void draw_menu_list_disp(const char *title, const char **labels, char valbufs[][24], uint8_t count, uint8_t cursor, const uint8_t **icons = nullptr, const uint8_t *icon_widths = nullptr, const int8_t *icon_dx = nullptr, bool icon_col_shared = true, const int8_t *text_dx = nullptr, const uint8_t **right_icons = nullptr, const uint8_t *right_icon_widths = nullptr) {
+  // right_dx is icon_dx's mirror for the right-aligned value column - a
+  // per-row nudge (px, positive = toward the screen edge) applied to both
+  // right_icons[i] and its valbufs[i] text together, since they move as a
+  // unit (val_right already accounts for the icon's reserved width).
+  // Default nullptr/0, same opt-in pattern as icon_dx/text_dx.
+  // separator_before: row index a dashed divider sits directly above (e.g.
+  // MENU_STATE_MSNGR_PEER's boundary between message rows and the Compose
+  // message/Ping/.../BACK action rows below them) - default -1 draws
+  // nothing, same opt-in pattern as icons/right_icons. Only drawn when
+  // both the row it sits above and the row before it are in the current
+  // scroll window - if the boundary itself has scrolled out of view
+  // there's nothing to visually divide.
+  void draw_menu_list_disp(const char *title, const char **labels, char valbufs[][24], uint8_t count, uint8_t cursor, const uint8_t **icons = nullptr, const uint8_t *icon_widths = nullptr, const int8_t *icon_dx = nullptr, bool icon_col_shared = true, const int8_t *text_dx = nullptr, const uint8_t **right_icons = nullptr, const uint8_t *right_icon_widths = nullptr, const int8_t *right_dx = nullptr, int16_t separator_before = -1) {
     MENU_GFX.setFont(MENU_FONT);
     MENU_GFX.setTextSize(1);
     MENU_GFX.setTextColor(SSD1306_WHITE);
     MENU_GFX.setCursor(6, MENU_HEADER_TEXT_Y);
     MENU_GFX.print(title);
-    MENU_GFX.drawFastHLine(4, MENU_HEADER_HLINE_Y, MENU_CONTENT_W, SSD1306_WHITE);
+    MENU_GFX.drawFastHLine(MENU_CONTENT_X, MENU_HEADER_HLINE_Y, MENU_CONTENT_W, SSD1306_WHITE);
 
     const uint8_t row_h = MENU_LIST_ROW_H;
     const uint8_t visible_rows = MENU_LIST_VISIBLE_ROWS;
@@ -5659,7 +7642,7 @@
       uint8_t y = row_top + MENU_LIST_BASELINE_OFF; // text baseline
       bool selected = (i == cursor);
       if (selected) {
-        MENU_GFX.fillRect(4, row_top, MENU_CONTENT_W, row_h - 1, SSD1306_WHITE);
+        MENU_GFX.fillRect(MENU_CONTENT_X, row_top, MENU_CONTENT_W, row_h - 1, SSD1306_WHITE);
         MENU_GFX.setTextColor(SSD1306_BLACK);
       } else {
         MENU_GFX.setTextColor(SSD1306_WHITE);
@@ -5720,25 +7703,41 @@
       if (valbufs[i][0] != 0) {
         int16_t x1, y1; uint16_t w, h;
         MENU_GFX.getTextBounds(valbufs[i], 0, 0, &x1, &y1, &w, &h);
-        uint8_t val_right = 4 + MENU_CONTENT_W - 2;
+        uint8_t val_right = MENU_CONTENT_X + MENU_CONTENT_W - 2;
         // MENU_STATE_MSNGR_PEER's incoming messages (Menu.h) - reserve room
         // for a trailing direction icon by pulling the value's right edge
         // in first, same "shrink the text side, not the icon" idiom the
         // left-hand icon column above uses.
         if (right_icons && right_icons[i]) val_right -= (right_icon_widths[i] + MENU_ROW_ICON_GAP);
+        if (right_dx) val_right += right_dx[i];
         MENU_GFX.setCursor(val_right - w, y);
         MENU_GFX.print(valbufs[i]);
         if (right_icons && right_icons[i]) {
           int16_t icon_y = row_top + (row_h - MENU_ICON_H) / 2 + MENU_ICON_Y_NUDGE;
           uint16_t fg = selected ? SSD1306_BLACK : SSD1306_WHITE;
           uint16_t bg = selected ? SSD1306_WHITE : SSD1306_BLACK;
-          MENU_GFX.drawBitmap(4 + MENU_CONTENT_W - 2 - right_icon_widths[i], icon_y, right_icons[i], right_icon_widths[i], MENU_ICON_H, fg, bg);
+          int16_t icon_x2 = MENU_CONTENT_X + MENU_CONTENT_W - 2 - right_icon_widths[i] + (right_dx ? right_dx[i] : 0);
+          MENU_GFX.drawBitmap(icon_x2, icon_y, right_icons[i], right_icon_widths[i], MENU_ICON_H, fg, bg);
         }
       }
     }
 
+    // Dashed divider - 1px blank, 1px dashed line, 1px blank (3px total),
+    // sitting in the boundary between two adjacent rows rather than
+    // stealing a row height of its own, per user request. Same dash/gap
+    // idiom as any other 1bpp OLED UI's dashed rule, just hand-drawn since
+    // Adafruit_GFX has no dashed-line primitive.
+    if (separator_before >= 0 && separator_before > (int16_t)first && separator_before < (int16_t)(first + visible_rows)) {
+      uint8_t sep_vi = (uint8_t)(separator_before - first);
+      int16_t sep_y = MENU_LIST_TOP_Y + sep_vi * row_h - 2;
+      for (int16_t dx = 0; dx < MENU_CONTENT_W; dx += 4) {
+        int16_t seg_w = (MENU_CONTENT_W - dx) < 2 ? (MENU_CONTENT_W - dx) : 2;
+        MENU_GFX.drawFastHLine(MENU_CONTENT_X + dx, sep_y, seg_w, SSD1306_WHITE);
+      }
+    }
+
     MENU_GFX.setTextColor(SSD1306_WHITE);
-    MENU_GFX.drawFastHLine(4, MENU_LIST_FOOTER_HLINE_Y, MENU_CONTENT_W, SSD1306_WHITE);
+    MENU_GFX.drawFastHLine(MENU_CONTENT_X, MENU_LIST_FOOTER_HLINE_Y, MENU_CONTENT_W, SSD1306_WHITE);
     MENU_GFX.setCursor(6, MENU_LIST_FOOTER_TEXT_Y);
     // Whether an encoder is actually populated is a runtime choice
     // (encoder_enabled) on boards where it's optional, not the compile-time
@@ -5789,7 +7788,278 @@
     // board uses today, see MSNGR_MSG_DETAIL_CHARS_PER_LINE's own comment)
     // - expect this to need live on-hardware nudging like every other
     // pixel-level layout in this file.
+    // Extracted from draw_menu_msngr_keyboard_disp()'s own non-hex-mode
+    // preview box below - shared with MENU_STATE_MSNGR_CHAT's own draw
+    // block, which wants the exact same box+border behavior, just
+    // positioned at the bottom of the screen instead of right under the
+    // title.
+    //
+    // cursor_pos < 0 (default): unchanged from this function's original
+    // behavior - the on-screen keyboard only ever appends/trims-the-tail
+    // (msngr_kb_insert_char()/_do_backspace(), no cursor concept at all),
+    // so the caret is always right after the last character and the
+    // visible window always anchors on the tail, trimming from the front
+    // ("..." prefixed) when it doesn't fit.
+    //
+    // cursor_pos >= 0 (MENU_STATE_MSNGR_CHAT only, msngr_chat_cursor): the
+    // caret can sit anywhere in the buffer, not just the end, so the
+    // visible window has to track wherever the cursor currently is instead
+    // of always the tail - see msngr_chat_compose_win_start's own comment.
+    // Caret blink period - matches MSNGR_ENVELOPE_BLINK_MS's own cadence
+    // (Display.h) for a consistent "blink speed" across the UI, per user
+    // request that the compose caret blink like a real text cursor rather
+    // than sit permanently solid.
+    #if HAS_BLE_HID_HOST == true
+      // MENU_STATE_MSNGR_CHAT's DELETE MESSAGE? confirm - shared by both
+      // the normal message-list view and the full-screen single-message
+      // view (draw_settings_menu_disp()'s own MSNGR_CHAT case, below),
+      // since Backspace opens the same dialog from either. Deliberately
+      // NOT draw_menu_status_rect() (that primitive's own single
+      // footprint-tracking slot is already shared by the KBD CONNECTED/
+      // DISCONNECTED notice and the button-hold overlay; reusing it here
+      // for a two-line dialog would collide with those). Enter/Y=DELETE,
+      // Esc/Backspace/N=CANCEL per user request, not a real cursor-based
+      // CONFIRM/CANCEL list - see msngr_chat_delete_confirm_pending's own
+      // comment.
+      void draw_msngr_chat_delete_confirm_box() {
+        const char *line1 = "DELETE MESSAGE?";
+        const char *line2 = "Y/Enter:Yes N/Esc:No";
+        int16_t x1, y1; uint16_t w1, h1, w2, h2;
+        MENU_GFX.getTextBounds(line1, 0, 0, &x1, &y1, &w1, &h1);
+        MENU_GFX.getTextBounds(line2, 0, 0, &x1, &y1, &w2, &h2);
+        uint16_t inner_w = std::max(w1, w2);
+        const int16_t pad_x = 4, pad_y = 3, line_gap = 3;
+        int16_t box_w2 = (int16_t)inner_w + pad_x * 2;
+        int16_t box_h2 = (int16_t)(h1 + h2) + pad_y * 2 + line_gap;
+        int16_t bx = (128 - box_w2) / 2;
+        int16_t by = (64 - box_h2) / 2;
+        MENU_GFX.fillRect(bx, by, box_w2, box_h2, SSD1306_BLACK);
+        MENU_GFX.drawRect(bx, by, box_w2, box_h2, SSD1306_WHITE);
+        MENU_GFX.setTextColor(SSD1306_WHITE);
+        MENU_GFX.setCursor(bx + (box_w2 - (int16_t)w1) / 2, by + pad_y + (int16_t)h1);
+        MENU_GFX.print(line1);
+        MENU_GFX.setCursor(bx + (box_w2 - (int16_t)w2) / 2, by + pad_y + (int16_t)h1 + line_gap + (int16_t)h2);
+        MENU_GFX.print(line2);
+      }
+    #endif
+
+    // Scroll position indicator for draw_msngr_full_message_view(), below -
+    // per user-provided mockup (~/Downloads/scrollbar-mockup.c): a hollow
+    // capsule track (rounded-corner outline) spanning almost the full
+    // canvas height, plus a solid thumb sized to visible_lines/total_lines
+    // and positioned to msngr_msg_view_scroll_line/max_scroll. Only ever
+    // called when total_lines > visible_lines (caller's own check) - a
+    // fully-visible message has nothing to scroll, so nothing is drawn.
+    // Geometry is relative to MENU_CONTENT_X/_W (the board-group content-
+    // area constants used throughout this file) rather than the mockup's
+    // literal 123-126 pixel columns, even though this view exists on only
+    // one board group today.
+    void draw_msngr_msg_view_scrollbar(uint8_t total_lines, uint8_t visible_lines) {
+      const int16_t track_x0 = (MENU_CONTENT_X + MENU_CONTENT_W) - 5; // 123 on this board group
+      const int16_t track_x1 = track_x0 + 3;                          // 126
+      const int16_t track_y0 = 1, track_y1 = 62;
+      const int16_t track_h  = track_y1 - track_y0 + 1;               // 62
+      MENU_GFX.drawFastVLine(track_x0, track_y0 + 1, track_h - 2, SSD1306_WHITE);
+      MENU_GFX.drawFastVLine(track_x1, track_y0 + 1, track_h - 2, SSD1306_WHITE);
+      MENU_GFX.drawFastHLine(track_x0 + 1, track_y0, 2, SSD1306_WHITE);
+      MENU_GFX.drawFastHLine(track_x0 + 1, track_y1, 2, SSD1306_WHITE);
+
+      // Thumb height scales with the visible fraction of the message,
+      // clamped to a minimum so it never vanishes on a very long message -
+      // the mockup's own 6px thumb was just one example ratio, not a fixed
+      // size.
+      const int16_t min_thumb_h = 3;
+      int16_t thumb_h = (int16_t)((int32_t)track_h * visible_lines / total_lines);
+      if (thumb_h < min_thumb_h) thumb_h = min_thumb_h;
+      if (thumb_h > track_h) thumb_h = track_h;
+      uint8_t max_scroll = total_lines - visible_lines; // caller's own check guarantees > 0
+      int16_t thumb_y = track_y0 + (int16_t)((int32_t)(track_h - thumb_h) * msngr_msg_view_scroll_line / max_scroll);
+      MENU_GFX.fillRect(track_x0, thumb_y, 4, thumb_h, SSD1306_WHITE);
+
+      // Per user correction: the track's own rounded caps (the two
+      // drawFastHLine() calls above, matching the mockup's own two-pixel-
+      // narrower top/bottom rows) must stay rounded even when the thumb's
+      // fillRect happens to cover that exact row (thumb at the very top or
+      // very bottom of the track) - the fillRect above is a full 4px-wide
+      // rect, which would otherwise square off that row's corners by
+      // painting over the two side pixels the cap deliberately leaves
+      // blank. Un-paint just those two pixels again, only when the thumb
+      // actually reaches an end.
+      if (thumb_y == track_y0) {
+        MENU_GFX.drawPixel(track_x0, track_y0, SSD1306_BLACK);
+        MENU_GFX.drawPixel(track_x1, track_y0, SSD1306_BLACK);
+      }
+      if (thumb_y + thumb_h - 1 == track_y1) {
+        MENU_GFX.drawPixel(track_x0, track_y1, SSD1306_BLACK);
+        MENU_GFX.drawPixel(track_x1, track_y1, SSD1306_BLACK);
+      }
+    }
+
+    // Full-screen, ornament-free single-message view - the actual drawing
+    // shared by both entry points (msngr_msg_view_active's own comment):
+    // MENU_STATE_MSNGR_MSG_DETAIL's "Full Message" row and MENU_STATE_
+    // MSNGR_CHAT's Enter-while-browsing. No message-list rows, no compose
+    // box, no title/footer - just the wrapped content filling the whole
+    // 64px-tall canvas. msngr_msg_detail_cache_content (Messenger.h) was
+    // already populated right when this mode was entered - not re-fetched
+    // here (same "only ever refresh from a discrete input event, never
+    // the render path" discipline as every other flash-reading cache in
+    // this file). Deliberately NOT gated behind HAS_BLE_HID_HOST - see
+    // msngr_msg_view_active's own declaration.
+    //
+    // draw_delete_confirm: only ever true from the MENU_STATE_MSNGR_CHAT
+    // call site - its own Backspace-opens-delete-confirm gesture
+    // (HAS_BLE_HID_HOST only). MENU_STATE_MSNGR_MSG_DETAIL has no
+    // equivalent in-place overlay here (its own Delete row is a full
+    // MENU_STATE_MSNGR_DELETE_CONFIRM screen instead, reached after
+    // leaving this view), so its own call site always passes false.
+    void draw_msngr_full_message_view(bool draw_delete_confirm) {
+      MENU_GFX.setFont(MENU_FONT);
+      MENU_GFX.setTextSize(1);
+      std::string lines[MSNGR_MSG_VIEW_MAX_LINES];
+      uint8_t total_lines = msngr_msg_view_wrap(msngr_msg_detail_cache_content, lines, MSNGR_MSG_VIEW_MAX_LINES);
+      const uint8_t visible_lines = 7; // 7*9=63px, fits the 64px canvas
+      uint8_t max_scroll = (total_lines > visible_lines) ? (uint8_t)(total_lines - visible_lines) : 0;
+      if (msngr_msg_view_scroll_line > max_scroll) msngr_msg_view_scroll_line = max_scroll;
+      MENU_GFX.setTextColor(SSD1306_WHITE);
+      for (uint8_t vi = 0; vi < visible_lines; vi++) {
+        uint8_t li = (uint8_t)(msngr_msg_view_scroll_line + vi);
+        if (li >= total_lines) break;
+        MENU_GFX.setCursor(MENU_CONTENT_X, 7 + (int16_t)vi * 9);
+        MENU_GFX.print(lines[li].c_str());
+      }
+      if (total_lines > visible_lines) draw_msngr_msg_view_scrollbar(total_lines, visible_lines);
+      #if HAS_BLE_HID_HOST == true
+        if (draw_delete_confirm && msngr_chat_delete_confirm_pending) draw_msngr_chat_delete_confirm_box();
+      #endif
+    }
+
+    #define MSNGR_COMPOSE_CARET_BLINK_MS 500
+    void draw_msngr_compose_box(int16_t box_y, int32_t cursor_pos = -1) {
+      const int16_t box_x = MENU_CONTENT_X, box_w = MENU_CONTENT_W;
+      const uint8_t line_h = 9; // one text line's worth of box height
+      const int16_t box_h = (int16_t)line_h;
+      MENU_GFX.drawRect(box_x, box_y, box_w, box_h, SSD1306_WHITE);
+      const int16_t max_w = box_w - 6;
+      // Phase computed off millis() directly (no separate stored toggle/
+      // timestamp needed) - both callers of this function already redraw
+      // every real display cycle while their screen is open, so a plain
+      // "which half of the current period are we in" check is enough to
+      // blink smoothly, same idea as the envelope icon's own blink but
+      // without needing persisted state.
+      bool caret_visible = ((millis() / MSNGR_COMPOSE_CARET_BLINK_MS) % 2) == 0;
+
+      if (cursor_pos < 0) {
+        std::string shown(msngr_text_entry_buf);
+        size_t full_len = shown.size();
+        int16_t x1, y1; uint16_t tw, th;
+        MENU_GFX.getTextBounds(shown.c_str(), 0, 0, &x1, &y1, &tw, &th);
+        while (tw > (uint16_t)max_w && !shown.empty()) {
+          shown.erase(0, 1);
+          std::string probe = "..." + shown;
+          MENU_GFX.getTextBounds(probe.c_str(), 0, 0, &x1, &y1, &tw, &th);
+        }
+        if (shown.size() < full_len) shown = "..." + shown;
+        MENU_GFX.setCursor(box_x + 2, box_y + 6); // nudged up 1px, per user request on real hardware
+        MENU_GFX.print(shown.c_str());
+        // getCursorX() after the real print(), not getTextBounds()'s tw -
+        // getTextBounds() measures the ink-pixel bounding box, and a
+        // trailing space draws no ink, so its width was being excluded from
+        // tw entirely whenever the buffer ended in a space (visible on
+        // hardware: caret sat ~1px after the last letter instead of after
+        // the real space, until a further character made the space
+        // internal rather than trailing and the measurement "corrected
+        // itself"). print()'s own cursor always advances by each glyph's
+        // true xAdvance regardless of ink, so reading it back after the
+        // real print() gives the correct position unconditionally.
+        int16_t caret_x = MENU_GFX.getCursorX() + 1;
+        if (caret_visible && caret_x < box_x + box_w - 1) MENU_GFX.drawFastVLine(caret_x, box_y + 1, box_h - 2, SSD1306_WHITE);
+        return;
+      }
+
+      #if HAS_BLE_HID_HOST == true
+        // EN/RU layout indicator, in this box's own far-right corner -
+        // per user request. Dialog Mode has no title/footer chrome at
+        // all (MENU_STATE_MSNGR_CHAT's own draw block's comment) to put
+        // one in otherwise, unlike MENU_STATE_MSNGR_TEXT_ENTRY's title
+        // row (draw_menu_msngr_keyboard_disp(), above) - same dark-on-
+        // bright box style as that one, just placed here instead. Drawn
+        // first so the text-window math below (the shadowed max_w) knows
+        // to leave room for it, rather than needing the indicator to
+        // paint over already-scrolled text.
+        const char *lang_label = msngr_kb_lang_ru ? "RU" : "EN";
+        int16_t lx1, ly1; uint16_t lang_w, lang_h;
+        MENU_GFX.getTextBounds(lang_label, 0, 0, &lx1, &ly1, &lang_w, &lang_h);
+        const int16_t lang_pad_x = 2;
+        // +1 - per user request on real hardware, widens the box 1px to
+        // the left (the fillRect's own left edge, right edge unchanged)
+        // so exactly 2 bright pixels are left on the left of the glyph
+        // ink, matching the 2 the text's own +1 nudge below leaves on
+        // the right (against the compose box's own border).
+        const int16_t lang_box_w = (int16_t)lang_w + lang_pad_x * 2 + 1;
+        const int16_t lang_box_h = box_h - 2; // fits inside the box's own 1px border, top and bottom
+        const int16_t lang_box_x = box_x + box_w - 1 - lang_box_w;
+        const int16_t lang_box_y = box_y + 1;
+        MENU_GFX.fillRect(lang_box_x, lang_box_y, lang_box_w, lang_box_h, SSD1306_WHITE);
+        MENU_GFX.setTextColor(SSD1306_BLACK);
+        // +1 - per user request on real hardware, leaves exactly 2 bright
+        // pixels between the glyph ink and the compose box's own right
+        // border (1 from this nudge + the border pixel itself).
+        MENU_GFX.setCursor(lang_box_x + lang_pad_x + 1, box_y + 6);
+        MENU_GFX.print(lang_label);
+        MENU_GFX.setTextColor(SSD1306_WHITE);
+
+        // A separate, narrower budget than the function-level max_w
+        // (used by the cursor_pos<0 branch above, unaffected - this
+        // function has no nested scope here to actually shadow it in)
+        // - text now wraps/scrolls around the indicator's own reserved
+        // width plus a small gap, rather than running underneath it.
+        const int16_t compose_max_w = box_w - 6 - lang_box_w - 2;
+
+        std::string full(msngr_text_entry_buf);
+        size_t cpos = (size_t)cursor_pos;
+        if (cpos > full.size()) cpos = full.size();
+
+        // Pull the window start forward to the cursor if it scrolled out
+        // of view to the left (cursor moved/backspaced before win_start).
+        if (msngr_chat_compose_win_start > cpos) msngr_chat_compose_win_start = cpos;
+
+        auto slice_width = [&](size_t start, size_t end) -> uint16_t {
+          std::string probe = full.substr(start, end - start);
+          int16_t x1, y1; uint16_t w, h;
+          MENU_GFX.getTextBounds(probe.c_str(), 0, 0, &x1, &y1, &w, &h);
+          return w;
+        };
+        // Push the window start rightward until the cursor fits within
+        // compose_max_w again (cursor moved/typed past the right edge).
+        while (msngr_chat_compose_win_start < cpos &&
+               slice_width(msngr_chat_compose_win_start, cpos) > (uint16_t)compose_max_w) {
+          msngr_chat_compose_win_start++;
+        }
+        // Extend the tail as far past the cursor as still fits, for
+        // trailing context - doesn't affect win_start.
+        size_t win_end = cpos;
+        while (win_end < full.size() && slice_width(msngr_chat_compose_win_start, win_end + 1) <= (uint16_t)compose_max_w) {
+          win_end++;
+        }
+
+        std::string before_cursor = full.substr(msngr_chat_compose_win_start, cpos - msngr_chat_compose_win_start);
+        std::string after_cursor = full.substr(cpos, win_end - cpos);
+
+        MENU_GFX.setCursor(box_x + 2, box_y + 6);
+        MENU_GFX.print(before_cursor.c_str());
+        // Same getCursorX()-after-print() reasoning as the cursor_pos<0
+        // path above - correct even if before_cursor ends in a space.
+        int16_t caret_x = MENU_GFX.getCursorX() + 1;
+        MENU_GFX.print(after_cursor.c_str());
+        // Bounded by the indicator's own left edge now, not just the
+        // box's physical right edge, so the caret can't land underneath it.
+        if (caret_visible && caret_x < lang_box_x - 1) MENU_GFX.drawFastVLine(caret_x, box_y + 1, box_h - 2, SSD1306_WHITE);
+      #endif
+    }
+
     void draw_menu_msngr_keyboard_disp() {
+      const bool hex_mode = (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH);
       MENU_GFX.setFont(MENU_FONT);
       MENU_GFX.setTextSize(1);
       MENU_GFX.setTextColor(SSD1306_WHITE);
@@ -5801,7 +8071,8 @@
       const int16_t header_y = MENU_HEADER_TEXT_Y + 1;
       MENU_GFX.setCursor(6, header_y);
       MENU_GFX.print(msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME ? "Name" :
-                     msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_PRESET ? "Preset" : "Send Msg");
+                     msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_PRESET ? "Preset" :
+                     msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH ? "Add Hash" : "Send Msg");
 
       // Byte count, right-aligned on the same title line - "(N bytes)",
       // the actual UTF-8 payload size this buffer would send/save as
@@ -5825,28 +8096,46 @@
       // changes.
       {
         char count_buf[24];
-        snprintf(count_buf, sizeof(count_buf), " (%u bytes)", (unsigned)msngr_kb_utf8_len(msngr_text_entry_buf));
-        const char *lang_label = msngr_kb_lang_ru ? "RU" : "EN";
+        // Hash entry cares about hitting exactly 32 hex chars, not the
+        // UTF-8 payload size every other purpose here sends/saves as -
+        // an N/32 progress count is the useful number to show instead.
+        if (hex_mode) {
+          snprintf(count_buf, sizeof(count_buf), " (%u/%u)", (unsigned)strlen(msngr_text_entry_buf), (unsigned)(LXMF::PEER_HASH_SIZE * 2));
+        } else {
+          snprintf(count_buf, sizeof(count_buf), " (%u bytes)", (unsigned)msngr_kb_utf8_len(msngr_text_entry_buf));
+        }
 
-        int16_t lx1, ly1; uint16_t lang_w, lang_h;
-        MENU_GFX.getTextBounds(lang_label, 0, header_y, &lx1, &ly1, &lang_w, &lang_h);
         int16_t cx1, cy1; uint16_t count_w, count_h;
         MENU_GFX.getTextBounds(count_buf, 0, 0, &cx1, &cy1, &count_w, &count_h);
 
-        const int16_t pad_x = 2, pad_y = 1;
-        const int16_t lang_box_w = (int16_t)lang_w + pad_x * 2;
-        const int16_t lang_box_h = (int16_t)lang_h + pad_y * 2;
-        const int16_t lang_box_x = 4 + MENU_CONTENT_W - lang_box_w - (int16_t)count_w;
-        const int16_t lang_box_y = ly1 - pad_y;
+        if (hex_mode) {
+          // No EN/RU indicator - hex_mode's grid (MSNGR_KB_LAYOUT_HEX) has
+          // no language toggle at all (msngr_kb_lang_ru is forced/left
+          // false whenever this screen opens), so the box would just be
+          // permanently stuck showing "EN" with nothing to indicate.
+          MENU_GFX.setCursor(MENU_CONTENT_X + MENU_CONTENT_W - (int16_t)count_w, header_y);
+          MENU_GFX.print(count_buf);
+        } else {
+          const char *lang_label = msngr_kb_lang_ru ? "RU" : "EN";
 
-        MENU_GFX.fillRect(lang_box_x, lang_box_y, lang_box_w, lang_box_h, SSD1306_WHITE);
-        MENU_GFX.setTextColor(SSD1306_BLACK);
-        MENU_GFX.setCursor(lang_box_x + pad_x, header_y);
-        MENU_GFX.print(lang_label);
+          int16_t lx1, ly1; uint16_t lang_w, lang_h;
+          MENU_GFX.getTextBounds(lang_label, 0, header_y, &lx1, &ly1, &lang_w, &lang_h);
 
-        MENU_GFX.setTextColor(SSD1306_WHITE);
-        MENU_GFX.setCursor(lang_box_x + lang_box_w, header_y);
-        MENU_GFX.print(count_buf);
+          const int16_t pad_x = 2, pad_y = 1;
+          const int16_t lang_box_w = (int16_t)lang_w + pad_x * 2;
+          const int16_t lang_box_h = (int16_t)lang_h + pad_y * 2;
+          const int16_t lang_box_x = MENU_CONTENT_X + MENU_CONTENT_W - lang_box_w - (int16_t)count_w;
+          const int16_t lang_box_y = ly1 - pad_y;
+
+          MENU_GFX.fillRect(lang_box_x, lang_box_y, lang_box_w, lang_box_h, SSD1306_WHITE);
+          MENU_GFX.setTextColor(SSD1306_BLACK);
+          MENU_GFX.setCursor(lang_box_x + pad_x, header_y);
+          MENU_GFX.print(lang_label);
+
+          MENU_GFX.setTextColor(SSD1306_WHITE);
+          MENU_GFX.setCursor(lang_box_x + lang_box_w, header_y);
+          MENU_GFX.print(count_buf);
+        }
       }
 
       // No header separator line here anymore - the input box's own top
@@ -5858,41 +8147,69 @@
       // Input preview - tail of what's typed so far (leading "..." if it
       // doesn't all fit), with a caret after the last character. Same
       // "show the tail, not the head" idea as MSNGR_MSG_DETAIL's word-wrap,
-      // just single-line since there's no vertical room to spare here.
-      // box_y tracks MENU_HEADER_HLINE_Y (1px below it, same as before it moved).
-      const int16_t box_x = 4, box_y = MENU_HEADER_HLINE_Y + 1, box_w = MENU_CONTENT_W, box_h = 9;
+      // just single-line since there's no vertical room to spare here -
+      // EXCEPT for MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH below, which
+      // trades the two now-unused MSNGR_KB_LAYOUT_HEX keyboard rows for a
+      // second preview line instead, so all 32 hex chars are visible at
+      // once with no scrolling.
+      const int16_t box_x = MENU_CONTENT_X, box_y = MENU_HEADER_HLINE_Y + 1, box_w = MENU_CONTENT_W;
+      const uint8_t line_h = 9; // one text line's worth of box height - matches the single-line box's own original box_h
+      const int16_t box_h = hex_mode ? (int16_t)(line_h * 2) : (int16_t)line_h;
       MENU_GFX.drawRect(box_x, box_y, box_w, box_h, SSD1306_WHITE);
-      {
-        std::string shown(msngr_text_entry_buf);
-        size_t full_len = shown.size();
-        int16_t x1, y1; uint16_t tw, th;
-        MENU_GFX.getTextBounds(shown.c_str(), 0, 0, &x1, &y1, &tw, &th);
-        const int16_t max_w = box_w - 6;
-        while (tw > (uint16_t)max_w && !shown.empty()) {
-          shown.erase(0, 1);
-          std::string probe = "..." + shown;
-          MENU_GFX.getTextBounds(probe.c_str(), 0, 0, &x1, &y1, &tw, &th);
-        }
-        if (shown.size() < full_len) shown = "..." + shown;
-        MENU_GFX.getTextBounds(shown.c_str(), 0, 0, &x1, &y1, &tw, &th);
-        MENU_GFX.setCursor(box_x + 2, box_y + 6); // nudged up 1px, per user request on real hardware
-        MENU_GFX.print(shown.c_str());
-        int16_t caret_x = box_x + 2 + (int16_t)tw + 1;
-        if (caret_x < box_x + box_w - 1) MENU_GFX.drawFastVLine(caret_x, box_y + 1, box_h - 2, SSD1306_WHITE);
+      if (hex_mode) {
+        // Hard-capped at 32 chars (Menu.h's own MSNGR_TEXT_ENTRY_PURPOSE_
+        // BOOKMARK_HASH max_len) split 16/16 - always fits this box_w at
+        // Org_01's width (MSNGR_MSG_DETAIL_CHARS_PER_LINE=20 already fits
+        // 20 chars in the same MENU_CONTENT_W elsewhere), so unlike the
+        // scrolling tail below this never needs to measure/trim.
+        std::string full(msngr_text_entry_buf);
+        std::string line1 = full.size() > 16 ? full.substr(0, 16) : full;
+        std::string line2 = full.size() > 16 ? full.substr(16) : "";
+        MENU_GFX.setCursor(box_x + 2, box_y + 6);
+        MENU_GFX.print(line1.c_str());
+        MENU_GFX.setCursor(box_x + 2, box_y + 6 + line_h);
+        MENU_GFX.print(line2.c_str());
+
+        bool caret_on_line2 = full.size() >= 16;
+        const std::string &caret_line = caret_on_line2 ? line2 : line1;
+        int16_t cx1, cy1; uint16_t cw, ch;
+        MENU_GFX.getTextBounds(caret_line.c_str(), 0, 0, &cx1, &cy1, &cw, &ch);
+        int16_t caret_x = box_x + 2 + (int16_t)cw + 1;
+        int16_t caret_line_y = caret_on_line2 ? box_y + line_h : box_y;
+        if (caret_x < box_x + box_w - 1) MENU_GFX.drawFastVLine(caret_x, caret_line_y + 1, line_h - 2, SSD1306_WHITE);
+      } else {
+        // Border already drawn above (shared with the hex_mode branch) -
+        // draw_msngr_compose_box() draws its own too, a harmless redundant
+        // redraw of the same rect rather than restructuring that shared
+        // line just to avoid it.
+        draw_msngr_compose_box(box_y);
       }
 
       // Keyboard grid - reserve extra width for the last (action) column,
-      // sized to the widest action label ("SPACE"), split the rest evenly
-      // across the other 10 columns, and hand any leftover pixels to the
-      // first few columns - same approach meshtastic's own
+      // sized to the widest action label this layout actually uses
+      // ("SPACE" normally; hex entry has no SPACE/Shift cell, so "SAVE"/
+      // "BACK" - both 4 chars - are the widest it needs), split the rest
+      // evenly across the other 10 columns, and hand any leftover pixels
+      // to the first few columns - same approach meshtastic's own
       // VirtualKeyboard::draw() uses, just against Adafruit_GFX instead of
       // OLEDDisplay.
+      //
+      // row_h is always the standard MSNGR_KB_ROWS(4)-row height, even in
+      // hex_mode - NOT (grid_bottom-grid_top)/msngr_kb_active_rows(),
+      // which would stretch hex entry's 2 rows to fill all the vertical
+      // space its own taller 2-line preview box left behind, ending up
+      // visibly taller than every other keyboard screen. Any space below
+      // the 2 actual rows (grid_bottom - grid_top - kb_rows*row_h) is
+      // just left blank instead, on request - same "don't stretch cells
+      // to fill unused space" call already made for MSNGR_KB_LAYOUT_HEX's
+      // column widths below.
+      const uint8_t kb_rows = msngr_kb_active_rows();
       const int16_t grid_top = box_y + box_h + 1;
       const int16_t grid_bottom = MENU_LIST_FOOTER_HLINE_Y;
-      const uint8_t row_h = (uint8_t)((grid_bottom - grid_top) / MSNGR_KB_ROWS);
+      const uint8_t row_h = (uint8_t)((grid_bottom - (box_y + (int16_t)line_h + 1)) / MSNGR_KB_ROWS);
 
       int16_t x1, y1; uint16_t last_col_w, th;
-      MENU_GFX.getTextBounds("SPACE", 0, 0, &x1, &y1, &last_col_w, &th);
+      MENU_GFX.getTextBounds(hex_mode ? "SAVE" : "SPACE", 0, 0, &x1, &y1, &last_col_w, &th);
       last_col_w += 4;
       const uint8_t left_cols = MSNGR_KB_COLS - 1;
       int16_t usable_w = MENU_CONTENT_W - last_col_w;
@@ -5911,25 +8228,39 @@
       col_x[left_cols] = running_x;
       col_w[left_cols] = last_col_w;
 
-      const uint8_t cur_row = msngr_kb_cursor / MSNGR_KB_COLS;
-      const uint8_t cur_col = msngr_kb_cursor % MSNGR_KB_COLS;
+      uint8_t cur_row, cur_col;
+      msngr_kb_cursor_rc(msngr_kb_cursor, cur_row, cur_col);
 
-      for (uint8_t r = 0; r < MSNGR_KB_ROWS; r++) {
+      for (uint8_t r = 0; r < kb_rows; r++) {
         for (uint8_t c = 0; c < MSNGR_KB_COLS; c++) {
-          char ch = (msngr_kb_lang_ru ? MSNGR_KB_LAYOUT_RU : MSNGR_KB_LAYOUT)[r][c];
+          char ch = msngr_kb_active_layout()[r][c];
           uint8_t type = msngr_kb_key_type(ch);
+          if (type == MSNGR_KB_NONE) continue; // MSNGR_KB_LAYOUT_HEX's unused cells - nothing drawn, not even a blank button
+          // col_x/col_w (computed above, shared by every row) - not a
+          // per-row layout, so MSNGR_KB_LAYOUT_HEX's '0'-'9' and 'A'-'F'
+          // land in identical columns, and DEL/SAVE/BACK all land in the
+          // exact same rightmost column, on request.
           int16_t kx = col_x[c];
           int16_t ky = grid_top + r * row_h;
           int16_t kw = col_w[c];
+          if (type == MSNGR_KB_TYPE_TOGGLE) {
+            // Spans every narrow column the digit/letter rows above it
+            // use (col 0 through the one right before the action column)
+            // instead of just its own col 0 cell - "LXMF"/"Propagation"
+            // need far more room than a single digit-width cell, and
+            // nothing else lives in row 2's other cells to compete for it.
+            kw = col_x[left_cols] - col_x[0];
+          }
 
           char label_buf[2];
           const char *label;
           switch (type) {
-            case MSNGR_KB_BACKSPACE: label = "DEL"; break;
-            case MSNGR_KB_SEND:      label = "SEND"; break;
-            case MSNGR_KB_SPACE:     label = "SPACE"; break;
-            case MSNGR_KB_BACK:      label = "BACK"; break;
-            case MSNGR_KB_SHIFT:     label = msngr_kb_shift_on ? "^^" : "^"; break;
+            case MSNGR_KB_BACKSPACE:   label = "DEL"; break;
+            case MSNGR_KB_SEND:        label = hex_mode ? "SAVE" : "SEND"; break; // hex_mode saves a bookmark locally, nothing goes out over the air - "SEND" would be misleading
+            case MSNGR_KB_SPACE:       label = "SPACE"; break;
+            case MSNGR_KB_BACK:        label = "BACK"; break;
+            case MSNGR_KB_SHIFT:       label = msngr_kb_shift_on ? "^^" : "^"; break;
+            case MSNGR_KB_TYPE_TOGGLE: label = msngr_kb_bookmark_type == MSNGR_BOOKMARK_TYPE_PROPAGATION ? "Propagation" : "LXMF"; break;
             default: {
               char c2 = msngr_kb_apply_shift(ch, msngr_kb_shift_on);
               label_buf[0] = c2; label_buf[1] = 0;
@@ -5949,16 +8280,38 @@
           uint16_t lw, lh;
           int16_t lx1, ly1;
           MENU_GFX.getTextBounds(label, 0, 0, &lx1, &ly1, &lw, &lh);
-          int16_t label_x = kx + (kw - (int16_t)lw + 1) / 2;
-          if (label_x < kx) label_x = kx;
           int16_t label_y = ky + row_h - 3; // nudged up 1px, per user request on real hardware - fits the key boxes better
-          MENU_GFX.setCursor(label_x, label_y);
-          MENU_GFX.print(label);
+
+          if (type == MSNGR_KB_TYPE_TOGGLE) {
+            // Per user request: prefixes the label with the same node/
+            // propagation-node icons already used elsewhere (Graphics.h) -
+            // icon+label centered together as one unit in the cell, same
+            // reasoning MENU_ROW_TEXT_X_ICONS's own icon+text pairing
+            // uses elsewhere, just centered here instead of left-anchored.
+            bool is_prop = (msngr_kb_bookmark_type == MSNGR_BOOKMARK_TYPE_PROPAGATION);
+            const uint8_t *type_icon = is_prop ? bm_menu_icon_msngr_prop_node : bm_menu_icon_msngr_node;
+            uint8_t type_icon_w = is_prop ? MENU_ICON_W_MSNGR_PROP_NODE : MENU_ICON_W_MSNGR_NODE;
+            const int16_t icon_gap = 3;
+            int16_t combined_w = (int16_t)type_icon_w + icon_gap + (int16_t)lw;
+            int16_t combined_x = kx + (kw - combined_w) / 2;
+            if (combined_x < kx) combined_x = kx;
+            int16_t icon_y = ky + (row_h - MENU_ICON_H) / 2;
+            uint16_t fg = selected ? SSD1306_BLACK : SSD1306_WHITE;
+            uint16_t bg = selected ? SSD1306_WHITE : SSD1306_BLACK;
+            MENU_GFX.drawBitmap(combined_x, icon_y, type_icon, type_icon_w, MENU_ICON_H, fg, bg);
+            MENU_GFX.setCursor(combined_x + type_icon_w + icon_gap, label_y);
+            MENU_GFX.print(label);
+          } else {
+            int16_t label_x = kx + (kw - (int16_t)lw + 1) / 2;
+            if (label_x < kx) label_x = kx;
+            MENU_GFX.setCursor(label_x, label_y);
+            MENU_GFX.print(label);
+          }
         }
       }
 
       MENU_GFX.setTextColor(SSD1306_WHITE);
-      MENU_GFX.drawFastHLine(4, MENU_LIST_FOOTER_HLINE_Y, MENU_CONTENT_W, SSD1306_WHITE);
+      MENU_GFX.drawFastHLine(MENU_CONTENT_X, MENU_LIST_FOOTER_HLINE_Y, MENU_CONTENT_W, SSD1306_WHITE);
       MENU_GFX.setCursor(6, MENU_LIST_FOOTER_TEXT_Y);
       #if HAS_ENCODER == true
         if (encoder_enabled) MENU_GFX.print("turn:move press:open");
@@ -5990,7 +8343,7 @@
       MENU_GFX.setTextColor(SSD1306_WHITE);
       MENU_GFX.setCursor(6, MENU_HEADER_TEXT_Y);
       MENU_GFX.print("MEMORY");
-      MENU_GFX.drawFastHLine(4, MENU_HEADER_HLINE_Y, MENU_CONTENT_W, SSD1306_WHITE);
+      MENU_GFX.drawFastHLine(MENU_CONTENT_X, MENU_HEADER_HLINE_Y, MENU_CONTENT_W, SSD1306_WHITE);
 
       const uint8_t row_h = MENU_LIST_ROW_H;
       const int16_t bar_x = 46;
@@ -6002,7 +8355,7 @@
       // right-aligned per row.
       int16_t x1, y1; uint16_t pct_field_w, th;
       MENU_GFX.getTextBounds("100%", 0, 0, &x1, &y1, &pct_field_w, &th);
-      const int16_t row_right  = 4 + MENU_CONTENT_W - 2;
+      const int16_t row_right  = MENU_CONTENT_X + MENU_CONTENT_W - 2;
       const int16_t pct_left   = row_right - pct_field_w;
       const int16_t bar_w      = (pct_left - 4) - bar_x;
 
@@ -6011,7 +8364,7 @@
         uint8_t y = row_top + MENU_LIST_BASELINE_OFF;
         uint16_t fg = SSD1306_WHITE;
         if (i == mem_menu_cursor) {
-          MENU_GFX.fillRect(4, row_top, MENU_CONTENT_W, row_h - 1, SSD1306_WHITE);
+          MENU_GFX.fillRect(MENU_CONTENT_X, row_top, MENU_CONTENT_W, row_h - 1, SSD1306_WHITE);
           fg = SSD1306_BLACK;
         }
         MENU_GFX.setTextColor(fg);
@@ -6091,7 +8444,7 @@
       }
 
       MENU_GFX.setTextColor(SSD1306_WHITE);
-      MENU_GFX.drawFastHLine(4, MENU_LIST_FOOTER_HLINE_Y, MENU_CONTENT_W, SSD1306_WHITE);
+      MENU_GFX.drawFastHLine(MENU_CONTENT_X, MENU_LIST_FOOTER_HLINE_Y, MENU_CONTENT_W, SSD1306_WHITE);
       MENU_GFX.setCursor(6, MENU_LIST_FOOTER_TEXT_Y);
       #if HAS_ENCODER == true
         if (encoder_enabled) MENU_GFX.print("turn:move press:open");
@@ -6108,7 +8461,7 @@
     MENU_GFX.setTextColor(SSD1306_WHITE);
     MENU_GFX.setCursor(6, MENU_HEADER_TEXT_Y);
     MENU_GFX.print(title);
-    MENU_GFX.drawFastHLine(4, MENU_EDIT_HEADER_HLINE_Y, MENU_CONTENT_W, SSD1306_WHITE);
+    MENU_GFX.drawFastHLine(MENU_CONTENT_X, MENU_EDIT_HEADER_HLINE_Y, MENU_CONTENT_W, SSD1306_WHITE);
 
     MENU_GFX.setTextSize(2);
     int16_t x1, y1; uint16_t w, h;
@@ -6133,7 +8486,7 @@
     MENU_GFX.setCursor(MENU_EDIT_ARROW_R_EDGE - aw, MENU_EDIT_ARROW_Y);
     MENU_GFX.print(">");
 
-    MENU_GFX.drawFastHLine(4, MENU_EDIT_FOOTER_HLINE_Y, MENU_CONTENT_W, SSD1306_WHITE);
+    MENU_GFX.drawFastHLine(MENU_CONTENT_X, MENU_EDIT_FOOTER_HLINE_Y, MENU_CONTENT_W, SSD1306_WHITE);
     MENU_GFX.setCursor(6, MENU_EDIT_FOOTER_TEXT_Y);
     #if HAS_ENCODER == true
       if (encoder_enabled) MENU_GFX.print("turn:adjust press:ok");
@@ -6161,7 +8514,7 @@
       MENU_GFX.setTextColor(SSD1306_WHITE);
       MENU_GFX.setCursor(6, MENU_HEADER_TEXT_Y);
       MENU_GFX.print(title);
-      MENU_GFX.drawFastHLine(4, MENU_EDIT_HEADER_HLINE_Y, 120, SSD1306_WHITE);
+      MENU_GFX.drawFastHLine(MENU_CONTENT_X, MENU_EDIT_HEADER_HLINE_Y, MENU_CONTENT_W, SSD1306_WHITE);
 
       // Same font as the SSID/PSK screen's typed content (TEXT_ENTRY_FONT,
       // Tamsyn6x12 - see draw_menu_text_edit_disp()) - title/divider/footer
@@ -6208,7 +8561,7 @@
       MENU_GFX.setFont(MENU_FONT);
       MENU_GFX.setTextSize(1);
       MENU_GFX.setTextColor(SSD1306_WHITE);
-      MENU_GFX.drawFastHLine(4, MENU_EDIT_FOOTER_HLINE_Y, 120, SSD1306_WHITE);
+      MENU_GFX.drawFastHLine(MENU_CONTENT_X, MENU_EDIT_FOOTER_HLINE_Y, MENU_CONTENT_W, SSD1306_WHITE);
       MENU_GFX.setCursor(6, MENU_EDIT_FOOTER_TEXT_Y);
       #if HAS_ENCODER == true
         if (encoder_enabled) MENU_GFX.print("turn:adjust press:ok");
@@ -6239,7 +8592,7 @@
       // about here since it'd otherwise be the one screen on this page
       // that doesn't match what's shown everywhere else.
       MENU_GFX.print("SET TIME/DATE UTC");
-      MENU_GFX.drawFastHLine(4, MENU_EDIT_HEADER_HLINE_Y, 120, SSD1306_WHITE);
+      MENU_GFX.drawFastHLine(MENU_CONTENT_X, MENU_EDIT_HEADER_HLINE_Y, MENU_CONTENT_W, SSD1306_WHITE);
 
       MENU_GFX.setFont(TEXT_ENTRY_FONT);
       MENU_GFX.setTextSize(1);
@@ -6292,7 +8645,7 @@
       MENU_GFX.setFont(MENU_FONT);
       MENU_GFX.setTextSize(1);
       MENU_GFX.setTextColor(SSD1306_WHITE);
-      MENU_GFX.drawFastHLine(4, MENU_EDIT_FOOTER_HLINE_Y, 120, SSD1306_WHITE);
+      MENU_GFX.drawFastHLine(MENU_CONTENT_X, MENU_EDIT_FOOTER_HLINE_Y, MENU_CONTENT_W, SSD1306_WHITE);
       MENU_GFX.setCursor(6, MENU_EDIT_FOOTER_TEXT_Y);
       #if HAS_ENCODER == true
         if (encoder_enabled) MENU_GFX.print("turn:adjust press:ok");
@@ -6314,7 +8667,7 @@
       MENU_GFX.setTextColor(SSD1306_WHITE);
       MENU_GFX.setCursor(6, MENU_HEADER_TEXT_Y);
       MENU_GFX.print(title);
-      MENU_GFX.drawFastHLine(4, MENU_EDIT_HEADER_HLINE_Y, 120, SSD1306_WHITE);
+      MENU_GFX.drawFastHLine(MENU_CONTENT_X, MENU_EDIT_HEADER_HLINE_Y, MENU_CONTENT_W, SSD1306_WHITE);
 
       char candidate[6];
       if (wheel_is_del(wheel_idx))       sprintf(candidate, "DEL");
@@ -6331,7 +8684,7 @@
       // FreeMono9pt7b is monospace, but the window-growing logic still
       // measures real pixel widths rather than assuming a fixed advance,
       // so it stays correct if the font is ever swapped again.
-      const uint16_t max_width = 120;
+      const uint16_t max_width = MENU_CONTENT_W;
       int16_t cx1, cy1; uint16_t cw, ch;
       MENU_GFX.getTextBounds(candidate, 0, 0, &cx1, &cy1, &cw, &ch);
       uint16_t remaining_width = (max_width > cw + 3) ? (max_width - cw - 3) : 0;
@@ -6348,10 +8701,10 @@
 
       int16_t x1, y1; uint16_t pw, ph;
       MENU_GFX.getTextBounds(prefix_start, 0, 0, &x1, &y1, &pw, &ph);
-      uint16_t cand_x = 4 + pw;
+      uint16_t cand_x = MENU_CONTENT_X + pw;
 
       MENU_GFX.setTextColor(SSD1306_WHITE);
-      MENU_GFX.setCursor(4, 32);
+      MENU_GFX.setCursor(MENU_CONTENT_X, 32);
       MENU_GFX.print(prefix_start);
 
       // FreeMono9pt7b glyphs span roughly baseline-9 (ascenders) to
@@ -6365,7 +8718,7 @@
       MENU_GFX.setFont(MENU_FONT);
       MENU_GFX.setTextSize(1);
       MENU_GFX.setTextColor(SSD1306_WHITE);
-      MENU_GFX.drawFastHLine(4, MENU_EDIT_FOOTER_HLINE_Y, 120, SSD1306_WHITE);
+      MENU_GFX.drawFastHLine(MENU_CONTENT_X, MENU_EDIT_FOOTER_HLINE_Y, MENU_CONTENT_W, SSD1306_WHITE);
       MENU_GFX.setCursor(6, MENU_EDIT_FOOTER_TEXT_Y);
       // Same encoder_enabled branch as every other footer hint in this
       // file (e.g. the main list's "turn:move press:open" vs "tap:next
@@ -6757,6 +9110,13 @@
           sprintf(valbufs[BT_ITEM_UNPAIR], ">"); // opens a confirm dialog, not an inline value
         #endif
 
+        #if HAS_BLE_HID_HOST == true
+          labels[BT_ITEM_KEYBOARD] = "BLE Keyboard";
+          sprintf(valbufs[BT_ITEM_KEYBOARD], ">"); // opens MENU_STATE_BLEKBD_LIST
+          icons[BT_ITEM_KEYBOARD] = bm_menu_icon_blekbd;
+          icon_widths[BT_ITEM_KEYBOARD] = MENU_ICON_W_BLEKBD;
+        #endif
+
         labels[BT_ITEM_BACK] = "BACK";
         valbufs[BT_ITEM_BACK][0] = 0;
         // Explicit here (not auto-detected) since this list already builds
@@ -6765,10 +9125,11 @@
         icons[BT_ITEM_BACK] = bm_menu_icon_back;
         icon_widths[BT_ITEM_BACK] = MENU_ICON_W_BACK;
 
-        // icon_col_shared=false - only Settings (the one row with an icon)
-        // gets the wider indent; MAC/Bonds/Forget Bonds stay at the plain
-        // x=8 the list used before Settings existed. BACK still auto-gets
-        // its own icon+narrow position via the explicit icons[BT_ITEM_BACK]
+        // icon_col_shared=false - Settings and BLE Keyboard (the two rows
+        // with their own icon) each shift just their own label to make
+        // room; MAC/Bonds/Forget Bonds stay at the plain x=8 the list used
+        // before Settings existed. BACK still auto-gets its own icon+narrow
+        // position via the explicit icons[BT_ITEM_BACK]
         // entry above, same as every other plain submenu list.
         draw_menu_list_disp("BLUETOOTH", labels, valbufs, BT_ITEM_COUNT, bt_menu_cursor, icons, icon_widths, nullptr, false);
       }
@@ -6823,6 +9184,112 @@
           draw_menu_list_disp("FORGET BONDS?", labels, valbufs, 2, bt_unpair_confirm_cursor);
         }
       #endif
+    #endif
+    #if HAS_BLE_HID_HOST == true
+      else if (menu_state == MENU_STATE_BLEKBD_LIST) {
+        const char *labels[BLEKBD_ITEM_COUNT];
+        char valbufs[BLEKBD_ITEM_COUNT][24];
+
+        labels[BLEKBD_ITEM_ENABLED] = "Enabled";
+        sprintf(valbufs[BLEKBD_ITEM_ENABLED], staged_blekbd_enabled ? "ON" : "OFF");
+
+        labels[BLEKBD_ITEM_STATUS] = "Status";
+        if (!staged_blekbd_enabled) {
+          sprintf(valbufs[BLEKBD_ITEM_STATUS], "Disabled");
+        } else if (!blekbd_peer_stored) {
+          sprintf(valbufs[BLEKBD_ITEM_STATUS], "Not Paired");
+        } else if (blekbd_open_dev) {
+          sprintf(valbufs[BLEKBD_ITEM_STATUS], "Connected");
+        } else {
+          sprintf(valbufs[BLEKBD_ITEM_STATUS], "Not Connected");
+        }
+
+        labels[BLEKBD_ITEM_SCAN] = "Scan for Keyboard";
+        sprintf(valbufs[BLEKBD_ITEM_SCAN], ">");
+
+        labels[BLEKBD_ITEM_FORGET] = "Forget Keyboard";
+        sprintf(valbufs[BLEKBD_ITEM_FORGET], ">");
+
+        labels[BLEKBD_ITEM_BACK] = "BACK";
+        valbufs[BLEKBD_ITEM_BACK][0] = 0;
+
+        draw_menu_list_disp("BLE KEYBOARD", labels, valbufs, BLEKBD_ITEM_COUNT, blekbd_menu_cursor);
+      }
+      else if (menu_state == MENU_STATE_BLEKBD_EDIT) {
+        draw_menu_edit_disp("ENABLED", staged_blekbd_enabled ? "ON" : "OFF");
+      }
+      else if (menu_state == MENU_STATE_BLEKBD_SCAN) {
+        uint8_t row_count = blekbd_scan_row_count();
+        const char *labels[BLEKBD_MAX_DISCOVERED + 1];
+        char valbufs[BLEKBD_MAX_DISCOVERED + 1][24];
+        const uint8_t *icons[BLEKBD_MAX_DISCOVERED + 1] = { nullptr };
+        uint8_t icon_widths[BLEKBD_MAX_DISCOVERED + 1] = { 0 };
+
+        uint8_t any = 0;
+        for (uint8_t i = 0; i < BLEKBD_MAX_DISCOVERED; i++) if (blekbd_discovered[i].in_use) any++;
+
+        if (any == 0) {
+          labels[0] = "Scanning...";
+          valbufs[0][0] = 0;
+        } else {
+          uint8_t vis = 0;
+          for (uint8_t i = 0; i < BLEKBD_MAX_DISCOVERED; i++) {
+            if (!blekbd_discovered[i].in_use) continue;
+            labels[vis] = blekbd_discovered[i].name[0] ? blekbd_discovered[i].name : "(unnamed)";
+            sprintf(valbufs[vis], "%ddBm", (int)blekbd_discovered[i].rssi);
+            icons[vis] = bm_menu_icon_blekbd;
+            icon_widths[vis] = MENU_ICON_W_BLEKBD;
+            vis++;
+          }
+        }
+        labels[row_count - 1] = "BACK";
+        valbufs[row_count - 1][0] = 0;
+
+        // icon_col_shared=false - only the real device rows (each with its
+        // own icons[vis] entry above) shift for the glyph; "Scanning..."
+        // (no devices found yet) stays at the plain x=8 that placeholder
+        // always used. BACK still auto-gets bm_menu_icon_back via the
+        // no-explicit-icon+label=="BACK" fallback (icons[row_count-1] is
+        // left nullptr above), same as every other plain submenu list.
+        draw_menu_list_disp("SCAN FOR KEYBOARD", labels, valbufs, row_count, blekbd_scan_cursor, icons, icon_widths, nullptr, false);
+      }
+      else if (menu_state == MENU_STATE_BLEKBD_PAIR_CONFIRM) {
+        const char *labels[2] = { "PAIR", "CANCEL" };
+        char valbufs[2][24];
+        valbufs[0][0] = 0;
+        valbufs[1][0] = 0;
+        char title[24];
+        snprintf(title, sizeof(title), "PAIR: %s", blekbd_pending_name[0] ? blekbd_pending_name : "(unnamed)");
+        draw_menu_list_disp(title, labels, valbufs, 2, blekbd_pair_confirm_cursor);
+      }
+      else if (menu_state == MENU_STATE_BLEKBD_PAIRING) {
+        // Reads blekbd_pair_result fresh on every redraw - blekbd_hidh_cb()
+        // (BLEKeyboardHost.h) is what actually advances it, same "read live
+        // state, don't poll from here" split as MSNGR_SEND_RESULT. Auto-
+        // returns to MENU_STATE_BLEKBD_LIST on success after
+        // BLEKBD_PAIR_RESULT_POPUP_MS (blekbd_pair_result_process(),
+        // polled from loop()) - FAILED waits for manual BACK.
+        const char *labels[2];
+        char valbufs[2][24];
+        const char *status;
+        switch (blekbd_pair_result) {
+          case BLEKBD_PAIR_OK:     status = "Paired!"; break;
+          case BLEKBD_PAIR_FAILED: status = "Failed";  break;
+          default:                 status = "Pairing...";  break;
+        }
+        labels[0] = status;
+        valbufs[0][0] = 0;
+        labels[1] = "BACK";
+        valbufs[1][0] = 0;
+        draw_menu_list_disp("PAIRING", labels, valbufs, 2, blekbd_pairing_cursor);
+      }
+      else if (menu_state == MENU_STATE_BLEKBD_FORGET_CONFIRM) {
+        const char *labels[2] = { "FORGET", "CANCEL" };
+        char valbufs[2][24];
+        valbufs[0][0] = 0;
+        valbufs[1][0] = 0;
+        draw_menu_list_disp("FORGET KEYBOARD?", labels, valbufs, 2, blekbd_forget_confirm_cursor);
+      }
     #endif
     #if HAS_ETHERNET == true
       else if (menu_state == MENU_STATE_ETH_LIST) {
@@ -7255,6 +9722,11 @@
           sprintf(valbufs[URNS_ITEM_PROBE_DEST], "N/A");
         }
 
+        labels[URNS_ITEM_VAULT] = "PIN Protection";
+        // Reflects the live vault_enabled flag, not a staged value - this
+        // row has no staged/commit-on-exit state (see its own comment).
+        sprintf(valbufs[URNS_ITEM_VAULT], vault_enabled ? "ON" : "OFF");
+
         labels[URNS_ITEM_PATHS] = "Path Table";
         sprintf(valbufs[URNS_ITEM_PATHS], "%u", (unsigned)RNS::Transport::new_path_table().size());
 
@@ -7454,6 +9926,11 @@
         icons[MSNGR_TOP_ITEM_ANNOUNCE_NODE] = bm_menu_icon_announce_node;
         icon_widths[MSNGR_TOP_ITEM_ANNOUNCE_NODE] = MENU_ICON_W_ANNOUNCE_NODE;
 
+        labels[MSNGR_TOP_ITEM_SYNC_PROP] = "Sync to Prop";
+        valbufs[MSNGR_TOP_ITEM_SYNC_PROP][0] = 0;
+        icons[MSNGR_TOP_ITEM_SYNC_PROP] = bm_menu_icon_msngr_prop_node;
+        icon_widths[MSNGR_TOP_ITEM_SYNC_PROP] = MENU_ICON_W_MSNGR_PROP_NODE;
+
         labels[MSNGR_TOP_ITEM_SETTINGS] = "Settings";
         valbufs[MSNGR_TOP_ITEM_SETTINGS][0] = 0;
         icons[MSNGR_TOP_ITEM_SETTINGS] = bm_menu_icon_msngr_settings;
@@ -7479,6 +9956,16 @@
         const char *labels[MENU_MSNGR_LIST_MAX_ROWS + 1];
         char label_bufs[MENU_MSNGR_LIST_MAX_ROWS][MSNGR_NAME_MAX_LEN + 1];
         char valbufs[MENU_MSNGR_LIST_MAX_ROWS + 1][24];
+        const uint8_t *icons[MENU_MSNGR_LIST_MAX_ROWS + 1] = { nullptr };
+        uint8_t icon_widths[MENU_MSNGR_LIST_MAX_ROWS + 1] = { 0 };
+        // Per-row nudges (icon_col_shared=false path, same idiom
+        // MENU_STATE_MSNGR_PEER's incoming-message rows use) - icon 1px
+        // from the screen's left edge (icon_dx=-2, same delta that landed
+        // the incoming-message icon at MENU_ROW_ICON_X-2) and the label
+        // 2px clear of the icon's own right edge, not draw_menu_list_
+        // disp()'s wider default shared-column gap.
+        int8_t icon_dx[MENU_MSNGR_LIST_MAX_ROWS + 1] = { 0 };
+        int8_t text_dx[MENU_MSNGR_LIST_MAX_ROWS + 1] = { 0 };
 
         size_t conv_count = urns_message_store ? urns_message_store->get_conversation_count() : 0;
         if (conv_count == 0) {
@@ -7494,39 +9981,73 @@
             LXMF::MessageStore::ConversationInfo info = urns_message_store->get_conversation_info(convs[i]);
             if (info.unread_count > 0) sprintf(valbufs[i], "(%u)", (unsigned)info.unread_count);
             else valbufs[i][0] = 0;
+            icons[i] = bm_menu_icon_msngr_node;
+            icon_widths[i] = MENU_ICON_W_MSNGR_NODE;
+            icon_dx[i] = -2;
+            text_dx[i] = MENU_ROW_ICON_X + icon_dx[i] + MENU_ICON_W_MSNGR_NODE + 2 - MENU_ROW_TEXT_X_ICONS;
           }
         }
         labels[row_count - 1] = "BACK";
         valbufs[row_count - 1][0] = 0;
 
-        draw_menu_list_disp("INBOX", labels, valbufs, row_count, msngr_inbox_cursor);
+        // icon_col_shared=false - only the conversation rows opted into
+        // icons[], BACK keeps its own auto-icon path (draw_menu_list_
+        // disp()'s own comment), same shape as MENU_STATE_MSNGR_PEER above.
+        draw_menu_list_disp("INBOX", labels, valbufs, row_count, msngr_inbox_cursor, icons, icon_widths, icon_dx, false, text_dx);
       } else if (menu_state == MENU_STATE_MSNGR_BOOKMARKS) {
+        // +2, not +1 - bookmark rows plus "Add by Hash" (msngr_bookmarks_
+        // row_count()'s own comment) plus BACK.
         uint8_t row_count = msngr_bookmarks_row_count();
-        const char *labels[MSNGR_MAX_BOOKMARKS + 1];
-        char valbufs[MSNGR_MAX_BOOKMARKS + 1][24];
+        const char *labels[MSNGR_MAX_BOOKMARKS + 2];
+        char label_bufs[MSNGR_MAX_BOOKMARKS][MSNGR_NAME_MAX_LEN + 1];
+        char valbufs[MSNGR_MAX_BOOKMARKS + 2][24];
+        const uint8_t *icons[MSNGR_MAX_BOOKMARKS + 2] = { nullptr };
+        uint8_t icon_widths[MSNGR_MAX_BOOKMARKS + 2] = { 0 };
 
-        if (msngr_bookmark_count == 0) {
-          labels[0] = "No Bookmarks";
-          valbufs[0][0] = 0;
-        } else {
-          uint8_t vis = 0;
-          for (uint8_t i = 0; i < MSNGR_MAX_BOOKMARKS; i++) {
-            if (!msngr_bookmarks[i].in_use) continue;
-            // Points directly at the persistent global entry's own name
-            // buffer (not a stack-local copy) - safe since msngr_bookmarks
-            // outlives this draw call, same "labels can point at storage
-            // that isn't a string literal" shape as PATH TABLE's hash rows,
-            // just not needing a temporary buffer here since the source is
-            // already stable.
-            labels[vis] = msngr_bookmarks[i].name;
-            valbufs[vis][0] = 0;
-            vis++;
+        uint8_t vis = 0;
+        for (uint8_t i = 0; i < MSNGR_MAX_BOOKMARKS; i++) {
+          if (!msngr_bookmarks[i].in_use) continue;
+          // Through messenger_peer_display_name(), not msngr_bookmarks[i].
+          // name directly - an "Add by Hash" bookmark (Menu.h's own SEND-
+          // key handler for MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH) is
+          // deliberately saved with an empty name so it keeps falling
+          // through to that function's live Identity::recall_app_data()
+          // backfill check until a real name resolves - reading the raw
+          // buffer here would print a blank row in the meantime instead of
+          // the same hex/live-name fallback the peer screen already shows.
+          RNS::Bytes bm_hash(msngr_bookmarks[i].hash, LXMF::PEER_HASH_SIZE);
+          snprintf(label_bufs[vis], sizeof(label_bufs[vis]), "%s", messenger_peer_display_name(bm_hash).c_str());
+          labels[vis] = label_bufs[vis];
+          valbufs[vis][0] = 0;
+          // Same node glyph MENU_STATE_MSNGR_INBOX's conversation rows use
+          // (Graphics.h) - a bookmark is still just a saved peer/node -
+          // except Propagation-type bookmarks, which get their own
+          // broadcast-tower glyph so they read as distinct from LXMF peers
+          // at a glance (they don't behave like one - see
+          // messenger_bookmark_is_prop_node()'s own comment, Messenger.h).
+          if (msngr_bookmarks[i].type == MSNGR_BOOKMARK_TYPE_PROPAGATION) {
+            icons[vis] = bm_menu_icon_msngr_prop_node;
+            icon_widths[vis] = MENU_ICON_W_MSNGR_PROP_NODE;
+          } else {
+            icons[vis] = bm_menu_icon_msngr_node;
+            icon_widths[vis] = MENU_ICON_W_MSNGR_NODE;
           }
+          vis++;
+        }
+        if (msngr_bookmark_count < MSNGR_MAX_BOOKMARKS) {
+          labels[vis] = "Add by Hash";
+          valbufs[vis][0] = 0;
+          icons[vis] = bm_menu_icon_msngr_add_by_hash;
+          icon_widths[vis] = MENU_ICON_W_MSNGR_ADD_BY_HASH;
+          vis++;
         }
         labels[row_count - 1] = "BACK";
         valbufs[row_count - 1][0] = 0;
 
-        draw_menu_list_disp("BOOKMARKS", labels, valbufs, row_count, msngr_bookmarks_cursor);
+        // icon_col_shared=false - only the bookmark/Add-by-Hash rows opted
+        // into icons[], BACK keeps its own auto-icon path (draw_menu_list_
+        // disp()'s own comment), same shape as MENU_STATE_MSNGR_INBOX above.
+        draw_menu_list_disp("BOOKMARKS", labels, valbufs, row_count, msngr_bookmarks_cursor, icons, icon_widths, nullptr, false);
       } else if (menu_state == MENU_STATE_MSNGR_ANNOUNCES) {
         uint8_t row_count = msngr_announces_row_count();
         const char *labels[MSNGR_MAX_ANNOUNCES + 1];
@@ -7569,6 +10090,28 @@
         valbufs[row_count - 1][0] = 0;
 
         draw_menu_list_disp("ANNOUNCES", labels, valbufs, row_count, msngr_announces_cursor);
+      } else if (menu_state == MENU_STATE_MSNGR_PEER && messenger_bookmark_is_prop_node(msngr_active_peer_hash)) {
+        // Same fixed action set as msngr_peer_row_count()'s own
+        // is_prop_node branch - no message cache to draw at all (a
+        // propagation node bookmark never has a conversation).
+        const char *labels[MSNGR_PEER_PROP_ACTION_COUNT];
+        char valbufs[MSNGR_PEER_PROP_ACTION_COUNT][24];
+
+        labels[MSNGR_PEER_PROP_ACTION_SYNC] = "Sync";
+        valbufs[MSNGR_PEER_PROP_ACTION_SYNC][0] = 0;
+        labels[MSNGR_PEER_PROP_ACTION_SHOW_HASH] = "Show Hash";
+        valbufs[MSNGR_PEER_PROP_ACTION_SHOW_HASH][0] = 0;
+        bool is_active = messenger_prop_node_is_active(msngr_active_peer_hash);
+        labels[MSNGR_PEER_PROP_ACTION_SET_ACTIVE] = is_active ? "Unset Active" : "Set Active";
+        valbufs[MSNGR_PEER_PROP_ACTION_SET_ACTIVE][0] = 0;
+        labels[MSNGR_PEER_PROP_ACTION_REMOVE] = "Remove Bookmark";
+        valbufs[MSNGR_PEER_PROP_ACTION_REMOVE][0] = 0;
+        labels[MSNGR_PEER_PROP_ACTION_BACK] = "BACK";
+        valbufs[MSNGR_PEER_PROP_ACTION_BACK][0] = 0;
+
+        char title[24];
+        snprintf(title, sizeof(title), "%s", messenger_peer_display_name(msngr_active_peer_hash).c_str());
+        draw_menu_list_disp(title, labels, valbufs, MSNGR_PEER_PROP_ACTION_COUNT, msngr_peer_cursor);
       } else if (menu_state == MENU_STATE_MSNGR_PEER) {
         // Picks up a message that arrived for this peer while the screen
         // is sitting open - see that function's own comment for why this
@@ -7590,6 +10133,13 @@
         uint8_t icon_widths[MSNGR_PEER_MAX_ROWS] = { 0 };
         const uint8_t *right_icons[MSNGR_PEER_MAX_ROWS] = { nullptr };
         uint8_t right_icon_widths[MSNGR_PEER_MAX_ROWS] = { 0 };
+        // Message-row-only nudges (space-saving: pull each direction's
+        // icon+text pair closer to its own screen edge) - zeroed for the
+        // preset/action rows below, which keep draw_menu_list_disp()'s
+        // plain default positions.
+        int8_t icon_dx[MSNGR_PEER_MAX_ROWS] = { 0 };
+        int8_t text_dx[MSNGR_PEER_MAX_ROWS] = { 0 };
+        int8_t right_dx[MSNGR_PEER_MAX_ROWS] = { 0 };
 
         // Reads msngr_peer_cache (Messenger.h, populated once on screen
         // entry/after a send), not MessageStore directly - see that
@@ -7609,18 +10159,83 @@
         // user request, reversed from this feature's first pass (outgoing
         // left/incoming right), to match the "yours on the right" reading
         // convention most chat UIs use.
+        // Marquee-scroll the currently selected message row's snippet -
+        // msngr_peer_cache[].snippet (Messenger.h) can hold up to
+        // MSNGR_PEER_SNIPPET_CAP characters, far more than the fixed
+        // MSNGR_PEER_SCROLL_WINDOW that fits in one row - sliding that
+        // window across it one character every MSNGR_PEER_SCROLL_STEP_MS
+        // reveals the rest of a long message without needing to open
+        // MSG_DETAIL. Only the row the cursor is actually on scrolls (every
+        // other row keeps the plain window starting at 0, same as before
+        // this feature existed). Per user request, a fully-scrolled marquee
+        // now loops: once the tail is reached, it holds there for MSNGR_
+        // PEER_SCROLL_LOOP_PAUSE_MS, then jumps back to the start and
+        // scrolls again, for as long as the row stays selected. Reset (not
+        // just clamped back into bounds) the instant the cursor lands on a
+        // different row - re-selecting a row always restarts its scroll
+        // from the beginning, never resumes mid-way or mid-pause.
+        if (msngr_peer_scroll_row != msngr_peer_cursor) {
+          msngr_peer_scroll_row = msngr_peer_cursor;
+          msngr_peer_scroll_offset = 0;
+          msngr_peer_scroll_last_step_ms = millis();
+          msngr_peer_scroll_paused_since_ms = 0;
+          msngr_peer_scroll_start_pause_until_ms = 0;
+        }
+
         for (uint8_t i = 0; i < msg_rows; i++) {
+          const char *full = msngr_peer_cache[i].snippet;
+          size_t full_len = strlen(full);
+          char windowed[24];
+          // Per user request, the cursor-selected row's own marquee is
+          // always on, exempt from blekbd_marquee_enabled entirely - the
+          // toggle only matters where there's a "background/other rows"
+          // scroll to turn off (MENU_STATE_MSNGR_CHAT, below), which this
+          // screen doesn't have (only ever the one selected row).
+          if (i == msngr_peer_cursor && full_len > MSNGR_PEER_SCROLL_WINDOW) {
+            uint8_t max_offset = (uint8_t)(full_len - MSNGR_PEER_SCROLL_WINDOW);
+            unsigned long now = millis();
+            if (msngr_peer_scroll_offset >= max_offset) {
+              if (msngr_peer_scroll_paused_since_ms == 0) {
+                msngr_peer_scroll_paused_since_ms = now;
+              } else if ((int32_t)(now - msngr_peer_scroll_paused_since_ms) >= (int32_t)MSNGR_PEER_SCROLL_LOOP_PAUSE_MS) {
+                // Loop back to the start - per user request, pause here
+                // too (MSNGR_PEER_SCROLL_START_PAUSE_MS) before actually
+                // scrolling again, so the beginning is readable.
+                msngr_peer_scroll_offset = 0;
+                msngr_peer_scroll_paused_since_ms = 0;
+                msngr_peer_scroll_start_pause_until_ms = now + MSNGR_PEER_SCROLL_START_PAUSE_MS;
+                msngr_peer_scroll_last_step_ms = now;
+              }
+            } else if (msngr_peer_scroll_start_pause_until_ms != 0) {
+              // Still in the post-loop start-pause window - hold at 0
+              // (not a row's very first scroll, which never arms this).
+              if ((int32_t)(now - msngr_peer_scroll_start_pause_until_ms) >= 0) {
+                msngr_peer_scroll_start_pause_until_ms = 0;
+                msngr_peer_scroll_last_step_ms = now;
+              }
+            } else if ((int32_t)(now - msngr_peer_scroll_last_step_ms) >= (int32_t)MSNGR_PEER_SCROLL_STEP_MS) {
+              msngr_peer_scroll_last_step_ms = now;
+              msngr_peer_scroll_offset++;
+            }
+            snprintf(windowed, sizeof(windowed), "%s", full + msngr_peer_scroll_offset);
+          } else {
+            snprintf(windowed, sizeof(windowed), "%s", full);
+          }
+
           if (msngr_peer_cache[i].incoming) {
-            snprintf(label_bufs[i], sizeof(label_bufs[i]), "%s", msngr_peer_cache[i].snippet);
+            snprintf(label_bufs[i], sizeof(label_bufs[i]), "%s", windowed);
             labels[i] = label_bufs[i];
             valbufs[i][0] = 0;
             icons[i] = bm_menu_icon_msngr_msg_incoming;
             icon_widths[i] = MENU_ICON_W_MSNGR_MSG_INCOMING;
+            icon_dx[i] = -2;
+            text_dx[i] = -4;
           } else {
             labels[i] = "";
-            snprintf(valbufs[i], 24, "%s", msngr_peer_cache[i].snippet);
+            snprintf(valbufs[i], 24, "%s", windowed);
             right_icons[i] = bm_menu_icon_msngr_msg_outgoing;
             right_icon_widths[i] = MENU_ICON_W_MSNGR_MSG_OUTGOING;
+            right_dx[i] = 2;
           }
         }
 
@@ -7642,11 +10257,24 @@
         bool is_bookmarked = messenger_bookmark_find(msngr_active_peer_hash) >= 0;
         labels[fixed_base + MSNGR_PEER_FIXED_ACTION_BOOKMARK] = is_bookmarked ? "Remove Bookmark" : "Add Bookmark";
         valbufs[fixed_base + MSNGR_PEER_FIXED_ACTION_BOOKMARK][0] = 0;
+        icons[fixed_base + MSNGR_PEER_FIXED_ACTION_BOOKMARK] = is_bookmarked ? bm_menu_icon_msngr_remove_bookmark : bm_menu_icon_msngr_bookmarks;
+        icon_widths[fixed_base + MSNGR_PEER_FIXED_ACTION_BOOKMARK] = is_bookmarked ? MENU_ICON_W_MSNGR_REMOVE_BOOKMARK : MENU_ICON_W_MSNGR_BOOKMARKS;
 
         labels[fixed_base + MSNGR_PEER_FIXED_ACTION_CLEAR] = "Clear Conversation";
         valbufs[fixed_base + MSNGR_PEER_FIXED_ACTION_CLEAR][0] = 0;
         icons[fixed_base + MSNGR_PEER_FIXED_ACTION_CLEAR] = bm_menu_icon_msngr_delete;
         icon_widths[fixed_base + MSNGR_PEER_FIXED_ACTION_CLEAR] = MENU_ICON_W_MSNGR_DELETE;
+
+        #if HAS_BLE_HID_HOST == true
+          // Renamed from "Chat" per user request - reuses the same
+          // keyboard glyph BT_LIST's own "BLE Keyboard" row uses
+          // (bm_menu_icon_blekbd), since this row's whole point is "compose
+          // with the physical keyboard".
+          labels[fixed_base + MSNGR_PEER_FIXED_ACTION_CHAT] = "Dialog Mode";
+          valbufs[fixed_base + MSNGR_PEER_FIXED_ACTION_CHAT][0] = 0;
+          icons[fixed_base + MSNGR_PEER_FIXED_ACTION_CHAT] = bm_menu_icon_blekbd;
+          icon_widths[fixed_base + MSNGR_PEER_FIXED_ACTION_CHAT] = MENU_ICON_W_BLEKBD;
+        #endif
 
         labels[fixed_base + MSNGR_PEER_FIXED_ACTION_BACK] = "BACK";
         valbufs[fixed_base + MSNGR_PEER_FIXED_ACTION_BACK][0] = 0;
@@ -7657,23 +10285,35 @@
         // message/Ping/Clear Conversation action rows above opted into
         // icons[]/right_icons[], the remaining action rows stay at the
         // plain x=8 they always used.
-        draw_menu_list_disp(title, labels, valbufs, row_count, msngr_peer_cursor, icons, icon_widths, nullptr, false, nullptr, right_icons, right_icon_widths);
+        draw_menu_list_disp(title, labels, valbufs, row_count, msngr_peer_cursor, icons, icon_widths, icon_dx, false, text_dx, right_icons, right_icon_widths, right_dx, msg_rows);
+      } else if (menu_state == MENU_STATE_MSNGR_MSG_DETAIL && msngr_msg_view_active) {
+        // draw_delete_confirm=false - this screen's own Delete row is a
+        // full MENU_STATE_MSNGR_DELETE_CONFIRM screen, reached after
+        // leaving this view, not an in-place overlay (draw_msngr_full_
+        // message_view()'s own comment).
+        draw_msngr_full_message_view(false);
       } else if (menu_state == MENU_STATE_MSNGR_MSG_DETAIL) {
         uint8_t row_count = msngr_msg_detail_row_count();
-        // +3, not +1 - content lines plus the trailing Reply, Delete and
-        // BACK rows.
-        const char *labels[MSNGR_MSG_DETAIL_MAX_LINES + 3];
+        // +4, not +1 - content lines plus the trailing Reply, Delete,
+        // Full Message and BACK rows.
+        const char *labels[MSNGR_MSG_DETAIL_MAX_LINES + 4];
         char label_bufs[MSNGR_MSG_DETAIL_MAX_LINES][MSNGR_MSG_DETAIL_CHARS_PER_LINE + 1];
-        char valbufs[MSNGR_MSG_DETAIL_MAX_LINES + 3][24];
-        const uint8_t *icons[MSNGR_MSG_DETAIL_MAX_LINES + 3] = { nullptr };
-        uint8_t icon_widths[MSNGR_MSG_DETAIL_MAX_LINES + 3] = { 0 };
+        char valbufs[MSNGR_MSG_DETAIL_MAX_LINES + 4][24];
+        const uint8_t *icons[MSNGR_MSG_DETAIL_MAX_LINES + 4] = { nullptr };
+        uint8_t icon_widths[MSNGR_MSG_DETAIL_MAX_LINES + 4] = { 0 };
+        // Per user request: the content-preview rows lose their previous
+        // 8px left padding (draw_menu_list_disp()'s own "plain x=8"
+        // default for icon-less rows) to better use the screen width -
+        // Reply/Delete/Full Message (icons[i] set, below) and BACK (its
+        // own auto-icon path) are unaffected, left at 0/default.
+        int8_t text_dx[MSNGR_MSG_DETAIL_MAX_LINES + 4] = { 0 };
 
         // Reads msngr_msg_detail_cache_* (Messenger.h, populated once
         // when the message row was selected) - same "don't read flash
         // from the render path" reasoning as MENU_STATE_MSNGR_PEER above.
         const std::string &content = msngr_msg_detail_cache_content;
 
-        uint8_t lines = row_count - 3; // content lines - Reply, Delete, BACK are appended after
+        uint8_t lines = row_count - 4; // content lines - Reply, Delete, Full Message, BACK are appended after
         for (uint8_t i = 0; i < lines; i++) {
           size_t start = (size_t)i * MSNGR_MSG_DETAIL_CHARS_PER_LINE;
           if (start < content.size()) {
@@ -7683,6 +10323,11 @@
           }
           labels[i] = label_bufs[i];
           valbufs[i][0] = 0;
+          // 8 -> 1, not all the way to 0 (MENU_CONTENT_X) - per user
+          // feedback, flush against the physical edge looked too tight;
+          // a 1px margin reads better while still reclaiming almost all
+          // of the previous 8px padding.
+          text_dx[i] = -7;
         }
 
         labels[lines] = "Reply";
@@ -7693,8 +10338,13 @@
         valbufs[lines + 1][0] = 0;
         icons[lines + 1] = bm_menu_icon_msngr_delete;
         icon_widths[lines + 1] = MENU_ICON_W_MSNGR_DELETE;
-        labels[lines + 2] = "BACK";
+        // Per user request: right under Delete, above BACK.
+        labels[lines + 2] = "Full Message";
         valbufs[lines + 2][0] = 0;
+        icons[lines + 2] = bm_menu_icon_msngr_full_message;
+        icon_widths[lines + 2] = MENU_ICON_W_MSNGR_FULL_MESSAGE;
+        labels[lines + 3] = "BACK";
+        valbufs[lines + 3][0] = 0;
 
         // Local (Timezone-shifted) time+date, same apply_tz_offset()
         // convention as the RTC list's own Time/Date rows - time first,
@@ -7720,10 +10370,13 @@
           snprintf(title, sizeof(title), "%s", msngr_msg_detail_cache_incoming ? "RCVD" : "SENT");
         }
 
-        // icon_col_shared=false - only the Reply/Delete rows above opted
-        // into icons[], BACK keeps its own auto-icon path and the
-        // content lines stay at the plain x=8 they always used.
-        draw_menu_list_disp(title, labels, valbufs, row_count, msngr_msg_detail_cursor, icons, icon_widths, nullptr, false);
+        // icon_col_shared=false - only the Reply/Delete/Full Message rows
+        // above opted into icons[], BACK keeps its own auto-icon path;
+        // text_dx pulls just the content lines left (their own comment,
+        // above). separator_before=lines - same "divide content from
+        // commands" dashed rule as MENU_STATE_MSNGR_PEER's own boundary
+        // between messages and Compose message/Ping/.../BACK.
+        draw_menu_list_disp(title, labels, valbufs, row_count, msngr_msg_detail_cursor, icons, icon_widths, nullptr, false, text_dx, nullptr, nullptr, nullptr, lines);
       } else if (menu_state == MENU_STATE_MSNGR_DELETE_CONFIRM) {
         // Plain 2-item list, same draw_menu_list_disp() as everywhere else -
         // same pattern as F/W Update's UPDATE/CANCEL (MENU_STATE_FWUPD_CONFIRM).
@@ -7740,12 +10393,170 @@
         draw_menu_list_disp("CLEAR ALL?", labels, valbufs, 2, msngr_clear_confirm_cursor);
       } else if (menu_state == MENU_STATE_MSNGR_TEXT_ENTRY) {
         draw_menu_msngr_keyboard_disp();
-      } else if (menu_state == MENU_STATE_MSNGR_DISCARD_CONFIRM) {
+      }
+      #if HAS_BLE_HID_HOST == true
+        else if (menu_state == MENU_STATE_MSNGR_CHAT) {
+          // Same live-refresh-on-redraw idea as MENU_STATE_MSNGR_PEER's own
+          // draw block - picks up a message that arrived while this screen
+          // is sitting open - but against msngr_chat_cache/window_start
+          // (Messenger.h), Chat's own separate, chronologically-windowed
+          // cache, not msngr_peer_cache.
+          messenger_refresh_chat_window_if_stale(msngr_active_peer_hash);
+
+          // Per user request, an idle selection auto-deselects back to the
+          // compose box after MSNGR_CHAT_SEL_TIMEOUT_MS with no navigation
+          // activity - same effect as pressing Esc. Not gated on the
+          // delete-confirm dialog being closed - if it's open, msngr_chat_
+          // sel_last_activity_ms hasn't moved either (no nav key reaches
+          // this far while it's pending), so both time out together.
+          if (msngr_chat_sel != 0xFF &&
+              (int32_t)(millis() - msngr_chat_sel_last_activity_ms) >= (int32_t)MSNGR_CHAT_SEL_TIMEOUT_MS) {
+            msngr_chat_sel = 0xFF;
+            msngr_chat_delete_confirm_pending = false;
+          }
+
+          MENU_GFX.setFont(MENU_FONT);
+          MENU_GFX.setTextSize(1);
+
+          if (msngr_msg_view_active) {
+            // draw_delete_confirm=true - Chat's own Backspace-opens-
+            // delete-confirm overlay (draw_msngr_full_message_view()'s
+            // own comment).
+            draw_msngr_full_message_view(true);
+            return;
+          }
+
+          // No title, no header hline, no footer hint - deliberately, this
+          // is the entire point of this screen vs. MENU_STATE_MSNGR_PEER/
+          // _TEXT_ENTRY. Compose box pinned to the bottom (1px margin from
+          // the physical screen edge); the 5 message rows fill whatever's
+          // left above it. Starting estimate, like every other pixel value
+          // in this file - real tuning happens live on hardware.
+          const uint8_t row_h = 9;
+          // 1px up from this screen's original baseline (7) - per user
+          // request on real hardware, text sat flush with the bottom of
+          // the selection highlight otherwise.
+          const int16_t baseline_off = 6;
+          const uint8_t compose_line_h = 9;
+          const int16_t box_y = 64 - (int16_t)compose_line_h - 1;
+
+          for (uint8_t i = 0; i < msngr_chat_cache_count; i++) {
+            // Per user request, anchored to the BOTTOM (right above the
+            // compose box) and growing upward, same as any real chat app -
+            // the most recent loaded row (msngr_chat_cache_count-1) always
+            // sits immediately above the compose box, not stranded at the
+            // very top of the screen with a big gap underneath whenever
+            // fewer than 5 messages are loaded (the previous top-anchored
+            // math's actual bug).
+            int16_t row_top = box_y - (int16_t)(msngr_chat_cache_count - i) * row_h;
+            int16_t y = row_top + baseline_off;
+            bool selected = (i == msngr_chat_sel);
+            if (selected) {
+              MENU_GFX.fillRect(MENU_CONTENT_X, row_top, MENU_CONTENT_W, row_h - 1, SSD1306_WHITE);
+              MENU_GFX.setTextColor(SSD1306_BLACK);
+            } else {
+              MENU_GFX.setTextColor(SSD1306_WHITE);
+            }
+
+            // Per user request: incoming stays left-aligned with its
+            // right-pointing arrow on the left; outgoing is now right-
+            // aligned instead, with its left-pointing arrow on the right -
+            // same "yours on the right" chat convention MSNGR_PEER's own
+            // rows already use, just with an icon instead of the old plain
+            // left/right text alignment alone. Icon position is fixed
+            // either way; text position (and, for outgoing, its width) is
+            // resolved after the marquee window is computed below, since
+            // right-alignment needs to know how wide the windowed text
+            // actually is.
+            bool incoming = msngr_chat_cache[i].incoming;
+            const uint8_t *dir_icon = incoming ? bm_menu_icon_right_arrow : bm_menu_icon_left_arrow;
+            int16_t icon_y = row_top + (row_h - MENU_ICON_W_LEFT_ARROW) / 2;
+            int16_t icon_x = incoming ? (MENU_CONTENT_X + 1) : (MENU_CONTENT_X + MENU_CONTENT_W - 1 - MENU_ICON_W_LEFT_ARROW);
+            MENU_GFX.drawBitmap(icon_x, icon_y, dir_icon, MENU_ICON_W_LEFT_ARROW, MENU_ICON_W_LEFT_ARROW,
+              selected ? SSD1306_BLACK : SSD1306_WHITE, selected ? SSD1306_WHITE : SSD1306_BLACK);
+
+            // msngr_chat_cache[i].snippet is already decoded into this
+            // device's internal single-byte glyph codes at cache-
+            // population time (messenger_refresh_chat_window(), Messenger.
+            // h) - printable as-is. Calling msngr_kb_decode_utf8() on it
+            // here too double-decoded it as if it were still raw UTF-8,
+            // corrupting every Cyrillic character into '?' (confirmed on
+            // hardware, MSNGR_PEER's own draw block hit the same bug).
+            //
+            // Marquee-scroll, same mechanism as MSNGR_PEER's own
+            // (MSNGR_PEER_SCROLL_STEP_MS/_WINDOW/_LOOP_PAUSE_MS, above).
+            // Per user request: the cursor-highlighted row (i ==
+            // msngr_chat_sel) always scrolls, exempt from blekbd_marquee_
+            // enabled entirely - same "selected row's own marquee is
+            // always on" rule MSNGR_PEER's own code above now follows too.
+            // Every OTHER overflowing row also scrolls, but only while
+            // blekbd_marquee_enabled is on (Play/Pause key, blekbd_
+            // toggle_marquee() above) - that's the "general marquee" the
+            // toggle actually controls here. Doesn't touch selection/
+            // highlighting either way. Still keyed per-row (msngr_chat_
+            // scroll_offset[]/_last_step_ms[]/_paused_since_ms[],
+            // Messenger.h, one slot per visible row). Loops - see MSNGR_
+            // PEER's own marquee logic above for the identical pause-
+            // then-restart shape.
+            const char *full = msngr_chat_cache[i].snippet;
+            size_t full_len = strlen(full);
+            char windowed[24];
+            if ((i == msngr_chat_sel || blekbd_marquee_enabled) && full_len > MSNGR_PEER_SCROLL_WINDOW) {
+              uint8_t max_offset = (uint8_t)(full_len - MSNGR_PEER_SCROLL_WINDOW);
+              unsigned long now = millis();
+              if (msngr_chat_scroll_offset[i] >= max_offset) {
+                if (msngr_chat_scroll_paused_since_ms[i] == 0) {
+                  msngr_chat_scroll_paused_since_ms[i] = now;
+                } else if ((int32_t)(now - msngr_chat_scroll_paused_since_ms[i]) >= (int32_t)MSNGR_PEER_SCROLL_LOOP_PAUSE_MS) {
+                  // Loop back to the start - per user request, pause here
+                  // too (MSNGR_PEER_SCROLL_START_PAUSE_MS) before actually
+                  // scrolling again, so the beginning is readable.
+                  msngr_chat_scroll_offset[i] = 0;
+                  msngr_chat_scroll_paused_since_ms[i] = 0;
+                  msngr_chat_scroll_start_pause_until_ms[i] = now + MSNGR_PEER_SCROLL_START_PAUSE_MS;
+                  msngr_chat_scroll_last_step_ms[i] = now;
+                }
+              } else if (msngr_chat_scroll_start_pause_until_ms[i] != 0) {
+                // Still in the post-loop start-pause window - hold at 0
+                // (not a row's very first scroll, which never arms this).
+                if ((int32_t)(now - msngr_chat_scroll_start_pause_until_ms[i]) >= 0) {
+                  msngr_chat_scroll_start_pause_until_ms[i] = 0;
+                  msngr_chat_scroll_last_step_ms[i] = now;
+                }
+              } else if ((int32_t)(now - msngr_chat_scroll_last_step_ms[i]) >= (int32_t)MSNGR_PEER_SCROLL_STEP_MS) {
+                msngr_chat_scroll_last_step_ms[i] = now;
+                msngr_chat_scroll_offset[i]++;
+              }
+              snprintf(windowed, sizeof(windowed), "%s", full + msngr_chat_scroll_offset[i]);
+            } else {
+              snprintf(windowed, sizeof(windowed), "%s", full);
+            }
+
+            int16_t text_x;
+            if (incoming) {
+              text_x = MENU_CONTENT_X + 1 + MENU_ICON_W_LEFT_ARROW + 2;
+            } else {
+              int16_t x1, y1; uint16_t tw, th;
+              MENU_GFX.getTextBounds(windowed, 0, 0, &x1, &y1, &tw, &th);
+              text_x = icon_x - 2 - (int16_t)tw;
+            }
+            MENU_GFX.setCursor(text_x, y);
+            MENU_GFX.print(windowed);
+          }
+          MENU_GFX.setTextColor(SSD1306_WHITE);
+
+          draw_msngr_compose_box(box_y, (int32_t)msngr_chat_cursor);
+
+          if (msngr_chat_delete_confirm_pending) draw_msngr_chat_delete_confirm_box();
+        }
+      #endif
+      else if (menu_state == MENU_STATE_MSNGR_DISCARD_CONFIRM) {
         const char *labels[2] = { "DISCARD", "CANCEL" };
         char valbufs[2][24];
         valbufs[0][0] = 0;
         valbufs[1][0] = 0;
-        draw_menu_list_disp("DISCARD MSG?", labels, valbufs, 2, msngr_discard_confirm_cursor);
+        const char *discard_title = (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH) ? "DISCARD HASH?" : "DISCARD MSG?";
+        draw_menu_list_disp(discard_title, labels, valbufs, 2, msngr_discard_confirm_cursor);
       } else if (menu_state == MENU_STATE_MSNGR_PING_RESULT) {
         // Reads msngr_ping_state/msngr_ping_rtt fresh on every redraw -
         // messenger_ping_process() (RNode_Firmware.ino's loop()) is what
@@ -7754,14 +10565,30 @@
         const char *labels[2];
         char valbufs[2][24];
         char status_buf[24];
+        // Per user request: a checkmark/X icon prefixes the status row on
+        // a terminal outcome - success (bm_menu_icon_msngr_ping_ok) or any
+        // of the three failure states (bm_menu_icon_msngr_ping_fail).
+        // RESOLVING/ESTABLISHING are still in-progress, no outcome yet, so
+        // neither icon applies - left nullptr, same "no icon" default
+        // every other icon-less row here already uses.
+        const uint8_t *icons[2] = { nullptr, nullptr };
+        uint8_t icon_widths[2] = { 0, 0 };
         switch (msngr_ping_state) {
           case MSNGR_PING_RESOLVING:    snprintf(status_buf, sizeof(status_buf), "Resolving..."); break;
           case MSNGR_PING_ESTABLISHING: snprintf(status_buf, sizeof(status_buf), "Pinging..."); break;
-          case MSNGR_PING_SUCCESS:      snprintf(status_buf, sizeof(status_buf), "RTT: %.0f ms", msngr_ping_rtt * 1000.0); break;
+          case MSNGR_PING_SUCCESS:
+            snprintf(status_buf, sizeof(status_buf), "RTT: %.0f ms", msngr_ping_rtt * 1000.0);
+            icons[0] = bm_menu_icon_msngr_ping_ok;
+            icon_widths[0] = MENU_ICON_W_MSNGR_PING_OK;
+            break;
           case MSNGR_PING_TIMEOUT:      snprintf(status_buf, sizeof(status_buf), "Timed Out"); break;
           case MSNGR_PING_NO_IDENTITY:  snprintf(status_buf, sizeof(status_buf), "Not Ready"); break;
           case MSNGR_PING_FAILED:       snprintf(status_buf, sizeof(status_buf), "Link Failed"); break;
           default:                      snprintf(status_buf, sizeof(status_buf), "..."); break;
+        }
+        if (msngr_ping_state == MSNGR_PING_TIMEOUT || msngr_ping_state == MSNGR_PING_NO_IDENTITY || msngr_ping_state == MSNGR_PING_FAILED) {
+          icons[0] = bm_menu_icon_msngr_ping_fail;
+          icon_widths[0] = MENU_ICON_W_MSNGR_PING_FAIL;
         }
         labels[0] = status_buf;
         valbufs[0][0] = 0;
@@ -7770,7 +10597,7 @@
 
         char title[24];
         snprintf(title, sizeof(title), "PING: %s", messenger_peer_display_name(msngr_active_peer_hash).c_str());
-        draw_menu_list_disp(title, labels, valbufs, 2, msngr_ping_result_cursor);
+        draw_menu_list_disp(title, labels, valbufs, 2, msngr_ping_result_cursor, icons, icon_widths, nullptr, false);
       } else if (menu_state == MENU_STATE_MSNGR_SEND_RESULT) {
         // Reads msngr_send_state fresh on every redraw - messenger_send_
         // process()/messenger_on_delivered() (Messenger.h) are what
@@ -7784,6 +10611,13 @@
         const char *labels[2];
         char valbufs[2][24];
         char status_buf[24];
+        // Per user request: same OK/FAIL icons as MSNGR_PING_RESULT above -
+        // OK on confirmed delivery, FAIL on any of the three terminal
+        // failure/uncertain-failure states. RESOLVING/PENDING are still
+        // in-progress, no outcome yet, left nullptr (no icon), same
+        // reasoning as Ping's own RESOLVING/ESTABLISHING.
+        const uint8_t *icons[2] = { nullptr, nullptr };
+        uint8_t icon_widths[2] = { 0, 0 };
         switch (msngr_send_state) {
           case MSNGR_SEND_RESOLVING:  snprintf(status_buf, sizeof(status_buf), "Resolving..."); break;
           case MSNGR_SEND_PENDING: {
@@ -7806,7 +10640,11 @@
             }
             break;
           }
-          case MSNGR_SEND_DELIVERED:  snprintf(status_buf, sizeof(status_buf), "Delivered"); break;
+          case MSNGR_SEND_DELIVERED:
+            snprintf(status_buf, sizeof(status_buf), "Delivered");
+            icons[0] = bm_menu_icon_msngr_ping_ok;
+            icon_widths[0] = MENU_ICON_W_MSNGR_PING_OK;
+            break;
           case MSNGR_SEND_TIMEOUT:    snprintf(status_buf, sizeof(status_buf), "No Confirmation"); break;
           case MSNGR_SEND_UNRESOLVED: snprintf(status_buf, sizeof(status_buf), "Unknown Destination"); break;
           // Router-confirmed failure (messenger_on_failed(), Messenger.h) -
@@ -7815,6 +10653,10 @@
           case MSNGR_SEND_FAILED:     snprintf(status_buf, sizeof(status_buf), "Delivery Failed"); break;
           default:                    snprintf(status_buf, sizeof(status_buf), "..."); break;
         }
+        if (msngr_send_state == MSNGR_SEND_TIMEOUT || msngr_send_state == MSNGR_SEND_UNRESOLVED || msngr_send_state == MSNGR_SEND_FAILED) {
+          icons[0] = bm_menu_icon_msngr_ping_fail;
+          icon_widths[0] = MENU_ICON_W_MSNGR_PING_FAIL;
+        }
         labels[0] = status_buf;
         valbufs[0][0] = 0;
         labels[1] = "BACK";
@@ -7822,7 +10664,7 @@
 
         char title[24];
         snprintf(title, sizeof(title), "SEND: %s", messenger_peer_display_name(msngr_active_peer_hash).c_str());
-        draw_menu_list_disp(title, labels, valbufs, 2, msngr_send_result_cursor);
+        draw_menu_list_disp(title, labels, valbufs, 2, msngr_send_result_cursor, icons, icon_widths, nullptr, false);
       } else if (menu_state == MENU_STATE_MSNGR_SETTINGS) {
         const char *labels[MSNGR_SETTINGS_ITEM_COUNT];
         char valbufs[MSNGR_SETTINGS_ITEM_COUNT][24];
@@ -7838,6 +10680,20 @@
 
         labels[MSNGR_SETTINGS_ITEM_ANNOUNCE_INTERVAL] = "Auto Announce";
         sprintf(valbufs[MSNGR_SETTINGS_ITEM_ANNOUNCE_INTERVAL], msngr_announce_interval_labels[staged_msngr_announce_interval_idx]);
+
+        labels[MSNGR_SETTINGS_ITEM_PROP_ON_FAIL] = "Propagate on Fail";
+        sprintf(valbufs[MSNGR_SETTINGS_ITEM_PROP_ON_FAIL], staged_msngr_propagate_on_fail ? "ON" : "OFF");
+
+        labels[MSNGR_SETTINGS_ITEM_SYNC_INTERVAL] = "Periodic Sync";
+        sprintf(valbufs[MSNGR_SETTINGS_ITEM_SYNC_INTERVAL], msngr_sync_interval_labels[staged_msngr_sync_interval_idx]);
+
+        labels[MSNGR_SETTINGS_ITEM_SYNC_LIMIT] = "Sync Limit";
+        if (staged_msngr_sync_limit == 0) sprintf(valbufs[MSNGR_SETTINGS_ITEM_SYNC_LIMIT], "Unlimited");
+        else sprintf(valbufs[MSNGR_SETTINGS_ITEM_SYNC_LIMIT], "%u", (unsigned)staged_msngr_sync_limit);
+
+        labels[MSNGR_SETTINGS_ITEM_STAMP_COST] = "Req. Stamp Cost";
+        if (staged_msngr_stamp_cost == 0) sprintf(valbufs[MSNGR_SETTINGS_ITEM_STAMP_COST], "OFF");
+        else sprintf(valbufs[MSNGR_SETTINGS_ITEM_STAMP_COST], "%u", (unsigned)staged_msngr_stamp_cost);
 
         labels[MSNGR_SETTINGS_ITEM_DISPLAY_NAME] = "Name";
         // Not staged (opens the on-screen keyboard directly, not MSNGR_
@@ -7875,9 +10731,23 @@
         } else if (msngr_settings_cursor == MSNGR_SETTINGS_ITEM_ANNOUNCE_START) {
           sprintf(valbuf, staged_msngr_announce_at_start ? "ON" : "OFF");
           draw_menu_edit_disp("ANNOUNCE AT START", valbuf);
-        } else {
+        } else if (msngr_settings_cursor == MSNGR_SETTINGS_ITEM_ANNOUNCE_INTERVAL) {
           sprintf(valbuf, msngr_announce_interval_labels[staged_msngr_announce_interval_idx]);
           draw_menu_edit_disp("AUTO ANNOUNCE", valbuf);
+        } else if (msngr_settings_cursor == MSNGR_SETTINGS_ITEM_PROP_ON_FAIL) {
+          sprintf(valbuf, staged_msngr_propagate_on_fail ? "ON" : "OFF");
+          draw_menu_edit_disp("PROPAGATE ON FAIL", valbuf);
+        } else if (msngr_settings_cursor == MSNGR_SETTINGS_ITEM_SYNC_INTERVAL) {
+          sprintf(valbuf, msngr_sync_interval_labels[staged_msngr_sync_interval_idx]);
+          draw_menu_edit_disp("PERIODIC SYNC", valbuf);
+        } else if (msngr_settings_cursor == MSNGR_SETTINGS_ITEM_SYNC_LIMIT) {
+          if (staged_msngr_sync_limit == 0) sprintf(valbuf, "Unlimited");
+          else sprintf(valbuf, "%u", (unsigned)staged_msngr_sync_limit);
+          draw_menu_edit_disp("SYNC LIMIT", valbuf);
+        } else {
+          if (staged_msngr_stamp_cost == 0) sprintf(valbuf, "OFF");
+          else sprintf(valbuf, "%u", (unsigned)staged_msngr_stamp_cost);
+          draw_menu_edit_disp("REQUIRED STAMP COST", valbuf);
         }
       } else if (menu_state == MENU_STATE_MSNGR_PRESETS) {
         uint8_t row_count = msngr_presets_row_count();

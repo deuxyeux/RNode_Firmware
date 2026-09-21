@@ -308,6 +308,12 @@
 	// gate - a bigger buffer here couldn't accept more than MTU bytes
 	// anyway.
 	uint8_t prov_req_buf[MTU];
+	// CMD_IDENTITY_IMPORT payload buffer (IdentityTransfer.h) - same
+	// "bigger than cmdbuf, capped to MTU" reasoning as prov_req_buf above.
+	// A wrapped identity VaultBlob (RNVB header + 64-byte identity
+	// ciphertext + 16-byte GCM tag, ~120 bytes) comfortably exceeds
+	// CMD_L's 64 bytes.
+	uint8_t identity_import_buf[MTU];
 	#endif
 
 	// LoRa transmit buffer
