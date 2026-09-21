@@ -21,6 +21,7 @@
 #include "Identity.h"
 #include "Link.h"
 #include "Log.h"
+#include "Compression/Bz2Decompress.h"
 
 #include <MsgPack.h>
 
@@ -28,6 +29,16 @@
 
 using namespace RNS;
 using namespace RNS::Utilities;
+
+// Firmware-side bound on decompressed Resource size, independent of
+// Type::Resource::AUTO_COMPRESS_MAX_SIZE (16MB - the on-disk-staging
+// ceiling from the desktop/server reference implementation, meaningless
+// here). This onboard node only ever needs to receive LXMF messages
+// (a few KB of text at most, never arbitrary files), so this exists
+// purely as a sanity/DoS guard against a peer advertising a tiny
+// compressed blob that claims to expand to something absurd - not a
+// real expected-traffic ceiling.
+static const size_t RESOURCE_BZ2_MAX_DECOMPRESSED_SIZE = 65536;
 
 
 // ============================================================================
@@ -687,15 +698,33 @@ void Resource::assemble() {
 			plaintext = stream;
 		}
 
-		if (_object->_compressed) {
-			ERRORF("Received resource %s flagged as compressed, but bz2 is not supported on the C++ port. Rejecting.", _object->_hash.toHex().c_str());
-			_object->_status = Type::Resource::CORRUPT;
-			cancel();
-			return;
-		}
-
-		// Strip random_hash prefix (Python Resource.py:682).
+		// Strip random_hash prefix (Python Resource.py:682). Real Reticulum
+		// strips this BEFORE decompressing, not after - random_hash itself
+		// is never part of the compressed payload (Resource.py's sender
+		// side: self.data = random_hash + compressed_data, prepended after
+		// compression, then the whole thing is encrypted) - decompressing
+		// before stripping fed bz2 the random_hash bytes as if they were
+		// the start of its own magic header/block stream, corrupting it.
 		Bytes data = plaintext.mid(Type::Resource::RANDOM_HASH_SIZE);
+
+		if (_object->_compressed) {
+			// _object->_uncompressed_size (adv._d, Resource::accept() above)
+			// is the content's size alone, matching Python's self.
+			// uncompressed_size (set before random_hash is ever prepended,
+			// Resource.py) - the right destination-buffer size for bzip2's
+			// one-shot API and the right sanity bound. This device never
+			// produces a compressed Resource itself (_auto_compress forced
+			// false in the constructor, above) - see Bz2Decompress.h for
+			// why decompression-only is the right scope.
+			Bytes decompressed;
+			if (!bz2_decompress(data, _object->_uncompressed_size, decompressed, RESOURCE_BZ2_MAX_DECOMPRESSED_SIZE)) {
+				ERRORF("Failed to decompress resource %s, rejecting", _object->_hash.toHex().c_str());
+				_object->_status = Type::Resource::CORRUPT;
+				cancel();
+				return;
+			}
+			data = decompressed;
+		}
 
 		// Verify hash matches advertised hash. The on-wire layout is
 		//   plaintext = prepended_random_hash || content
