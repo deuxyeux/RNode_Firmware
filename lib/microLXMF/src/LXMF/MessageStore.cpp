@@ -437,11 +437,22 @@ bool MessageStore::save_message(const LXMessage& message) {
 	// cleanup step - trimming has to run first to actually free space.
 	// reserve=1: leave room for the one message this call is about to
 	// add, so the conversation/store lands exactly at the limit
-	// afterward, not one over.
+	// afterward, not one over. reserve=0 when this hash is ALREADY in the
+	// conversation index (a re-save of an existing message, eg the vault
+	// migration walk re-encrypting/re-decrypting every stored message
+	// in place, Messenger.h's vault_migrate_messages_encrypt()/_decrypt())
+	// - add_message_hash() below is itself a no-op for an already-present
+	// hash, so reserving room for "one new message" here would be wrong
+	// and could evict a real, different message from a conversation
+	// that's already sitting exactly at the retention cap, even though
+	// this call adds nothing net-new to it.
 	{
 		Bytes pre_trim_peer_hash = message.incoming() ? message.source_hash() : message.destination_hash();
-		trim_conversation_to_retention(pre_trim_peer_hash, 1);
-		trim_global_total(1);
+		ConversationSlot* pre_trim_slot = find_conversation(pre_trim_peer_hash);
+		bool is_resave = pre_trim_slot && pre_trim_slot->info.has_message(message.hash());
+		size_t reserve = is_resave ? 0 : 1;
+		trim_conversation_to_retention(pre_trim_peer_hash, reserve);
+		trim_global_total(reserve);
 	}
 
 	std::string message_path = get_message_path(message.hash());
@@ -479,13 +490,34 @@ bool MessageStore::save_message(const LXMessage& message) {
 		_json_doc["timestamp"] = message.timestamp();
 		_json_doc["state"] = static_cast<int>(message.state());
 
-		// Store content as UTF-8 for fast loading (no msgpack unpacking needed)
-		std::string content_str((const char*)message.content().data(), message.content().size());
-		_json_doc["content"] = content_str;
+		// "content"/"packed" go through the optional field cipher
+		// (set_field_cipher(), PIN/passphrase vault - see MessageStore.h's
+		// own comment) when one is configured. "enc" records which case a
+		// given file is in so load_message()/load_message_metadata() never
+		// have to guess - needed because a device can have plaintext files
+		// left over from before the vault was enabled (migrated separately,
+		// bulk-re-saved through this same path) or, in principle, files
+		// saved while the cipher was unset for any other reason.
+		// destination_hash/source_hash above are never encrypted - the
+		// inbox/conversation list needs them in the clear to render without
+		// unlocking each message (see the plan's disclosed plaintext-
+		// metadata tradeoff).
+		Bytes peer_hash = message.incoming() ? message.source_hash() : message.destination_hash();
+		if (_field_encrypt) {
+			Bytes content_ct = _field_encrypt(peer_hash, message.content());
+			_json_doc["content"] = content_ct.toHex();
+			Bytes packed_ct = _field_encrypt(peer_hash, message.packed());
+			_json_doc["packed"] = packed_ct.toHex();
+			_json_doc["enc"] = true;
+		} else {
+			// Store content as UTF-8 for fast loading (no msgpack unpacking needed)
+			std::string content_str((const char*)message.content().data(), message.content().size());
+			_json_doc["content"] = content_str;
 
-		// Store the entire packed message to preserve hash/signature
-		// This ensures exact reconstruction on load
-		_json_doc["packed"] = message.packed().toHex();
+			// Store the entire packed message to preserve hash/signature
+			// This ensures exact reconstruction on load
+			_json_doc["packed"] = message.packed().toHex();
+		}
 
 		std::string json_str;
 		serializeJsonPretty(_json_doc, json_str);
@@ -573,9 +605,9 @@ bool MessageStore::save_message(const LXMessage& message) {
 		DEBUG("  Message file saved: " + message_path);
 
 		// Update conversation index
-		// Determine peer hash (the other party in the conversation)
-		// For incoming: peer = source, for outgoing: peer = destination
-		Bytes peer_hash = message.incoming() ? message.source_hash() : message.destination_hash();
+		// peer_hash (the other party in the conversation - incoming: peer =
+		// source, outgoing: peer = destination) already computed above for
+		// the field cipher.
 
 		// Get or create conversation slot
 		transaction_slot = find_conversation(peer_hash);
@@ -735,6 +767,11 @@ void MessageStore::set_archive_filesystem(microStore::FileSystem fs,
 
 bool MessageStore::has_archive() const {
 	return (bool)_archive_fs;
+}
+
+void MessageStore::set_field_cipher(FieldEncryptFn encrypt_fn, FieldDecryptFn decrypt_fn) {
+	_field_encrypt = encrypt_fn;
+	_field_decrypt = decrypt_fn;
 }
 
 bool MessageStore::set_display_name(const Bytes& peer_hash,
@@ -1190,7 +1227,28 @@ LXMessage MessageStore::load_message(const Bytes& message_hash) {
 		// Unpack the message from stored packed bytes
 		// This preserves the exact hash and signature
 		Bytes packed;
-		packed.assignHex(_json_doc["packed"].as<const char*>());
+		bool encrypted = _json_doc["enc"] | false;
+		if (encrypted) {
+			if (!_field_decrypt) {
+				ERROR("Message is encrypted but no field decrypt cipher configured: " + message_hash.toHex());
+				return LXMessage(Bytes(), Bytes(), Bytes(), Bytes());
+			}
+			bool doc_incoming = _json_doc["incoming"] | true;
+			Bytes dest_hash, src_hash;
+			dest_hash.assignHex(_json_doc["destination_hash"].as<const char*>());
+			src_hash.assignHex(_json_doc["source_hash"].as<const char*>());
+			Bytes peer_hash = doc_incoming ? src_hash : dest_hash;
+			Bytes packed_ct;
+			packed_ct.assignHex(_json_doc["packed"].as<const char*>());
+			try {
+				packed = _field_decrypt(peer_hash, packed_ct);
+			} catch (const std::exception& e) {
+				ERROR("Failed to decrypt message payload: " + std::string(e.what()));
+				return LXMessage(Bytes(), Bytes(), Bytes(), Bytes());
+			}
+		} else {
+			packed.assignHex(_json_doc["packed"].as<const char*>());
+		}
 
 		// Skip signature validation - messages from storage were already validated when received
 		LXMessage message = LXMessage::unpack_from_bytes(packed, LXMF::Type::Message::DIRECT, true);
@@ -1256,6 +1314,12 @@ MessageStore::MessageMetadata MessageStore::load_message_metadata(const Bytes& m
 		filter["timestamp"] = true;
 		filter["incoming"] = true;
 		filter["state"] = true;
+		// Needed only to decrypt "content" below when "enc" is set - both
+		// are tiny fixed-length hex strings, negligible next to skipping
+		// "packed" (the whole point of this filtered parse).
+		filter["destination_hash"] = true;
+		filter["source_hash"] = true;
+		filter["enc"] = true;
 		_json_doc.clear();
 		DeserializationError error = deserializeJson(_json_doc, data.data(), data.size(),
 		                                             DeserializationOption::Filter(filter));
@@ -1270,7 +1334,28 @@ MessageStore::MessageMetadata MessageStore::load_message_metadata(const Bytes& m
 
 		// Read pre-extracted fields (no msgpack unpacking needed)
 		if (_json_doc["content"].is<const char*>()) {
-			meta.content = _json_doc["content"].as<std::string>();
+			bool encrypted = _json_doc["enc"] | false;
+			if (!encrypted) {
+				meta.content = _json_doc["content"].as<std::string>();
+			} else if (_field_decrypt) {
+				bool doc_incoming = _json_doc["incoming"] | true;
+				Bytes dest_hash, src_hash;
+				dest_hash.assignHex(_json_doc["destination_hash"].as<const char*>());
+				src_hash.assignHex(_json_doc["source_hash"].as<const char*>());
+				Bytes peer_hash = doc_incoming ? src_hash : dest_hash;
+				Bytes content_ct;
+				content_ct.assignHex(_json_doc["content"].as<const char*>());
+				try {
+					Bytes content_pt = _field_decrypt(peer_hash, content_ct);
+					meta.content.assign((const char*)content_pt.data(), content_pt.size());
+				} catch (const std::exception&) {
+					meta.content = "[unable to decrypt]";
+				}
+			} else {
+				// Locked/no cipher configured - never expose the raw hex
+				// ciphertext as if it were readable text.
+				meta.content = "[locked]";
+			}
 		}
 		meta.timestamp = _json_doc["timestamp"] | 0.0;
 		meta.incoming = _json_doc["incoming"] | true;

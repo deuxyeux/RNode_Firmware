@@ -389,6 +389,23 @@ namespace LXMF {
 		 */
 		void register_sync_complete_callback(SyncCompleteCallback callback);
 
+		/**
+		 * @brief Cap how many messages are requested per sync
+		 *
+		 * Applied to the "wants" list built from the propagation node's
+		 * message list response, after already-seen transient IDs are
+		 * filtered out - any remainder stays queued on the node for the
+		 * next sync.
+		 *
+		 * @param limit Max messages per sync (0 = unlimited)
+		 */
+		void set_sync_message_limit(uint16_t limit) { _sync_message_limit = limit; }
+
+		/**
+		 * @brief Get the current per-sync message limit
+		 */
+		uint16_t sync_message_limit() const { return _sync_message_limit; }
+
 		// ============== End Propagation Node Support ==============
 
 		// ============== Stamp Enforcement ==============
@@ -864,6 +881,7 @@ namespace LXMF {
 		float _sync_progress = 0.0f;
 		double _sync_start_time = 0.0;
 		SyncCompleteCallback _sync_complete_callback;
+		uint16_t _sync_message_limit = 0; // max messages requested per sync (0 = unlimited)
 
 		// Locally delivered transient IDs circular buffer (zero heap fragmentation)
 		// Note: Keep as Bytes for now - converting to static array causes issues

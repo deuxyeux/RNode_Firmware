@@ -2382,6 +2382,17 @@ void LXMRouter::on_message_list_response(const Bytes& response) {
 				 wants_count, (unsigned)(arr_size.size() - wants_count));
 		INFO(buf);
 
+		// Cap to the configured per-sync limit - the rest stays queued on
+		// the node and gets picked up by a later sync (transient_ids_
+		// contains() above only filters what's already been received, so
+		// nothing here is skipped permanently).
+		if (_sync_message_limit > 0 && available_ids.size() > _sync_message_limit) {
+			available_ids.resize(_sync_message_limit);
+			wants_count = _sync_message_limit;
+			snprintf(buf, sizeof(buf), "  Capped to %u messages (sync limit)", (unsigned)_sync_message_limit);
+			INFO(buf);
+		}
+
 		if (wants_count == 0) {
 			INFO("  No new messages to download");
 			_sync_state = PR_COMPLETE;

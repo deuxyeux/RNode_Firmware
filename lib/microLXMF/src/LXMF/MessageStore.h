@@ -5,6 +5,7 @@
 
 #include <ArduinoJson.h>
 #include <microStore/FileSystem.h>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -235,6 +236,22 @@ namespace LXMF {
 		 * @brief Whether an archive filesystem is configured
 		 */
 		bool has_archive() const;
+
+		// Optional per-field encryption hook for "content"/"packed" - the
+		// two fields that carry actual message text/payload (see the "enc"
+		// marker in save_message()/load_message()/load_message_metadata()).
+		// MessageStore itself stays free of any PIN/passphrase-vault
+		// dependency (that lives in RNode_Firmware/Vault.h, well above this
+		// portable library) - the caller supplies encrypt/decrypt as plain
+		// callbacks, keyed by peer hash so it can derive a per-peer subkey.
+		// Unset by default: every field is stored exactly as before
+		// (plaintext UTF-8 content / hex packed), so a consumer that never
+		// calls this sees zero behavior change. encrypt_fn/decrypt_fn may
+		// throw - callers of save_message()/load_message()/
+		// load_message_metadata() already handle exceptions from those.
+		using FieldEncryptFn = std::function<RNS::Bytes(const RNS::Bytes& peer_hash, const RNS::Bytes& plaintext)>;
+		using FieldDecryptFn = std::function<RNS::Bytes(const RNS::Bytes& peer_hash, const RNS::Bytes& ciphertext)>;
+		void set_field_cipher(FieldEncryptFn encrypt_fn, FieldDecryptFn decrypt_fn);
 
 		/**
 		 * @brief Cache a peer's LXMF display name in the conversation
@@ -571,6 +588,11 @@ namespace LXMF {
 		// older messages flow to `<_archive_path>/messages/<hash>.json`.
 		microStore::FileSystem _archive_fs;
 		std::string _archive_path;
+
+		// Set via set_field_cipher() - both null (default-constructed
+		// std::function, falsy) until a caller opts in.
+		FieldEncryptFn _field_encrypt;
+		FieldDecryptFn _field_decrypt;
 
 		// Reusable JSON document to reduce heap fragmentation
 		// Note: This class is assumed to be used from a single thread (main loop).
