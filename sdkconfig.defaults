@@ -66,7 +66,29 @@ CONFIG_COMPILER_CXX_RTTI=y
 
 # --- PSRAM: platformio.ini's board_build.arduino.memory_type=qio_opi is NOT
 # auto-translated into Kconfig under combined framework mode; replicated
-# manually here (matches this board's octal PSRAM) ---
+# manually here (matches meshadventurer_s3/meshpoe_s3's real octal PSRAM -
+# the only two production HAS_URNS boards using combined "arduino, espidf"
+# mode as of this writing). This file is a single shared fragment - this
+# platform version has no real per-env sdkconfig scoping for combined mode
+# (confirmed by reading espidf.py: the "custom_sdkconfig" mechanism that
+# would otherwise allow it is explicitly disabled whenever "espidf" is in
+# the framework list) - so every combined-mode env gets these same values.
+#
+# [env:heltec32v4pa_urns_ble] (platformio.ini) is the one exception that
+# needs something different - Quad, not Octal, 2MB not 8MB (see that env's
+# own comment). Confirmed via live debug-UART capture (2026-09-21): with
+# these Octal settings, that board's real Quad PSRAM chip fails ID
+# readback ("PSRAM ID read error... fallback to use default driver
+# pattern... Found 16MB PSRAM device" - garbage), and it crashes before
+# app_main() every single boot. To build that env, temporarily swap the
+# two lines below for:
+#   CONFIG_SPIRAM_MODE_QUAD=y
+#   CONFIG_SPIRAM_TYPE_ESPPSRAM16=y
+# (TYPE_ESPPSRAM16 explicitly, not TYPE_AUTO - auto-detect alone was
+# confirmed NOT sufficient on that exact chip, a MODE_QUAD+TYPE_AUTO test
+# still failed) then revert back to the two lines below before building
+# meshadventurer_s3/meshpoe_s3 again. Do NOT leave the Quad/PSRAM16
+# variant committed here - it silently breaks both real boards' PSRAM.
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_OCT=y
 CONFIG_SPIRAM_TYPE_AUTO=y
@@ -94,3 +116,68 @@ CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=512
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
 CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+
+# --- esp_hid component's src/nimble_hidh.c (the BLE HID *Host* backend -
+# scan/connect/bond to an external HID device, e.g. a keyboard) is entirely
+# wrapped in "#if CONFIG_BT_NIMBLE_HID_SERVICE" despite that Kconfig name
+# reading like it's only about the device/peripheral HID service
+# (BLEHIDDevice). Without this, esp_hidh_init()/esp_hidh_dev_open() link-fail
+# ("undefined reference to esp_ble_hidh_init") even though esp_hidh.c itself
+# (the transport-agnostic dispatcher) always compiles in. ---
+CONFIG_BT_NIMBLE_HID_SERVICE=y
+
+# --- BLE HID keyboard host spike diagnostics (BLEKeyboardSpike.h) - needed
+# for uxTaskGetSystemState()/vTaskList() to work at all (TRACE_FACILITY) and
+# for the per-task CPU-time figures it reports to be meaningful rather than
+# always zero (RUN_TIME_STATS) - both off by default. Remove along with the
+# spike file once the investigation concludes. ---
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y
+CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
+CONFIG_FREERTOS_VTASKLIST_INCLUDE_COREID=y
+
+# --- Diagnostic test (round 6, BLE HID keyboard investigation): the real
+# Kconfig name is CONFIG_ESP_COEX_SW_COEXIST_ENABLE (default y whenever both
+# ESP_WIFI_ENABLED && BT_ENABLED are set, as they are here) - its own help
+# text: "If only Bluetooth is used, it is recommended to disable this option".
+# Task-dump tracing (BLEKeyboardSpike.h) showed the "wifi" FreeRTOS task is
+# the one thing consistently active (real periodic CPU time, every dump)
+# throughout a hang where btController/nimble_host go completely silent the
+# moment an active BLE radio state change (scan-cancel, then connect-
+# initiate) is attempted - testing whether BT/WiFi software coexistence
+# arbitration is the actual root cause. NOTE: if this fixes it, disabling
+# coexistence outright is not necessarily the right permanent answer - RNode
+# does support real concurrent WiFi+BLE (WiFi Remote/ESP-NOW) elsewhere: this
+# is a diagnostic test, not yet a considered permanent fix. ---
+CONFIG_ESP_COEX_SW_COEXIST_ENABLE=n
+
+# --- BLE bond persistence fix (found investigating the BLE HID keyboard
+# spike - see project memory "BLE HID keyboard host spike"). Without this,
+# esp_nimble_cfg.h's own #ifndef MYNEWT_VAL_BLE_STORE_CONFIG_PERSIST block
+# (host/nimble/port/include/esp_nimble_cfg.h) falls through to its `#else`
+# branch and hardcodes persistence OFF - ble_store_config_priv.h then
+# silently swaps in no-op inline stubs (ble_store_config_persist_peer_secs()
+# etc, just `return 0;`) for the real NVS-backed implementation in
+# ble_store_nvs.c. Confirmed live: every pairing "succeeded" (SM-level
+# bonded=1, connection worked fine) but the bond never reached flash - not a
+# capacity or reboot-timing issue, the persistent-write path itself was
+# entirely inert. This is the one Kconfig option gating that ifndef/ifdef
+# chain to the real implementation instead. ---
+CONFIG_BT_NIMBLE_NVS_PERSIST=y
+
+# --- Core dump to flash - a permanent, board-agnostic diagnostic
+# capability, not a one-off test (unlike the reverted CONFIG_SPIRAM_MODE
+# experiment - see git history around 2026-09-21). On panic/crash, ESP-IDF
+# writes a full register/backtrace/stack dump to the partition table's
+# "coredump" partition (every env's own *.csv already has one, e.g.
+# partitions/heltec32v4pa_urns_ble.csv - a standard part of this project's
+# partition layout already). Retrieved after the fact over the same USB
+# port used for flashing, no separate debug UART needed:
+#   ~/.platformio/penv/bin/python3 -m esp_coredump info_corefile \
+#     --port /dev/ttyACM0 .pio_build/<env>/firmware.elf
+# (esp_coredump is already installed in PlatformIO's own managed venv -
+# confirmed present, `pip install esp-coredump` only needed elsewhere).
+# ELF format (not the older BIN format) for full symbol/backtrace info,
+# not just a raw register dump. ---
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
+CONFIG_ESP_COREDUMP_CHECKSUM_CRC32=y

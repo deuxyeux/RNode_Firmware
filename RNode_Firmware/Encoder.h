@@ -38,6 +38,18 @@
   void menu_encoder_chord_rotate(int8_t dir);
   extern bool msngr_kb_chord_used;
 
+  // Forward declarations - implemented in VaultUnlock.h. When the boot-
+  // unlock screen (or the Menu.h PIN-enable/disable flow) owns the input,
+  // rotation/press dispatch redirects here instead of into Menu.h - see
+  // encoder_process()'s own vault_unlock_active check below. menu_state
+  // isn't initialized yet during the boot-unlock screen, so this can't
+  // just be handled inside menu_encoder_rotate()/menu_encoder_button()
+  // themselves.
+  extern bool vault_unlock_active;
+  extern bool vault_suppress_next_release;
+  void vault_unlock_encoder_rotate(int8_t dir);
+  void vault_unlock_encoder_button(unsigned long duration);
+
   // Classic 4-state Gray-code quadrature transition table, indexed by
   // (prev_AB<<2)|curr_AB. Illegal transitions (both channels changed
   // between reads - noise the board's RC filtering didn't fully catch)
@@ -127,8 +139,17 @@
     // than a plain rotate - checked against the debounced button state
     // (enc_btn_state), not a raw pin read, so it can't flicker mid-turn on
     // contact bounce.
-    if (d != 0 && encoder_enabled) {
-      if (enc_btn_state == ENC_PRESSED) menu_encoder_chord_rotate(d);
+    // vault_unlock_active bypasses the encoder_enabled preference check -
+    // that flag is the user's menu-navigation input preference (defaults
+    // OFF even on encoder-equipped boards, RNode_Firmware.ino's own
+    // comment on ADDR_CONF_ENA), a different thing from "does this board
+    // physically have an encoder." The boot-unlock screen runs before that
+    // preference is even read from EEPROM (urns_init() runs earlier than
+    // ADDR_CONF_ENA's read in setup()), and a locked-out user should be
+    // able to use working hardware regardless of an unrelated nav setting.
+    if (d != 0 && (encoder_enabled || vault_unlock_active)) {
+      if (vault_unlock_active) vault_unlock_encoder_rotate(d);
+      else if (enc_btn_state == ENC_PRESSED) menu_encoder_chord_rotate(d);
       else menu_encoder_rotate(d);
     }
 
@@ -151,8 +172,10 @@
             msngr_kb_del_hold_fired_enc = false;   // ...nor has DEL-repeat
             msngr_kb_del_repeat_last_enc = 0;
           #endif
-        } else if (encoder_enabled) {
-          menu_encoder_button(millis() - enc_btn_down_last);
+        } else if (encoder_enabled || vault_unlock_active) {
+          if (vault_unlock_active) vault_unlock_encoder_button(millis() - enc_btn_down_last);
+          else if (vault_suppress_next_release) vault_suppress_next_release = false;
+          else menu_encoder_button(millis() - enc_btn_down_last);
         }
       }
     }
@@ -167,8 +190,16 @@
     #if HAS_LXMF == true
       if (menu_state == MENU_STATE_MSNGR_TEXT_ENTRY) hold_beep_threshold = 3000;
     #endif
+    // Suppressed during the vault unlock/enroll screen - this tone's
+    // meaning ("hold longer and release to trigger the current context's
+    // long-press action") is specifically wrong there: it's inherited from
+    // Settings' own long-press-opens-Settings semantics, and hearing it
+    // mid-PIN-entry told the user "release now and this will open
+    // Settings," which isn't what a long hold does here at all
+    // (backspace/submit - see vault_unlock_encoder_button(), VaultUnlock.h).
     if (encoder_enabled && enc_btn_state == ENC_PRESSED && !enc_btn_hold_beeped &&
-        menu_state != MENU_STATE_STATUS_POPUP &&
+        menu_state != MENU_STATE_STATUS_POPUP && !vault_unlock_active &&
+        !vault_suppress_next_release &&
         (millis() - enc_btn_down_last) > hold_beep_threshold) {
       buzzer_encoder_tick_melody();
       enc_btn_hold_beeped = true;

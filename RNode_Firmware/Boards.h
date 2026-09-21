@@ -225,6 +225,16 @@
   #define HAS_DISPLAY false
   #define HAS_BLUETOOTH false
   #define HAS_BLE false
+  // BLE HID keyboard host (BLEKeyboardHost.h) - separate from HAS_BLE
+  // (BLESerial peripheral role) since a board could plausibly support one
+  // without the other. MeshAdventurer-S3/MCU_ESP32 only by default.
+  // #ifndef-guarded (matching HAS_URNS's own global fallback further
+  // down) so a test/experimental env can force it on via a plain
+  // -DHAS_BLE_HID_HOST=true build flag (platformio.ini) without a
+  // board-specific Boards.h block - see [env:heltec32v4pa_urns_ble].
+  #ifndef HAS_BLE_HID_HOST
+    #define HAS_BLE_HID_HOST false
+  #endif
   #define HAS_WIFI false
   #define HAS_ESPNOW false
   #define HAS_ETHERNET false
@@ -487,6 +497,10 @@
       #define HAS_BLUETOOTH false
       #undef HAS_BLE
       #define HAS_BLE true
+      #if MCU_VARIANT == MCU_ESP32
+        #undef HAS_BLE_HID_HOST
+        #define HAS_BLE_HID_HOST true
+      #endif
       #undef HAS_WIFI
       #define HAS_WIFI true
       #undef HAS_ESPNOW

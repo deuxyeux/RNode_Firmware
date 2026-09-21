@@ -364,6 +364,32 @@ char bt_da[BT_DEV_ADDR_LEN];
       if (millis() < BT_START_MIN_UPTIME_MS) return;
       display_unblank();
       if (bt_state == BT_STATE_OFF) {
+        // DIAGNOSTIC ONLY - raw NVS dump of the "nimble_bond" namespace,
+        // BEFORE BLEDevice::init()/ble_store_config_init() gets a chance to
+        // touch anything. Investigating why a successful pairing (bond_
+        // count=1 right after) doesn't survive a reboot (bond_count=0
+        // again). This tells us whether the raw stored bytes themselves
+        // survive the reboot (a storage-layer problem if they don't) or
+        // survive but something in NimBLE's own reload logic fails to load
+        // them back into the in-RAM store (a logic-layer problem if they
+        // do). Remove after the investigation concludes.
+        #if defined(CONFIG_NIMBLE_ENABLED)
+        {
+          nvs_iterator_t bleiag_it = NULL;
+          esp_err_t bleiag_find_rc = nvs_entry_find(NVS_DEFAULT_PART_NAME, "nimble_bond", NVS_TYPE_ANY, &bleiag_it);
+          int bleiag_raw_count = 0;
+          DEBUG_LOG("[BLEDIAG] raw NVS scan of 'nimble_bond' namespace before init: find_rc=%d\n", (int)bleiag_find_rc);
+          while (bleiag_find_rc == ESP_OK && bleiag_it != NULL) {
+            nvs_entry_info_t bleiag_info;
+            nvs_entry_info(bleiag_it, &bleiag_info);
+            DEBUG_LOG("[BLEDIAG]   raw key='%s' type=%d\n", bleiag_info.key, (int)bleiag_info.type);
+            bleiag_raw_count++;
+            bleiag_find_rc = nvs_entry_next(&bleiag_it);
+          }
+          nvs_release_iterator(bleiag_it);
+          DEBUG_LOG("[BLEDIAG] raw NVS scan done: %d entries found\n", bleiag_raw_count);
+        }
+        #endif
         // SerialBT.begin() (BLESerial::begin(), BLESerial.cpp) now returns
         // false instead of crashing when the underlying BLEDevice::init()
         // fails (confirmed live: a WiFi/BLE coexistence race can still make
@@ -376,6 +402,21 @@ char bt_da[BT_DEV_ADDR_LEN];
         if (ok) {
           bt_state = BT_STATE_ON;
           SerialBT.setTimeout(10);
+          // DIAGNOSTIC ONLY - checking whether the NimBLE bond/RPA-record
+          // store on THIS board is already at/near CONFIG_BT_NIMBLE_MAX_BONDS
+          // capacity from real testing history (BLE MITM/multi-client
+          // sessions, this same keyboard's own 4+ rotating per-OS-mode
+          // identities) - see BLEKeyboardSpike.h investigation. A full RPA
+          // record store (ble_store_config.c: ble_store_config_rpa_recs[],
+          // sized to MYNEWT_VAL(BLE_STORE_MAX_BONDS)) has already been
+          // confirmed to fail writes on this exact board once
+          // (bt_debond_all()'s own comment, this file: "rc=27, ESTORE_CAP").
+          // Remove after checking.
+          #if defined(CONFIG_NIMBLE_ENABLED)
+            int bleiag_bond_count = 0;
+            ble_store_util_count(BLE_STORE_OBJ_TYPE_PEER_SEC, &bleiag_bond_count);
+            DEBUG_LOG("[BLEDIAG] bond_count=%d (CONFIG_BT_NIMBLE_MAX_BONDS=%d)\n", bleiag_bond_count, (int)MYNEWT_VAL(BLE_STORE_MAX_BONDS));
+          #endif
           // Gated on bt_state actually reaching ON, not on bt_start() merely
           // being called - this is the variant that can genuinely no-op
           // above (BT_START_MIN_UPTIME_MS) or right here (SerialBT.begin()

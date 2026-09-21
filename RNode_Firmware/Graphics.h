@@ -762,6 +762,16 @@ const unsigned char bm_hg_high [] PROGMEM = {
 #define MENU_ICON_W_MSNGR_DELETE 11
 #define MENU_ICON_W_MSNGR_REPLY 10
 #define MENU_ICON_W_MSNGR_COMPOSE 11
+#define MENU_ICON_W_MSNGR_NODE 11
+#define MENU_ICON_W_MSNGR_REMOVE_BOOKMARK 11
+#define MENU_ICON_W_MSNGR_ADD_BY_HASH 10
+#define MENU_ICON_W_MSNGR_PROP_NODE 11
+#define MENU_ICON_W_BLEKBD 11
+#define MENU_ICON_W_LEFT_ARROW  7
+#define MENU_ICON_W_RIGHT_ARROW 7
+#define MENU_ICON_W_MSNGR_FULL_MESSAGE 11
+#define MENU_ICON_W_MSNGR_PING_OK 13
+#define MENU_ICON_W_MSNGR_PING_FAIL 18
 
 const unsigned char bm_menu_icon_bt_legacy_pairing [] PROGMEM = {
   0x00, 0x00,
@@ -773,6 +783,24 @@ const unsigned char bm_menu_icon_bt_legacy_pairing [] PROGMEM = {
   0x1a, 0x00,
   0x29, 0x00,
   0x4e, 0x00,
+  0x00, 0x00,
+};
+
+// BT_LIST's "BLE Keyboard" row (BT_ITEM_KEYBOARD, Menu.h) and each
+// discovered-device row on MENU_STATE_BLEKBD_SCAN - a keyboard glyph, from
+// ~/Downloads/Icons/rnode-settings-keyboard.c (11x10 Piskel export),
+// converted to this project's 1bpp/PROGMEM format the same way every other
+// icon here is (see bm_menu_icon_msngr_settings's comment further below).
+const unsigned char bm_menu_icon_blekbd [] PROGMEM = {
+  0x00, 0x00,
+  0x3f, 0x80,
+  0x40, 0x40,
+  0x55, 0x40,
+  0x40, 0x40,
+  0x40, 0x40,
+  0x5d, 0x40,
+  0x40, 0x40,
+  0x3f, 0x80,
   0x00, 0x00,
 };
 
@@ -1117,6 +1145,35 @@ const unsigned char bm_menu_icon_msngr_msg_outgoing [] PROGMEM = {
   0x00, 0x00,
 };
 
+// MENU_STATE_MSNGR_CHAT's own message-row direction/selection glyphs
+// (Menu.h) - per user request, a left-pointing arrow for outgoing rows and
+// a right-pointing one for incoming, both drawn to the left of the row's
+// text (unlike MSNGR_PEER's own incoming/outgoing icons above, which sit
+// on whichever side the text itself is aligned to). From ~/Downloads/
+// Icons/rnode-settings-left-arrow.c / rnode-settings-right-arrow.c (7x7
+// Piskel exports, frame 1 - frame 0 is blank), converted to this project's
+// 1bpp/PROGMEM format the same way every other icon here is (see bm_menu_
+// icon_msngr_settings's own comment above).
+const unsigned char bm_menu_icon_left_arrow [] PROGMEM = {
+  0x00,
+  0x10,
+  0x20,
+  0x7c,
+  0x20,
+  0x10,
+  0x00,
+};
+
+const unsigned char bm_menu_icon_right_arrow [] PROGMEM = {
+  0x00,
+  0x10,
+  0x08,
+  0x7c,
+  0x08,
+  0x10,
+  0x00,
+};
+
 // MENU_STATE_MSNGR_PEER's "Ping" action row (MSNGR_PEER_ACTION_PING,
 // Menu.h) - a radar-ring glyph, from ~/Downloads/Icons/rnode-settings-ping.c
 // (10x10 Piskel export), converted to this project's 1bpp/PROGMEM format
@@ -1174,6 +1231,62 @@ const unsigned char bm_menu_icon_msngr_reply [] PROGMEM = {
   0x00, 0x00,
 };
 
+// MENU_STATE_MSNGR_MSG_DETAIL's "Full Message" row (Menu.h) - a document
+// glyph, from ~/Downloads/Icons/rnode-settings-full-message.c (11x10
+// Piskel export), converted to this project's 1bpp/PROGMEM format the
+// same way every other icon here is (see bm_menu_icon_msngr_settings's
+// comment above).
+const unsigned char bm_menu_icon_msngr_full_message [] PROGMEM = {
+  0x00, 0x00,
+  0x7f, 0xc0,
+  0x60, 0xc0,
+  0x51, 0x40,
+  0x4e, 0x40,
+  0x40, 0x40,
+  0x55, 0x40,
+  0x40, 0x40,
+  0x7f, 0xc0,
+  0x00, 0x00,
+};
+
+// MENU_STATE_MSNGR_PING_RESULT's status row (Menu.h) on a successful ping -
+// a checkmark-in-circle glyph, from ~/Downloads/Icons/rnode-settings-ping-
+// ok.c (13x10 Piskel export), converted to this project's 1bpp/PROGMEM
+// format the same way every other icon here is (see bm_menu_icon_msngr_
+// settings's comment above).
+const unsigned char bm_menu_icon_msngr_ping_ok [] PROGMEM = {
+  0x00, 0x00,
+  0x7f, 0xf0,
+  0x40, 0x10,
+  0x5d, 0x50,
+  0x55, 0x50,
+  0x55, 0x90,
+  0x5d, 0x50,
+  0x40, 0x10,
+  0x7f, 0xf0,
+  0x00, 0x00,
+};
+
+// MENU_STATE_MSNGR_PING_RESULT's status row (Menu.h) on a failed ping - an
+// X-in-circle glyph, from ~/Downloads/Icons/rnode-settings-ping-fail.c
+// (18x10 Piskel export, the first icon in this file wide enough to need 3
+// bytes/row rather than 2 - drawBitmap()'s own row stride is ceil(w/8),
+// same conversion script, no special-casing needed), converted to this
+// project's 1bpp/PROGMEM format the same way every other icon here is (see
+// bm_menu_icon_msngr_settings's comment above).
+const unsigned char bm_menu_icon_msngr_ping_fail [] PROGMEM = {
+  0x00, 0x00, 0x00,
+  0x7f, 0xff, 0x80,
+  0x40, 0x00, 0x80,
+  0x5d, 0xd4, 0x80,
+  0x51, 0x54, 0x80,
+  0x59, 0xd4, 0x80,
+  0x51, 0x56, 0x80,
+  0x40, 0x00, 0x80,
+  0x7f, 0xff, 0x80,
+  0x00, 0x00, 0x00,
+};
+
 // MENU_STATE_MSNGR_PEER's "Compose message" row (Menu.h) - a pencil
 // glyph, from ~/Downloads/Icons/rnode-settings-compose.c (11x10 Piskel
 // export), converted to this project's 1bpp/PROGMEM format the same way
@@ -1188,6 +1301,82 @@ const unsigned char bm_menu_icon_msngr_compose [] PROGMEM = {
   0x4c, 0x40,
   0x50, 0x40,
   0x40, 0x40,
+  0x7f, 0xc0,
+  0x00, 0x00,
+};
+
+// MENU_STATE_MSNGR_INBOX's conversation rows (Menu.h) - a contact/node
+// glyph to the left of each peer's display name, from
+// ~/Downloads/Icons/rnode-settings-node.c (11x10 Piskel export),
+// converted to this project's 1bpp/PROGMEM format the same way every other
+// icon here is (see bm_menu_icon_msngr_settings's comment above).
+const unsigned char bm_menu_icon_msngr_node [] PROGMEM = {
+  0x00, 0x00,
+  0x0e, 0x00,
+  0x11, 0x00,
+  0x11, 0x00,
+  0x11, 0x00,
+  0x2e, 0x80,
+  0x40, 0x40,
+  0x40, 0x40,
+  0x40, 0x40,
+  0x00, 0x00,
+};
+
+// MENU_STATE_MSNGR_PEER's "Remove Bookmark" action row (Menu.h,
+// MSNGR_PEER_FIXED_ACTION_BOOKMARK, shown once the active peer is already
+// bookmarked - bm_menu_icon_msngr_bookmarks itself covers the "Add
+// Bookmark" state) - a ribbon-bookmark-with-X glyph, from
+// ~/Downloads/Icons/rnode-settings-remove-bookmark.c (11x10 Piskel
+// export), converted to this project's 1bpp/PROGMEM format the same way
+// every other icon here is (see bm_menu_icon_msngr_settings's comment
+// above).
+const unsigned char bm_menu_icon_msngr_remove_bookmark [] PROGMEM = {
+  0x00, 0x00,
+  0x7f, 0x00,
+  0x00, 0x00,
+  0x7f, 0x80,
+  0x41, 0x40,
+  0x49, 0xc0,
+  0x55, 0x00,
+  0x63, 0x00,
+  0x41, 0x00,
+  0x00, 0x00,
+};
+
+// MENU_STATE_MSNGR_BOOKMARKS' "Add by Hash" row (Menu.h) - a plus-in-
+// brackets glyph, from ~/Downloads/Icons/rnode-settings-add-by-hash.c
+// (10x10 Piskel export), converted to this project's 1bpp/PROGMEM format
+// the same way every other icon here is (see bm_menu_icon_msngr_settings's
+// comment above).
+const unsigned char bm_menu_icon_msngr_add_by_hash [] PROGMEM = {
+  0x00, 0x00,
+  0x12, 0x00,
+  0x12, 0x00,
+  0x7f, 0x80,
+  0x12, 0x00,
+  0x12, 0x00,
+  0x7f, 0x80,
+  0x12, 0x00,
+  0x12, 0x00,
+  0x00, 0x00,
+};
+
+// MENU_STATE_MSNGR_BOOKMARKS' row icon for Propagation-type bookmarks
+// (Menu.h, in place of bm_menu_icon_msngr_node) - a broadcast-tower
+// glyph, from ~/Downloads/Icons/rnode-settings-prop-node.c (11x10 Piskel
+// export), converted to this project's 1bpp/PROGMEM format the same way
+// every other icon here is (see bm_menu_icon_msngr_settings's comment
+// above).
+const unsigned char bm_menu_icon_msngr_prop_node [] PROGMEM = {
+  0x00, 0x00,
+  0x7f, 0xc0,
+  0x44, 0x40,
+  0x4e, 0x40,
+  0x55, 0x40,
+  0x44, 0x40,
+  0x7f, 0xc0,
+  0x04, 0x00,
   0x7f, 0xc0,
   0x00, 0x00,
 };

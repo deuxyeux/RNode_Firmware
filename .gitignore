@@ -15,9 +15,11 @@ build/*
 .pio_vendor/
 compile_commands.json
 Release/*.version
-# Combined "arduino, espidf" build mode (meshadventurer_s3) generated/fetched
-# artifacts - sdkconfig.defaults itself is hand-authored and stays tracked.
-sdkconfig.meshadventurer_s3
+# Combined "arduino, espidf" build mode (meshadventurer_s3, heltec32v4pa_urns_ble,
+# ...) per-env generated/fetched config caches - sdkconfig.defaults itself is
+# hand-authored and stays tracked (excluded below).
+sdkconfig.*
+!sdkconfig.defaults
 managed_components/
 dependencies.lock
 # Two separate generated files: the top-level project one (always at

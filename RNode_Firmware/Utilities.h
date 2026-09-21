@@ -330,7 +330,24 @@ void buzzer_wait_for_melody();
     // same reason/pattern as kiss_select_interface() above.
     bool espnow_send(const uint8_t *data, uint16_t len);
   #endif
+  // PIN/passphrase at-rest protection for the identity URNS.h sets up below
+  // (Vault.h) - must come BEFORE URNS.h: urns_init() (URNS.h) calls into
+  // Vault.h's functions, so they need to already be declared by the time
+  // that function body is parsed. Vault.h has its own self-contained
+  // microReticulum.h include for exactly this reason (can't rely on
+  // URNS.h having done it first).
+  #include "Vault.h"
+  // Boot-unlock PIN entry screen - must also come before URNS.h, since
+  // RNode_Firmware.ino's setup() calls vault_unlock_boot_screen() (defined
+  // here) right before urns_init() (URNS.h).
+  #include "VaultUnlock.h"
   #include "URNS.h"
+  // KISS identity export/import - needs urns_ready (URNS.h, just above)
+  // plus Vault.h/VaultUnlock.h's PIN-entry plumbing, but nothing from
+  // Messenger.h - identity transfer applies regardless of whether this
+  // board also has HAS_LXMF, so it isn't nested under that guard the way
+  // Messenger.h itself is just below.
+  #include "IdentityTransfer.h"
   #if HAS_LXMF == true
     #include "Messenger.h"
   #endif
@@ -343,6 +360,7 @@ void buzzer_wait_for_melody();
 #if MCU_VARIANT == MCU_ESP32 || HAS_BLUETOOTH == true || HAS_BLE == true
   #include "Bluetooth.h"
 #endif
+#include "BLEKeyboardHost.h"
 
 #if HAS_WIFI == true
   // Forward-declared so Remote.h's wifi_remote_available() (included next)
