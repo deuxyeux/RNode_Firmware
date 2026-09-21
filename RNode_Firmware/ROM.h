@@ -325,6 +325,104 @@
   #define URNS_INTERFACE_ESPNOW_ONLY 0x01
   #define URNS_INTERFACE_BOTH        0x02
 
+  // Whether a failed DIRECT/OPPORTUNISTIC LXMF delivery automatically
+  // retries via the active propagation node (LXMRouter::set_fallback_to_
+  // propagation(), Messenger.h/Menu.h) - RNode Settings > Messenger >
+  // Settings > Propagate on Fail. Same unclaimed 256-823 gap as
+  // ADDR_CONF_URNS_INTERFACE above, raw physical byte, no eeprom_addr()
+  // wrapper. Default OFF (byte 0x00/absent-EEPROM-is-off, the usual
+  // convention) - propagation is a new feature and needs an active node
+  // selected via Bookmarks > Add by Hash first anyway, so silently
+  // enabling fallback out of the box would just mean failed sends
+  // quietly retry into a black hole on every existing device.
+  #define ADDR_CONF_MSNGR_PROP_ON_FAIL 274
+  #define MSNGR_PROP_ON_FAIL_ENABLE_BYTE  0x01
+  #define MSNGR_PROP_ON_FAIL_DISABLE_BYTE 0x00
+
+  // Periodic propagation-node sync interval - stores a preset index (Off/
+  // 15m/30m/1h/2h/6h/12h/24h, msngr_sync_interval_presets_s[], Messenger.h)
+  // driving a periodic LXMRouter::request_messages_from_propagation_node()
+  // call, same "preset index, not a raw value" shape as ADDR_CONF_MSNGR_
+  // ANNOUNCE_INTERVAL. Out-of-range/erased (0xFF) leaves msngr_sync_
+  // interval_idx at its compiled default (0 = Off) - no periodic sync
+  // traffic on a device that never configured a propagation node. Same
+  // unclaimed 256-823 gap as ADDR_CONF_MSNGR_PROP_ON_FAIL above.
+  #define ADDR_CONF_MSNGR_SYNC_INTERVAL 275
+
+  // Max messages requested per propagation sync (LXMRouter::set_sync_
+  // message_limit(), raw value not a preset index) - RNode Settings >
+  // Messenger > Settings > Sync Limit. Menu range is deliberately 0-254,
+  // not the full 0-255 a byte could hold - keeping 0xFF/255 permanently
+  // out of range (same "out-of-range/erased leaves compiled default"
+  // convention as ADDR_CONF_MSNGR_RETRIES) is what lets an erased byte on
+  // a never-configured device fall back to the compiled default (8)
+  // instead of being misread as an explicit 255-message cap; 0 (the
+  // "unlimited" value) is unaffected since it's a genuinely separate
+  // value from 255. Same unclaimed 256-823 gap as ADDR_CONF_MSNGR_SYNC_
+  // INTERVAL above.
+  #define ADDR_CONF_MSNGR_SYNC_LIMIT 276
+
+  // Required LXMF stamp cost for inbound delivery (LXMRouter::set_stamp_
+  // cost()/enforce_stamps()/ignore_stamps()) - RNode Settings > Messenger >
+  // Settings > Required Stamp Cost. Same "menu range stops at 254, not
+  // 255" shape as ADDR_CONF_MSNGR_SYNC_LIMIT above and for the same
+  // reason - keeps 0xFF/255 permanently out of range so an erased byte on
+  // a never-configured device falls back to the compiled default (0 =
+  // disabled) instead of being misread as an explicit cost-255
+  // requirement (which would reject every inbound message). Same
+  // unclaimed 256-823 gap as ADDR_CONF_MSNGR_SYNC_LIMIT above.
+  #define ADDR_CONF_MSNGR_STAMP_COST 277
+
+  // Whether the LXMF identity + message store are encrypted at rest behind
+  // a user PIN/passphrase (Vault.h, VaultUnlock.h) - RNode Settings >
+  // Messenger > PIN Protection. Raw physical byte, not through
+  // eeprom_addr() - must be readable in setup() before urns_init() ever
+  // mounts the "urns" LittleFS partition, the same reasoning as
+  // ADDR_CONF_URNS/ADDR_CONF_URNS_TRANSPORT above (this decides whether the
+  // boot-unlock screen even runs, so it can't itself live inside the thing
+  // it's gating). Default OFF/erased-0xFF - PIN protection is opt-in, so an
+  // existing device with a plaintext identity keeps working unchanged until
+  // the user explicitly enables it via the menu (which also migrates any
+  // existing plaintext identity in place). Same unclaimed 256-823 gap as
+  // ADDR_CONF_MSNGR_STAMP_COST above.
+  #define ADDR_CONF_VAULT_ENABLED 278
+  #define VAULT_ENABLE_BYTE  0x01
+  #define VAULT_DISABLE_BYTE 0x00
+
+  // Whether BLE HID keyboard-host functionality (BLEKeyboardHost.h,
+  // HAS_BLE_HID_HOST boards only) is opted into at all - RNode Settings >
+  // Bluetooth > BLE Keyboard > Enabled. Same unclaimed 256-823 gap as
+  // ADDR_CONF_VAULT_ENABLED above, raw physical byte, no eeprom_addr()
+  // wrapper. Default OFF/erased-0xFF - unlike most existing BT flags this
+  // scans and opens a GATT connection to a remembered peer whenever BLE is
+  // on, so it must not be silently on for existing devices; a brand new
+  // opt-in feature, no pre-existing shipped behavior to preserve.
+  #define ADDR_CONF_BLEKBD_ENABLED 279
+  #define BLEKBD_ENABLE_BYTE  0x01
+  #define BLEKBD_DISABLE_BYTE 0x00
+
+  // The one BLE HID keyboard the user has explicitly selected and paired
+  // via RNode Settings > Bluetooth > BLE Keyboard > Scan for Keyboard -
+  // blekbd_peer_conf_save()/blekbd_peer_conf_forget() (BLEKeyboardHost.h).
+  // Two fields, 7 bytes total:
+  //   ADDR_CONF_BLEKBD_PEER_ADDR_TYPE (1 byte) - the ble_addr_type_t
+  //     (BLE_ADDR_PUBLIC=0/BLE_ADDR_RANDOM=1/BLE_ADDR_PUBLIC_ID=2/
+  //     BLE_ADDR_RANDOM_ID=3) NimBLE returned for this peer at pairing
+  //     time. Legal range is 0-3, so 0xFF/erased is permanently out of
+  //     range and used as the "no keyboard stored" sentinel - same
+  //     "keep 0xFF out of range so erased reads as unset" convention as
+  //     ADDR_CONF_MSNGR_STAMP_COST above. Written LAST by
+  //     blekbd_peer_conf_save() (after the 6 address bytes below) so a
+  //     power-loss mid-write can never leave a valid-looking type paired
+  //     with a half-written stale address.
+  //   ADDR_CONF_BLEKBD_PEER_ADDR (6 bytes, 281-286) - the peer's own
+  //     ble_addr_t.val[6], same byte order NimBLE's own event->disc.addr.
+  //     val uses. Meaningless whenever the type byte above reads as unset.
+  // Same unclaimed 256-823 gap, raw physical bytes, no eeprom_addr()
+  // wrapper.
+  #define ADDR_CONF_BLEKBD_PEER_ADDR_TYPE 280
+  #define ADDR_CONF_BLEKBD_PEER_ADDR      281 // .. 286 (6 bytes)
+
   #define CONFIG_SIZE     256
   #define ADDR_CONF_SSID 0x00
   #define ADDR_CONF_PSK  0x21

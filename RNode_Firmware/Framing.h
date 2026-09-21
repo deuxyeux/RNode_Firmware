@@ -101,6 +101,21 @@
   // can configure its buzzer/vsense-divider again.
   #define CMD_SND         0x91
   #define CMD_VSENSE_DIV  0x92
+  // LXMF identity export/import (IdentityTransfer.h, HAS_URNS boards
+  // only, phase (d) of /home/nickie/.claude/plans/lucky-wandering-
+  // journal.md) - same request/full-frame-then-dispatch shape as
+  // CMD_PROVISION_REQ/RSP above, reused for both directions on a single
+  // opcode each (there's no separate _RSP counterpart - the device's
+  // reply reuses the same command byte, mirroring how CMD_SENSOR's single
+  // opcode covers both the trigger and its own reply). EXPORT's request
+  // payload is ignored (a bare trigger, like CMD_SENSOR) - the real
+  // gating (current-PIN re-verification) and the fresh export passphrase
+  // are both entered ON-DEVICE, never over this wire. IMPORT's request
+  // payload IS meaningful: the already-PIN-encrypted VaultBlob produced
+  // by a prior EXPORT - still safe to send in the clear since it's
+  // ciphertext, decrypted only after an on-device passphrase prompt.
+  #define CMD_IDENTITY_EXPORT 0x93
+  #define CMD_IDENTITY_IMPORT 0x94
   // Wired Ethernet's own static IP/netmask (MeshPoE-S3 only, HAS_ETHERNET) -
   // same wire format as CMD_WIFI_IP/NM above, just a separate address pair
   // (ADDR_CONF_ETH_IP/NM, ROM.h) so WiFi and Ethernet can each have their

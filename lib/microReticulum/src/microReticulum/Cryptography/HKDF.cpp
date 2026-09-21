@@ -37,6 +37,9 @@ const Bytes RNS::Cryptography::hkdf(size_t length, const Bytes& derive_from, con
 		hkdf.setKey(derive_from.data(), derive_from.size());
 	}
 	Bytes derived;
-	hkdf.extract(derived.writable(length), length);
+	// context is HKDF's "info" (domain-separation) parameter - must be forwarded here,
+	// otherwise two callers deriving different-purpose subkeys from the same
+	// derive_from/salt would silently get back identical bytes.
+	hkdf.extract(derived.writable(length), length, context.data(), context.size());
 	return derived;
 }

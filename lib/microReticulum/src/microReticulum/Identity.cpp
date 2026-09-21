@@ -397,6 +397,23 @@ Recall last heard app_data for a destination hash.
 							CRITICAL("This may indicate an attempt to modify network paths, or a random hash collision. The announce was rejected.");
 							return false;
 						}
+						else if (identity_entry._app_data.size() == 0 && app_data.size() > 0) {
+							// app_data backfill - the pubkey matches (same
+							// identity, nothing to reject), but the cached entry
+							// was first learned without app_data (a common case
+							// for RNode_Firmware's Messenger: a bare path
+							// response answering Transport::request_path() for a
+							// manually-added destination hash resolves the
+							// identity but carries no app_data of its own,
+							// Messenger.h's "Add by Hash" feature) and this
+							// announce/path-response is the first one to actually
+							// carry it. Worth the one-time flash write this
+							// DIVERGENCE optimization otherwise skips entirely -
+							// without it, a peer's display name could never
+							// resolve for the lifetime of this cache entry, even
+							// once real app_data becomes available.
+							remember(packet.get_hash(), destination_hash, public_key, app_data);
+						}
 					}
 					else {
 						// DIVERGENCE: To lessen flash wear, only adding known destination if it's not already known

@@ -481,6 +481,32 @@ MEM("Creating from std-vector-copy...");
 	inline std::string hexFromBytes(const Bytes& bytes) { return bytes.toHex(); }
 	std::string hexFromByte(uint8_t byte, bool upper = true);
 
+	// Overwrites the backing storage of bytes with zeros before releasing it -
+	// Bytes::clear() alone only drops the shared_ptr reference, it never
+	// touches the underlying heap memory, so secrets (KDF outputs, PIN/
+	// passphrase buffers, transient private-key plaintext) linger in freed
+	// heap until unrelated allocations happen to overwrite them.
+	// Deliberately writes through the raw pointer (not writable(), which can
+	// silently hand back a *new*, already-zeroed buffer instead of the
+	// original when the data isn't exclusively owned) and through a volatile
+	// pointer so the compiler can't optimize the writes away.
+	// CAUTION: Bytes is copy-on-write - if another Bytes instance still
+	// shares this buffer (e.g. via operator=/copy-construction, not via
+	// left()/mid()/right()/assign(), which always deep-copy), this zeroes
+	// that instance's view too. Only call this on a Bytes you know isn't
+	// aliased, e.g. a freshly-constructed temporary.
+	inline void secure_zero(Bytes& bytes) {
+		size_t sz = bytes.size();
+		if (sz == 0) {
+			return;
+		}
+		volatile uint8_t* p = (volatile uint8_t*)bytes.data();
+		for (size_t i = 0; i < sz; i++) {
+			p[i] = 0;
+		}
+		bytes.clear();
+	}
+
 }
 
 inline RNS::Bytes& operator << (RNS::Bytes& lhbytes, const RNS::Bytes& rhbytes) {
