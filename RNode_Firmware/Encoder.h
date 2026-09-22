@@ -45,10 +45,26 @@
   // isn't initialized yet during the boot-unlock screen, so this can't
   // just be handled inside menu_encoder_rotate()/menu_encoder_button()
   // themselves.
-  extern bool vault_unlock_active;
-  extern bool vault_suppress_next_release;
-  void vault_unlock_encoder_rotate(int8_t dir);
-  void vault_unlock_encoder_button(unsigned long duration);
+  //
+  // VaultUnlock.h is only included under HAS_URNS == true (Utilities.h) -
+  // stub fallbacks here for the false case, same "always false, no vault"
+  // effect as RNode_Firmware.ino's button_event() gets from wrapping its
+  // own vault_unlock_active checks in #if HAS_URNS == true, but without
+  // needing to scatter that guard through encoder_process()'s own
+  // interspersed if/else-if logic below (found via a full-fleet release
+  // build - promicro/meshadventurer, both non-URNS, failed to link on
+  // these exact symbols).
+  #if HAS_URNS == true
+    extern bool vault_unlock_active;
+    extern bool vault_suppress_next_release;
+    void vault_unlock_encoder_rotate(int8_t dir);
+    void vault_unlock_encoder_button(unsigned long duration);
+  #else
+    static bool vault_unlock_active = false;
+    static bool vault_suppress_next_release = false;
+    inline void vault_unlock_encoder_rotate(int8_t dir) {}
+    inline void vault_unlock_encoder_button(unsigned long duration) {}
+  #endif
 
   // Classic 4-state Gray-code quadrature transition table, indexed by
   // (prev_AB<<2)|curr_AB. Illegal transitions (both channels changed
