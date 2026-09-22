@@ -139,6 +139,10 @@ def build_manifest(env_name, release_basename):
         flash_files[hex(otadata_row["offset"])] = f"{release_basename}.boot_app0"
 
     return {
+        # Lets a flasher identify which catalog device/variant a zip is for
+        # from the manifest itself, not the outer zip's filename (which a
+        # browser download or a user rename can change).
+        "variant": release_basename,
         "chip_family": mcu,
         "flash_size": flash_size,
         "flash_mode": FLASH_MODE,
