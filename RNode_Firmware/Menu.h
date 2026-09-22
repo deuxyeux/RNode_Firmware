@@ -10594,10 +10594,16 @@
         valbufs[0][0] = 0;
         labels[1] = "BACK";
         valbufs[1][0] = 0;
+        // MENU_ROW_TEXT_X_ICONS's fixed column only clears the narrower
+        // ping-ok icon (13px) with room to spare - the wider ping-fail
+        // icon (18px) ran into the label text. Push the label right by
+        // the excess over the ok icon's width so both icons keep the
+        // same ~1px gap to the label.
+        const int8_t text_dx[2] = { (int8_t)(icon_widths[0] > MENU_ICON_W_MSNGR_PING_OK ? icon_widths[0] - MENU_ICON_W_MSNGR_PING_OK : 0), 0 };
 
         char title[24];
         snprintf(title, sizeof(title), "PING: %s", messenger_peer_display_name(msngr_active_peer_hash).c_str());
-        draw_menu_list_disp(title, labels, valbufs, 2, msngr_ping_result_cursor, icons, icon_widths, nullptr, false);
+        draw_menu_list_disp(title, labels, valbufs, 2, msngr_ping_result_cursor, icons, icon_widths, nullptr, false, text_dx);
       } else if (menu_state == MENU_STATE_MSNGR_SEND_RESULT) {
         // Reads msngr_send_state fresh on every redraw - messenger_send_
         // process()/messenger_on_delivered() (Messenger.h) are what
@@ -10661,10 +10667,14 @@
         valbufs[0][0] = 0;
         labels[1] = "BACK";
         valbufs[1][0] = 0;
+        // Same fixed-column overlap fix as MSNGR_PING_RESULT above - the
+        // wider ping-fail icon needs the label pushed right a bit further
+        // than the narrower ping-ok icon does.
+        const int8_t text_dx[2] = { (int8_t)(icon_widths[0] > MENU_ICON_W_MSNGR_PING_OK ? icon_widths[0] - MENU_ICON_W_MSNGR_PING_OK : 0), 0 };
 
         char title[24];
         snprintf(title, sizeof(title), "SEND: %s", messenger_peer_display_name(msngr_active_peer_hash).c_str());
-        draw_menu_list_disp(title, labels, valbufs, 2, msngr_send_result_cursor, icons, icon_widths, nullptr, false);
+        draw_menu_list_disp(title, labels, valbufs, 2, msngr_send_result_cursor, icons, icon_widths, nullptr, false, text_dx);
       } else if (menu_state == MENU_STATE_MSNGR_SETTINGS) {
         const char *labels[MSNGR_SETTINGS_ITEM_COUNT];
         char valbufs[MSNGR_SETTINGS_ITEM_COUNT][24];
