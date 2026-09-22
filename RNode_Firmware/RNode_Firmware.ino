@@ -2368,7 +2368,20 @@ void serial_callback(uint8_t sbyte) {
     } else if (command == CMD_FB_READ) {
       if (sbyte != 0x00) { kiss_indicate_fb(); }
     } else if (command == CMD_DISP_READ) {
-      if (sbyte != 0x00) { kiss_indicate_disp(); }
+      if (sbyte != 0x00) {
+        // Counts as activity, same as CMD_DISP_INT/CMD_DISP_BLNK/CMD_DISP_ROT
+        // below - resets the auto-blank timer so a screen read (and the web
+        // flasher's once-a-second auto-refresh polling this) doesn't itself
+        // read back a blanked buffer, and keeps reading live content for as
+        // long as reads keep arriving. See display_unblank()/update_display()
+        // (Display.h) for how the timer reset takes effect on the next
+        // loop() iteration's regular redraw - deliberately not forcing a
+        // redraw here to avoid growing this command path's call stack.
+        #if HAS_DISPLAY
+          display_unblank();
+        #endif
+        kiss_indicate_disp();
+      }
     } else if (command == CMD_DEV_HASH) {
       #if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
         if (sbyte != 0x00) {
