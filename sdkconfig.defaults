@@ -80,15 +80,22 @@ CONFIG_COMPILER_CXX_RTTI=y
 # these Octal settings, that board's real Quad PSRAM chip fails ID
 # readback ("PSRAM ID read error... fallback to use default driver
 # pattern... Found 16MB PSRAM device" - garbage), and it crashes before
-# app_main() every single boot. To build that env, temporarily swap the
-# two lines below for:
-#   CONFIG_SPIRAM_MODE_QUAD=y
-#   CONFIG_SPIRAM_TYPE_ESPPSRAM16=y
-# (TYPE_ESPPSRAM16 explicitly, not TYPE_AUTO - auto-detect alone was
-# confirmed NOT sufficient on that exact chip, a MODE_QUAD+TYPE_AUTO test
-# still failed) then revert back to the two lines below before building
-# meshadventurer_s3/meshpoe_s3 again. Do NOT leave the Quad/PSRAM16
-# variant committed here - it silently breaks both real boards' PSRAM.
+# app_main() every single boot. (TYPE_ESPPSRAM16 explicitly, not TYPE_AUTO -
+# auto-detect alone was confirmed NOT sufficient on that exact chip, a
+# MODE_QUAD+TYPE_AUTO test still failed.)
+#
+# DO NOT hand-edit this file to build that env - use
+# `scripts/pio_build.sh heltec32v4pa_urns_ble` instead, which applies the
+# Quad/ESPPSRAM16 override automatically and restores the committed
+# Octal/AUTO values below afterward even on failure. This file is a single
+# shared fragment with no per-env scoping (see header comment above) -
+# leaving a hand-edit committed here, or leaving it in place after a manual
+# build, silently breaks meshadventurer_s3/meshpoe_s3's real PSRAM; skipping
+# the swap when building heltec32v4pa_urns_ble (e.g. a mass-build loop
+# calling raw `pio run`) silently ships that board with a crash-on-boot
+# firmware instead. Both have actually happened in production - see
+# project memory "Heltec32-V4 BLE-keyboard PSRAM crash" for the original
+# diagnosis and its 2026-09-23 recurrence note.
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_OCT=y
 CONFIG_SPIRAM_TYPE_AUTO=y
