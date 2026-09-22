@@ -1,0 +1,28 @@
+# Name,   Type, SubType, Offset,  Size, Flags
+#
+# [env:xiao_esp32s3] variant of the stock no_ota.csv this board previously
+# used - real hardware has 8MB flash (user-confirmed 2026-09-22); the
+# stock table only used the first 4MB and platformio.ini didn't even
+# declare board_upload.flash_size explicitly before this. Same layout as
+# tbeam_supreme.csv - see that file's own comment for the full reasoning
+# (app0 doubled 2MB -> 4MB, spiffs kept exactly console_image.bin-sized
+# since HAS_CONSOLE is true here too, ~1.875MB deliberately left
+# unallocated spare margin).
+#
+# PSRAM is a SEPARATE, unresolved question, not touched by this file -
+# this env's own platformio.ini comment claims real hardware has 2MB Quad
+# PSRAM, contradicting other sources found researching this board
+# (8MB Octal) - BOARD_HAS_PSRAM is deliberately not set here either way,
+# so PSRAM stays inert regardless. Do not use this partition change as
+# grounds to also enable PSRAM without resolving that contradiction first
+# (see project memory on the Heltec32-V4 PSRAM crash for why a wrong
+# PSRAM mode is not a safe guess).
+#
+# UNTESTED ON REAL HARDWARE - flash_size correction came from the user,
+# not a live boot/flash confirmation on this exact board. Verify a full
+# flash+boot cycle before treating this as production-ready.
+nvs,      data, nvs,     0x9000,  0x5000,
+otadata,  data, ota,     0xe000,  0x2000,
+app0,     app,  ota_0,   0x10000, 0x400000,
+spiffs,   data, spiffs,  0x410000,0x1E0000,
+coredump, data, coredump,0x5F0000,0x10000,

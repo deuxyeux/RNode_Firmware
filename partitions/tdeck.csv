@@ -1,0 +1,22 @@
+# Name,   Type, SubType, Offset,  Size, Flags
+#
+# [env:tdeck] variant of the stock no_ota.csv this board previously used -
+# real hardware has 16MB flash (user-confirmed 2026-09-22), not the 4MB
+# the stock table and board_upload.flash_size assumed. HAS_CONSOLE is
+# false for this board (Boards.h) - the stock "spiffs" partition (console
+# web UI image) is dropped entirely, same reasoning as
+# meshadventurer_s3_urns.csv's own comment on that board's identical
+# HAS_CONSOLE=false case. app0 grown 2MB -> 4MB, same headroom bump as
+# the T-Beam Supreme pair. Total used: ~4MB of the real 16MB - the
+# remaining ~12MB is deliberately left unallocated spare margin, not
+# fully claimed (matches heltec32v4pa_urns.csv's own "ample spare room"
+# precedent - no current feature needs anywhere near the full 16MB for a
+# single classic-firmware app image).
+#
+# UNTESTED ON REAL HARDWARE - flash_size correction came from the user,
+# not a live boot/flash confirmation on this exact board. Verify a full
+# flash+boot cycle before treating this as production-ready.
+nvs,      data, nvs,     0x9000,  0x5000,
+otadata,  data, ota,     0xe000,  0x2000,
+app0,     app,  ota_0,   0x10000, 0x400000,
+coredump, data, coredump,0x410000,0x10000,

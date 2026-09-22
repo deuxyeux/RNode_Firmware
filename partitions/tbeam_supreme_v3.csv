@@ -1,0 +1,15 @@
+# Name,   Type, SubType, Offset,  Size, Flags
+#
+# [env:tbeam_supreme_v3] - same board family/layout as tbeam_supreme.csv,
+# see that file's own comment for the full reasoning (8MB real flash,
+# app0 doubled 2MB -> 4MB, spiffs kept exactly console_image.bin-sized,
+# ~1.875MB deliberately left unallocated). Kept as its own file rather
+# than sharing tbeam_supreme.csv, matching this project's existing
+# one-file-per-env convention even where two envs' tables are identical.
+#
+# UNTESTED ON REAL HARDWARE - see tbeam_supreme.csv's own caution.
+nvs,      data, nvs,     0x9000,  0x5000,
+otadata,  data, ota,     0xe000,  0x2000,
+app0,     app,  ota_0,   0x10000, 0x400000,
+spiffs,   data, spiffs,  0x410000,0x1E0000,
+coredump, data, coredump,0x5F0000,0x10000,
