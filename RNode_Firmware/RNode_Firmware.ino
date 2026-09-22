@@ -450,7 +450,7 @@ void setup() {
     boot_seq();
   #endif
 
-  #if BOARD_MODEL != BOARD_RAK4631 && BOARD_MODEL != BOARD_RAK3401 && BOARD_MODEL != BOARD_HELTEC_T114 && BOARD_MODEL != BOARD_HELTEC_T096 && BOARD_MODEL != BOARD_HELTEC_WTRACKER_V2 && BOARD_MODEL != BOARD_HELTEC_T1 && BOARD_MODEL != BOARD_MESHPOE_S3 && BOARD_MODEL != BOARD_MESHADVENTURER_S3 && BOARD_MODEL != BOARD_PROMICRO && BOARD_MODEL != BOARD_AETHERNODE_S3 && BOARD_MODEL != BOARD_TECHO && BOARD_MODEL != BOARD_T3S3 && BOARD_MODEL != BOARD_TBEAM_S_V1 && BOARD_MODEL != BOARD_TBEAM_S_V3 && BOARD_MODEL != BOARD_HELTEC32_V4 && BOARD_MODEL != BOARD_TBEAM_1W
+  #if BOARD_MODEL != BOARD_RAK4631 && BOARD_MODEL != BOARD_RAK3401 && BOARD_MODEL != BOARD_HELTEC_T114 && BOARD_MODEL != BOARD_HELTEC_T096 && BOARD_MODEL != BOARD_HELTEC_WTRACKER_V2 && BOARD_MODEL != BOARD_HELTEC_T1 && BOARD_MODEL != BOARD_MESHPOE_S3 && BOARD_MODEL != BOARD_MESHADVENTURER_S3 && BOARD_MODEL != BOARD_PROMICRO && BOARD_MODEL != BOARD_AETHERNODE_S3 && BOARD_MODEL != BOARD_TECHO && BOARD_MODEL != BOARD_T3S3 && BOARD_MODEL != BOARD_TBEAM_S_V1 && BOARD_MODEL != BOARD_TBEAM_S_V3 && BOARD_MODEL != BOARD_HELTEC32_V4 && BOARD_MODEL != BOARD_HELTEC32_V4_R8 && BOARD_MODEL != BOARD_TBEAM_1W
     // Some boards need to wait until the hardware UART is set up before booting
     // the full firmware. In the case of the RAK4631 and Heltec T114, the line below will wait
     // until a serial connection is actually established with a master. Thus, it
@@ -2772,7 +2772,7 @@ int  noise_floor_buffer[NOISE_FLOOR_SAMPLES] = {0};
 void update_noise_floor() {
   #if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
     if (!dcd) {
-      #if BOARD_MODEL != BOARD_HELTEC32_V4
+      #if BOARD_MODEL != BOARD_HELTEC32_V4 && BOARD_MODEL != BOARD_HELTEC32_V4_R8
       if (!noise_floor_sampled || current_rssi < noise_floor + CSMA_INFR_THRESHOLD_DB) {
       #else
       if ((!noise_floor_sampled || current_rssi < noise_floor + CSMA_INFR_THRESHOLD_DB) || (noise_floor_sampled && (noise_floor < LNA_GD_THRSHLD && current_rssi <= LNA_GD_LIMIT))) {
@@ -2866,7 +2866,7 @@ void update_modem_status() {
     portEXIT_CRITICAL();
   #endif
 
-  #if BOARD_MODEL == BOARD_HELTEC32_V4
+  #if BOARD_MODEL == BOARD_HELTEC32_V4 || BOARD_MODEL == BOARD_HELTEC32_V4_R8
     if (noise_floor > LNA_GD_THRSHLD)  { interference_detected = !carrier_detected && (current_rssi > (noise_floor+CSMA_INFR_THRESHOLD_DB)); }
     else                               { interference_detected = !carrier_detected && (current_rssi > LNA_GD_LIMIT); }
   #else
@@ -3491,7 +3491,7 @@ void sleep_now() {
           update_display(true);
         #endif
       #endif
-      #if BOARD_MODEL == BOARD_HELTEC32_V4
+      #if BOARD_MODEL == BOARD_HELTEC32_V4 || BOARD_MODEL == BOARD_HELTEC32_V4_R8
           #if LORA_PA_AUTO_DETECT
             if (sx126x_modem.isKCT8103L()) {
               digitalWrite(LORA_PA_CTX, LOW);

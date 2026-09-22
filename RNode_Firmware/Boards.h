@@ -105,6 +105,15 @@
   #define PRODUCT_H32_V4      0xC3
   #define BOARD_HELTEC32_V4   0x3F
   #define MODEL_C8            0xC8 // Heltec Lora32 v3, 850-950 MHz, 28dBm
+  // R8 (8MB Octal PSRAM) SKU of the same board - own PRODUCT, not just own
+  // BOARD_MODEL (BOARD_HELTEC32_V4_R8, this file's custom-board block
+  // below): RNode_Flasher re-identifies an already-provisioned device by
+  // its EEPROM PRODUCT+MODEL bytes alone (BOARD_MODEL is compiled-in, never
+  // read back over the wire) - sharing PRODUCT_H32_V4 here would make a
+  // reconnected R8 device silently misidentify as R2 and risk offering the
+  // wrong (crashing) firmware for a reflash. Radio/PA config is identical
+  // to R2 though, so MODEL_C8 is still shared - only PRODUCT needs to differ.
+  #define PRODUCT_H32_V4_R8   0xCB
 
   #define PRODUCT_HELTEC_T114 0xC2 // Heltec Mesh Node T114
   #define BOARD_HELTEC_T114   0x3C
@@ -155,6 +164,18 @@
   #define BOARD_PROMICRO          0xF5 // FakeTec (Promicro)
   #define BOARD_DIY_V1            0xF6 // DIY-V1
   #define BOARD_AETHERNODE_S3     0xF7 // Aethernode-S3
+  // Heltec WiFi LoRa 32 V4, ESP32-S3R8/8MB-Octal-PSRAM chip SKU - Heltec
+  // sells R2 (BOARD_HELTEC32_V4/0x3F, 2MB Quad) and R8 as separate SKUs
+  // under the same "V4" product name, independent of the 4.2/4.3 hardware
+  // revision (that's the RF front-end/PA chip only - GC1109 vs KCT8103L,
+  // already runtime-detected via GPIO, see sx126x.cpp's LORA_PA_MODEL
+  // probe). PSRAM bus width (Quad vs Octal) can't be runtime-probed the
+  // same way - it's an ESP-IDF Kconfig/board_build.arduino.memory_type
+  // choice baked in before app_main() ever runs, confirmed the hard way
+  // (see project memory "Heltec32-V4 BLE-keyboard PSRAM crash") - hence a
+  // real separate BOARD_MODEL, not just a differently-flagged build of
+  // the same one, matching Meshtastic's own separate heltec-v4-r8 target.
+  #define BOARD_HELTEC32_V4_R8    0xF8 // Heltec WiFi LoRa 32 V4 (ESP32-S3R8/8MB Octal PSRAM)
 
   // Heltec Wireless Tracker V2 (ESP32-S3FN8 + SX1262 + KCT8103L FEM +
   // ST7735S 160x80 TFT + UC6580 GNSS - same display/GNSS/FEM as
@@ -1084,7 +1105,16 @@
       const int pin_miso = 11;
       const int pin_sclk = 9;
 
-    #elif BOARD_MODEL == BOARD_HELTEC32_V4
+    #elif BOARD_MODEL == BOARD_HELTEC32_V4 || BOARD_MODEL == BOARD_HELTEC32_V4_R8
+      // Shared block - R8 (0xF8) differs from the base V4 (0x3F) only in
+      // PSRAM bus width (Quad/2MB vs Octal/8MB), which is entirely a
+      // build-time platformio.ini/sdkconfig concern (board_build.arduino.
+      // memory_type, or Kconfig under combined mode) - nothing here needs
+      // to differ. See BOARD_HELTEC32_V4_R8's own comment above for why
+      // that still needs a distinct BOARD_MODEL rather than just a build
+      // flag: PSRAM protocol mismatches crash before app_main() with no
+      // recovery, so RNode's flasher/hash-verification tooling needs a
+      // real device-identity distinction to pick the right firmware.
       #define IS_ESP32S3 true
       #undef HAS_DISPLAY
       #define HAS_DISPLAY true

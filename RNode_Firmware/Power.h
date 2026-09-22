@@ -130,7 +130,7 @@ float pmu_temperature = PMU_TEMP_MIN-1;
   bool bat_voltage_dropping = false;
   float bat_delay_v = 0;
   float bat_state_change_v = 0;
-#elif BOARD_MODEL == BOARD_HELTEC32_V4
+#elif BOARD_MODEL == BOARD_HELTEC32_V4 || BOARD_MODEL == BOARD_HELTEC32_V4_R8
   #define BAT_V_MIN       3.05
   #define BAT_V_MAX       4.0
   #define BAT_V_CHG       4.48
@@ -279,9 +279,9 @@ void measure_temperature() {
 }
 
 void measure_battery() {
-  #if BOARD_MODEL == BOARD_RNODE_NG_21 || BOARD_MODEL == BOARD_LORA32_V2_1 || BOARD_MODEL == BOARD_HELTEC32_V3 || BOARD_MODEL == BOARD_HELTEC32_V4 || BOARD_MODEL == BOARD_TDECK || BOARD_MODEL == BOARD_T3S3 || BOARD_MODEL == BOARD_HELTEC_T114 ||BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1 || BOARD_MODEL == BOARD_PROMICRO || BOARD_MODEL == BOARD_TECHO
+  #if BOARD_MODEL == BOARD_RNODE_NG_21 || BOARD_MODEL == BOARD_LORA32_V2_1 || BOARD_MODEL == BOARD_HELTEC32_V3 || BOARD_MODEL == BOARD_HELTEC32_V4 || BOARD_MODEL == BOARD_HELTEC32_V4_R8 || BOARD_MODEL == BOARD_TDECK || BOARD_MODEL == BOARD_T3S3 || BOARD_MODEL == BOARD_HELTEC_T114 ||BOARD_MODEL == BOARD_HELTEC_T096 || BOARD_MODEL == BOARD_HELTEC_WTRACKER_V2 || BOARD_MODEL == BOARD_HELTEC_T1 || BOARD_MODEL == BOARD_PROMICRO || BOARD_MODEL == BOARD_TECHO
     battery_installed = true;
-    #if BOARD_MODEL == BOARD_HELTEC32_V3 || BOARD_MODEL == BOARD_HELTEC32_V4
+    #if BOARD_MODEL == BOARD_HELTEC32_V3 || BOARD_MODEL == BOARD_HELTEC32_V4 || BOARD_MODEL == BOARD_HELTEC32_V4_R8
       battery_indeterminate = false;
     #else
       battery_indeterminate = true;
@@ -289,7 +289,7 @@ void measure_battery() {
 
     #if BOARD_MODEL == BOARD_HELTEC32_V3
       float battery_measurement = (float)(analogRead(pin_vbat)) * 0.0041;
-    #elif BOARD_MODEL == BOARD_HELTEC32_V4
+    #elif BOARD_MODEL == BOARD_HELTEC32_V4 || BOARD_MODEL == BOARD_HELTEC32_V4_R8
       float battery_measurement = (float)(analogRead(pin_vbat)) * 0.00418;
     #elif BOARD_MODEL == BOARD_T3S3
       float battery_measurement = (float)(analogRead(pin_vbat)) / 4095.0*6.7828;
@@ -612,7 +612,7 @@ bool init_pmu() {
     pinMode(pin_ctrl,OUTPUT);
     digitalWrite(pin_ctrl, pin_ctrl_active);
     return true;
-  #elif BOARD_MODEL == BOARD_HELTEC32_V4
+  #elif BOARD_MODEL == BOARD_HELTEC32_V4 || BOARD_MODEL == BOARD_HELTEC32_V4_R8
     pinMode(pin_ctrl,OUTPUT);
     digitalWrite(pin_ctrl, HIGH);
     return true;

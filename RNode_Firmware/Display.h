@@ -74,7 +74,7 @@
   #define DISP_ADDR 0x3C
   #define SCL_OLED 18
   #define SDA_OLED 17
-#elif BOARD_MODEL == BOARD_HELTEC32_V4
+#elif BOARD_MODEL == BOARD_HELTEC32_V4 || BOARD_MODEL == BOARD_HELTEC32_V4_R8
   #define DISP_RST 21
   #define DISP_ADDR 0x3C
   #define SCL_OLED 18
@@ -766,7 +766,7 @@ bool display_init() {
       digitalWrite(pin_display_en, HIGH);
       delay(50);
       Wire.begin(SDA_OLED, SCL_OLED);
-    #elif BOARD_MODEL == BOARD_HELTEC32_V4
+    #elif BOARD_MODEL == BOARD_HELTEC32_V4 || BOARD_MODEL == BOARD_HELTEC32_V4_R8
       // enable vext / pin 36
       pinMode(Vext, OUTPUT);
       digitalWrite(Vext, LOW);
@@ -942,7 +942,7 @@ bool display_init() {
         #elif BOARD_MODEL == BOARD_HELTEC32_V3
           disp_mode = DISP_MODE_PORTRAIT;
           display.setRotation(1);
-        #elif BOARD_MODEL == BOARD_HELTEC32_V4
+        #elif BOARD_MODEL == BOARD_HELTEC32_V4 || BOARD_MODEL == BOARD_HELTEC32_V4_R8
           disp_mode = DISP_MODE_PORTRAIT;
           display.setRotation(1);
         #elif BOARD_MODEL == BOARD_HELTEC_T114
