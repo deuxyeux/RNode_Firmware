@@ -1197,6 +1197,13 @@
   // over LORA_ENCRYPTED_PACKET_MDU. Displayed on the MSNGR_SEND_PENDING
   // screen (Menu.h) so it's clear which path a given send actually took.
   uint8_t msngr_send_method = LXMF::Type::Message::OPPORTUNISTIC;
+  // Live LXMF::Type::Message::State for the in-flight send (OUTBOUND/
+  // SENDING/SENT), polled from urns_lxmf_router->pending_outbound_state_for()
+  // the same way msngr_send_attempt is polled from pending_outbound_
+  // attempts_for() above - lets the MSNGR_SEND_PENDING screen (Menu.h)
+  // distinguish "still trying to get the packet onto the radio" from
+  // "handed off, waiting on delivery proof" instead of one static string.
+  uint8_t msngr_send_router_state = LXMF::Type::Message::OUTBOUND;
   unsigned long msngr_send_result_at_ms = 0; // set when state becomes DELIVERED/TIMEOUT/UNRESOLVED
   // Valid only while msngr_send_state == MSNGR_SEND_RESOLVING - the send
   // that's parked waiting for messenger_send_process() to find out whether
@@ -1306,6 +1313,7 @@
     msngr_send_state = MSNGR_SEND_PENDING;
     msngr_send_started_ms = millis();
     msngr_send_attempt = 1;
+    msngr_send_router_state = LXMF::Type::Message::OUTBOUND;
 
     DEBUG_LOG("[Messenger] send: queued message to %s\r\n", dest_hash.toHex().c_str());
   }
@@ -1322,7 +1330,27 @@
       // take over via their own hash check.
       int attempts = urns_lxmf_router->pending_outbound_attempts_for(msngr_send_message_hash);
       if (attempts > 0) { msngr_send_attempt = (uint8_t)attempts; }
-      if (millis() - msngr_send_started_ms > MSNGR_SEND_DELIVERY_TIMEOUT_MS) {
+      // Same "only trust a real match" guard as the attempts poll above -
+      // a stale read exactly at the DELIVERED/FAILED pop transition
+      // (message already gone from the front of the queue) would
+      // otherwise clobber the last known phase with the GENERATING
+      // sentinel right as the result screen is about to take over.
+      LXMF::Type::Message::State router_state = urns_lxmf_router->pending_outbound_state_for(msngr_send_message_hash);
+      if (router_state != LXMF::Type::Message::GENERATING) { msngr_send_router_state = router_state; }
+      // FIXED (local patch, not upstream): this UI backstop used to be a
+      // fixed MSNGR_SEND_DELIVERY_TIMEOUT_MS, sized for "no real retries
+      // ever happen". Now that OPPORTUNISTIC/DIRECT genuinely retry up to
+      // msngr_max_retries times with msngr_retry_delay_s backoff between
+      // each (LXMRouter.cpp), the worst case can take far longer than
+      // 60s - compute the effective timeout dynamically so this screen
+      // doesn't auto-dismiss to "No Confirmation" before the router's own
+      // retry cycle has actually finished (which would otherwise silently
+      // drop the real, later messenger_on_delivered()/messenger_on_failed()
+      // callback, since both guard on msngr_send_state == MSNGR_SEND_PENDING).
+      unsigned long effective_timeout_ms = MSNGR_SEND_DELIVERY_TIMEOUT_MS;
+      unsigned long retry_budget_ms = (unsigned long)msngr_max_retries * (unsigned long)msngr_retry_delay_s * 1000UL + 10000UL;
+      if (retry_budget_ms > effective_timeout_ms) { effective_timeout_ms = retry_budget_ms; }
+      if (millis() - msngr_send_started_ms > effective_timeout_ms) {
         msngr_send_state = MSNGR_SEND_TIMEOUT;
         msngr_send_result_at_ms = millis();
       }

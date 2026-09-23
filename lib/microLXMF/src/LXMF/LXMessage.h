@@ -265,6 +265,14 @@ namespace LXMF {
 		inline int delivery_attempts() const { return _delivery_attempts; }
 		inline void increment_delivery_attempts() { _delivery_attempts++; }
 
+		// Separate from delivery_attempts() - counts path/identity/link
+		// resolution cycles in process_outbound() (LXMRouter.cpp) that
+		// never actually reach a send_*() call, so a permanently-
+		// unresolvable destination can still be bounded and given up on
+		// instead of stalling the single-in-flight outbound queue forever.
+		inline int resolution_attempts() const { return _resolution_attempts; }
+		inline void increment_resolution_attempts() { _resolution_attempts++; }
+
 		/**
 		 * @brief Get message hash (ID)
 		 */
@@ -443,6 +451,7 @@ namespace LXMF {
 		Type::Message::Method _desired_method = Type::Message::DIRECT;
 		Type::Message::Method _method = Type::Message::DIRECT;
 		Type::Message::Representation _representation = Type::Message::UNKNOWN;
+		int _resolution_attempts = 0;
 
 		// Message state
 		Type::Message::State _state = Type::Message::GENERATING;

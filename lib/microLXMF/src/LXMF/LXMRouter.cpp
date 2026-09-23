@@ -998,7 +998,18 @@ void LXMRouter::process_outbound() {
 			pending_outbound_pop(dummy);
 			return;
 		}
-		message.increment_delivery_attempts();
+
+		// FIXED (local patch, not upstream): increment_delivery_attempts()
+		// used to fire unconditionally right here, before any of the three
+		// method branches below - so a destination with no known identity/
+		// path/link burned a real delivery attempt purely on issuing a
+		// path/link request, without send_propagated()/send_opportunistic()/
+		// send_via_link() ever actually being called. Moved to immediately
+		// precede each of those three actual attempts instead (see below);
+		// the path/identity/link-wait early-returns now use their own
+		// separate resolution_attempts() counter (see their own comments)
+		// so they still can't stall the single-in-flight outbound queue
+		// forever on a permanently-unresolvable destination.
 
 		// Route via propagation node when:
 		//   - propagation-only mode is enabled (router-level forced),
@@ -1010,6 +1021,7 @@ void LXMRouter::process_outbound() {
 		if (_propagation_only || message.method() == Type::Message::PROPAGATED) {
 			DEBUG("  Using PROPAGATED delivery");
 			message.set_method(Type::Message::PROPAGATED);
+			message.increment_delivery_attempts();
 			if (send_propagated(message)) {
 				// Resource transfer to PN was initiated. Don't fire
 				// _sent_callback yet — python LXMF semantics: SENT
@@ -1048,6 +1060,27 @@ void LXMRouter::process_outbound() {
 			// Try to recall the destination identity (needed to encrypt the packet)
 			Identity dest_identity = Identity::recall(message.destination_hash());
 			if (!dest_identity) {
+				// FIXED (local patch, not upstream): this used to also
+				// burn a real delivery attempt (see the comment above,
+				// where increment_delivery_attempts() used to run
+				// unconditionally). Now gated on its own
+				// resolution_attempts() counter instead, so it's still
+				// bounded (a destination that never resolves an identity
+				// can't stall this single-in-flight queue forever) without
+				// consuming the send-attempt budget a UI shows the user.
+				if (message.resolution_attempts() >= _max_delivery_attempts) {
+					WARNING("Giving up resolving identity for " + message.destination_hash().toHex());
+					message.state(Type::Message::FAILED);
+					if (_failed_callback) {
+						_failed_callback(message);
+					}
+					failed_outbound_push(message);
+					LXMessage dummy;
+					pending_outbound_pop(dummy);
+					return;
+				}
+				message.increment_resolution_attempts();
+
 				// Identity not known - request path which may trigger an announce
 				INFO("  Destination identity not known, requesting path...");
 				Transport::request_path(message.destination_hash());
@@ -1056,6 +1089,7 @@ void LXMRouter::process_outbound() {
 			}
 
 			// Create destination and send packet
+			message.increment_delivery_attempts();
 			if (send_opportunistic(message, dest_identity)) {
 				INFO("Message sent via OPPORTUNISTIC delivery");
 
@@ -1071,9 +1105,12 @@ void LXMRouter::process_outbound() {
 				// static_proof_timeout_callback() below. See the state()==
 				// SENT early-return above this function's own comment for
 				// the full reasoning.
-			} else {
-				ERROR("Failed to send OPPORTUNISTIC message");
-				message.state(Type::Message::FAILED);
+			} else if (message.state() == Type::Message::FAILED) {
+				// FIXED (local patch, not upstream): send_opportunistic()
+				// only sets FAILED itself for genuinely non-retryable
+				// cases (destination hash mismatch) - honor that here
+				// with an immediate hard fail, same shape as before.
+				ERROR("Failed to send OPPORTUNISTIC message (non-retryable)");
 
 				if (_failed_callback) {
 					_failed_callback(message);
@@ -1082,6 +1119,16 @@ void LXMRouter::process_outbound() {
 				failed_outbound_push(message);
 				LXMessage dummy;
 				pending_outbound_pop(dummy);
+			} else {
+				// FIXED (local patch, not upstream): every other false
+				// return (falsy receipt, packing exception) is transient -
+				// back off and retry instead of hard-failing on the first
+				// hiccup, matching PROPAGATED's own retry contract above.
+				// The top-of-function delivery_attempts()>=_max_delivery_
+				// attempts check is what eventually declares final
+				// failure, exactly as it already does for PROPAGATED.
+				WARNING("OPPORTUNISTIC send not accepted by transport, will retry...");
+				_next_outbound_process_time = now + _outbound_retry_delay;
 			}
 		} else {
 			// DIRECT delivery - need a link for large messages
@@ -1089,6 +1136,24 @@ void LXMRouter::process_outbound() {
 
 			// Check if we have a path to the destination
 			if (!Transport::has_path(message.destination_hash())) {
+				// FIXED (local patch, not upstream): gated on its own
+				// resolution_attempts() counter (see the OPPORTUNISTIC
+				// branch's own identical comment above) instead of
+				// consuming a real delivery attempt just for a path
+				// request.
+				if (message.resolution_attempts() >= _max_delivery_attempts) {
+					WARNING("Giving up resolving path for " + message.destination_hash().toHex());
+					message.state(Type::Message::FAILED);
+					if (_failed_callback) {
+						_failed_callback(message);
+					}
+					failed_outbound_push(message);
+					LXMessage dummy;
+					pending_outbound_pop(dummy);
+					return;
+				}
+				message.increment_resolution_attempts();
+
 				// Request path from network
 				INFO("  No path to destination, requesting...");
 				Transport::request_path(message.destination_hash());
@@ -1100,6 +1165,22 @@ void LXMRouter::process_outbound() {
 			Link link = get_link_for_destination(message.destination_hash());
 
 			if (!link) {
+				// FIXED (local patch, not upstream): same resolution_
+				// attempts() gating as the has_path check just above -
+				// link establishment itself hasn't started a send yet.
+				if (message.resolution_attempts() >= _max_delivery_attempts) {
+					WARNING("Giving up establishing link for " + message.destination_hash().toHex());
+					message.state(Type::Message::FAILED);
+					if (_failed_callback) {
+						_failed_callback(message);
+					}
+					failed_outbound_push(message);
+					LXMessage dummy;
+					pending_outbound_pop(dummy);
+					return;
+				}
+				message.increment_resolution_attempts();
+
 				WARNING("Failed to establish link for message delivery");
 				// Set backoff timer to avoid tight loop
 				_next_outbound_process_time = now + _outbound_retry_delay;
@@ -1117,6 +1198,7 @@ void LXMRouter::process_outbound() {
 			}
 
 			// Send via link
+			message.increment_delivery_attempts();
 			if (send_via_link(message, link)) {
 				INFO("Message sent successfully via link");
 
@@ -1128,9 +1210,12 @@ void LXMRouter::process_outbound() {
 				// Remove from pending queue
 				LXMessage dummy;
 				pending_outbound_pop(dummy);
-			} else {
-				ERROR("Failed to send message via link");
-				message.state(Type::Message::FAILED);
+			} else if (message.state() == Type::Message::FAILED) {
+				// FIXED (local patch, not upstream): send_via_link() only
+				// sets FAILED itself for genuinely non-retryable cases
+				// (unknown message representation) - honor that here with
+				// an immediate hard fail, same shape as before.
+				ERROR("Failed to send message via link (non-retryable)");
 
 				// Call failed callback
 				if (_failed_callback) {
@@ -1141,6 +1226,14 @@ void LXMRouter::process_outbound() {
 				failed_outbound_push(message);
 				LXMessage dummy;
 				pending_outbound_pop(dummy);
+			} else {
+				// FIXED (local patch, not upstream): every other false
+				// return (falsy receipt, link went inactive, packing
+				// exception) is transient - back off and retry instead of
+				// hard-failing on the first hiccup, matching PROPAGATED/
+				// OPPORTUNISTIC's own retry contract above.
+				WARNING("Failed to send message via link, will retry...");
+				_next_outbound_process_time = now + _outbound_retry_delay;
 			}
 		}
 
@@ -1547,24 +1640,35 @@ bool LXMRouter::send_via_link(LXMessage& message, Link& link) {
 			Packet packet(link, message.packed());
 			PacketReceipt receipt = packet.receipt_send();
 
+			// FIXED (local patch, not upstream): same falsy-receipt shape
+			// as send_opportunistic()'s own fix - receipt_send() failing
+			// means Transport::outbound() never actually handed this
+			// packet to an interface (transient TX-queue/radio-online
+			// condition), so don't fall through and claim SENT/return
+			// true; reset to OUTBOUND (state(SENDING) was set above) and
+			// let the caller retry instead of orphaning this message.
+			if (!receipt) {
+				ERROR("  DIRECT-link packet not accepted by any interface");
+				message.state(Type::Message::OUTBOUND);
+				return false;
+			}
+
 			// Register proof callback so the sender's _delivered_callback
 			// fires once the receiver acknowledges. Without this hook the
 			// sender stays in SENT forever — same shape as the
 			// OPPORTUNISTIC path's proof tracking immediately above. The
 			// pyxis fork apparently never tested this branch end-to-end.
-			if (receipt) {
-				receipt.set_delivery_handler(static_proof_callback);
-				receipt.set_timeout_handler(static_proof_timeout_callback);
-				PendingProofSlot* slot = find_empty_pending_proof_slot();
-				if (slot) {
-					slot->in_use = true;
-					slot->set_packet_hash(receipt.hash());
-					slot->set_message_hash(message.hash());
-					snprintf(buf, sizeof(buf), "  Registered proof callback for direct-link packet %.16s...", receipt.hash().toHex().c_str());
-					DEBUG(buf);
-				} else {
-					WARNING("  Pending proofs pool full - cannot track DIRECT-link proof");
-				}
+			receipt.set_delivery_handler(static_proof_callback);
+			receipt.set_timeout_handler(static_proof_timeout_callback);
+			PendingProofSlot* slot = find_empty_pending_proof_slot();
+			if (slot) {
+				slot->in_use = true;
+				slot->set_packet_hash(receipt.hash());
+				slot->set_message_hash(message.hash());
+				snprintf(buf, sizeof(buf), "  Registered proof callback for direct-link packet %.16s...", receipt.hash().toHex().c_str());
+				DEBUG(buf);
+			} else {
+				WARNING("  Pending proofs pool full - cannot track DIRECT-link proof");
 			}
 
 			message.state(Type::Message::SENT);
@@ -1627,6 +1731,11 @@ bool LXMRouter::send_opportunistic(LXMessage& message, const Identity& dest_iden
 	snprintf(buf, sizeof(buf), "  Message size: %zu bytes", message.packed_size());
 	DEBUG(buf);
 
+	// Mirrors send_via_link()'s own state(SENDING) - makes "still trying to
+	// get the packet onto the radio" an observable phase (e.g. for a UI
+	// status getter) instead of jumping straight from OUTBOUND to SENT.
+	message.state(Type::Message::SENDING);
+
 	try {
 		// Create destination object for the remote peer's LXMF delivery
 		Destination destination(
@@ -1637,13 +1746,15 @@ bool LXMRouter::send_opportunistic(LXMessage& message, const Identity& dest_iden
 			"delivery"
 		);
 
-		// Verify destination hash matches
+		// Verify destination hash matches - not retryable, this destination
+		// will never encrypt correctly no matter how many times we try.
 		if (destination.hash() != message.destination_hash()) {
 			ERROR("Destination hash mismatch!");
 			snprintf(buf, sizeof(buf), "  Expected: %s", message.destination_hash().toHex().c_str());
 			DEBUG(buf);
 			snprintf(buf, sizeof(buf), "  Got: %s", destination.hash().toHex().c_str());
 			DEBUG(buf);
+			message.state(Type::Message::FAILED);
 			return false;
 		}
 
@@ -1661,20 +1772,37 @@ bool LXMRouter::send_opportunistic(LXMessage& message, const Identity& dest_iden
 		Packet packet(destination, packet_data);
 		PacketReceipt receipt = packet.receipt_send();
 
+		// FIXED (local patch, not upstream): receipt_send() goes falsy
+		// whenever Transport::outbound() failed to actually hand this
+		// packet to any interface (e.g. urns_enqueue_outgoing()'s TX
+		// queue is full, a host KISS frame is mid-assembly, or the radio
+		// isn't online yet - all real, transient conditions on this
+		// firmware). This used to fall through and unconditionally mark
+		// the message SENT/return true anyway, with no delivery/timeout
+		// handler and no PendingProofSlot ever registered - process_
+		// outbound()'s state()==SENT early-return then parked it forever
+		// with zero chance of ever retrying or failing out. Bail out
+		// here instead so the caller reads this as transient/retryable,
+		// same as every other failure path below - reset to OUTBOUND
+		// since state(SENDING) was already set above.
+		if (!receipt) {
+			ERROR("  OPPORTUNISTIC packet not accepted by any interface");
+			message.state(Type::Message::OUTBOUND);
+			return false;
+		}
+
 		// Register proof callback to track delivery confirmation
-		if (receipt) {
-			receipt.set_delivery_handler(static_proof_callback);
-			receipt.set_timeout_handler(static_proof_timeout_callback);
-			PendingProofSlot* slot = find_empty_pending_proof_slot();
-			if (slot) {
-				slot->in_use = true;
-				slot->set_packet_hash(receipt.hash());
-				slot->set_message_hash(message.hash());
-				snprintf(buf, sizeof(buf), "  Registered proof callback for packet %.16s...", receipt.hash().toHex().c_str());
-				DEBUG(buf);
-			} else {
-				WARNING("  Pending proofs pool full - cannot track delivery proof");
-			}
+		receipt.set_delivery_handler(static_proof_callback);
+		receipt.set_timeout_handler(static_proof_timeout_callback);
+		PendingProofSlot* slot = find_empty_pending_proof_slot();
+		if (slot) {
+			slot->in_use = true;
+			slot->set_packet_hash(receipt.hash());
+			slot->set_message_hash(message.hash());
+			snprintf(buf, sizeof(buf), "  Registered proof callback for packet %.16s...", receipt.hash().toHex().c_str());
+			DEBUG(buf);
+		} else {
+			WARNING("  Pending proofs pool full - cannot track delivery proof");
 		}
 
 		message.state(Type::Message::SENT);

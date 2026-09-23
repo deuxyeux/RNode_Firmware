@@ -474,6 +474,28 @@ namespace LXMF {
 		}
 
 		/**
+		 * @brief Live delivery state for a still-in-flight outbound message
+		 *
+		 * Sibling to pending_outbound_attempts_for() above, same "only the
+		 * front of the queue can match" reasoning - lets a UI distinguish
+		 * "still trying to get the packet onto the radio" (OUTBOUND/
+		 * SENDING) from "handed off, waiting on delivery proof" (SENT).
+		 *
+		 * @param message_hash Hash of the message to check
+		 * @return front->state() if message_hash matches the front of the
+		 *   outbound queue, otherwise Type::Message::GENERATING (not in
+		 *   flight - handle_outbound() always sets OUTBOUND before pushing,
+		 *   so a real in-flight message is never actually GENERATING)
+		 */
+		Type::Message::State pending_outbound_state_for(const RNS::Bytes& message_hash) {
+			LXMessage* front = pending_outbound_front();
+			if (front && front->hash() == message_hash) {
+				return front->state();
+			}
+			return Type::Message::GENERATING;
+		}
+
+		/**
 		 * @brief Get the current stamp cost requirement
 		 *
 		 * @return Required stamp cost

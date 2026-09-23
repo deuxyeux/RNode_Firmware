@@ -772,6 +772,7 @@ const unsigned char bm_hg_high [] PROGMEM = {
 #define MENU_ICON_W_MSNGR_FULL_MESSAGE 11
 #define MENU_ICON_W_MSNGR_PING_OK 13
 #define MENU_ICON_W_MSNGR_PING_FAIL 18
+#define MENU_ICON_W_MSNGR_WAITING 9
 
 const unsigned char bm_menu_icon_bt_legacy_pairing [] PROGMEM = {
   0x00, 0x00,
@@ -1285,6 +1286,26 @@ const unsigned char bm_menu_icon_msngr_ping_fail [] PROGMEM = {
   0x40, 0x00, 0x80,
   0x7f, 0xff, 0x80,
   0x00, 0x00, 0x00,
+};
+
+// MENU_STATE_MSNGR_SEND_RESULT's status row (Menu.h) while a send is
+// MSNGR_SEND_PENDING and the router has already handed the packet to the
+// radio (msngr_send_router_state == SENT, i.e. "Awaiting proof") - a clock/
+// hourglass glyph, from ~/Downloads/Icons/rnode-settings-waiting.c (9x10
+// Piskel export), converted to this project's 1bpp/PROGMEM format the same
+// way every other icon here is (see bm_menu_icon_msngr_settings's comment
+// above).
+const unsigned char bm_menu_icon_msngr_waiting [] PROGMEM = {
+  0x00, 0x00,
+  0x7f, 0x00,
+  0x41, 0x00,
+  0x22, 0x00,
+  0x14, 0x00,
+  0x1c, 0x00,
+  0x3e, 0x00,
+  0x7f, 0x00,
+  0x7f, 0x00,
+  0x00, 0x00,
 };
 
 // MENU_STATE_MSNGR_PEER's "Compose message" row (Menu.h) - a pencil

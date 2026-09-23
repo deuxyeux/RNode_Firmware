@@ -10632,14 +10632,35 @@
             // OPPORTUNISTIC vs the silent DIRECT upgrade for anything over
             // LORA_ENCRYPTED_PACKET_MDU, not just always "Sending...".
             const char *method_name = (msngr_send_method == LXMF::Type::Message::DIRECT) ? "Direct" : "Opportunistic";
-            // Only show the attempt count once a retry has actually
-            // started (msngr_send_attempt > 1, set by messenger_send_
-            // process()'s live poll of the router's own delivery_
-            // attempts() - see msngr_send_attempt's own declaration,
-            // Messenger.h) - keeps the common first-try case uncluttered.
-            // Drops the "Sending" prefix in that case to leave room for
-            // the attempt count within status_buf's 24-byte budget.
-            if (msngr_send_attempt > 1) {
+            // FIXED (local patch, not upstream): msngr_send_router_state
+            // (Messenger.h, polled from LXMRouter::pending_outbound_state_
+            // for()) now lets this distinguish "packet handed to the radio,
+            // waiting on delivery proof" (SENT) from "still trying to get
+            // it onto the radio" (OUTBOUND/SENDING) - previously both
+            // looked identical on this screen. Kept to one extra phrase
+            // ("Awaiting proof") rather than combining phase+method+
+            // attempt in one string - status_buf is only 24 bytes and
+            // "Transmitting Opportunistic (2/5)" alone would overflow it.
+            if (msngr_send_router_state == LXMF::Type::Message::SENT) {
+              // Same left-prefix icon convention as the OK/FAIL icons
+              // below (bm_menu_icon_msngr_ping_ok/_fail) - narrower than
+              // both (9px vs 13/18px) so the text_dx formula below (tuned
+              // against MENU_ICON_W_MSNGR_PING_OK) needs no adjustment.
+              icons[0] = bm_menu_icon_msngr_waiting;
+              icon_widths[0] = MENU_ICON_W_MSNGR_WAITING;
+              if (msngr_send_attempt > 1) {
+                snprintf(status_buf, sizeof(status_buf), "Awaiting Proof (%u/%u)", (unsigned)msngr_send_attempt, (unsigned)msngr_max_retries);
+              } else {
+                snprintf(status_buf, sizeof(status_buf), "Awaiting Proof");
+              }
+            } else if (msngr_send_attempt > 1) {
+              // Only show the attempt count once a retry has actually
+              // started (msngr_send_attempt > 1, set by messenger_send_
+              // process()'s live poll of the router's own delivery_
+              // attempts() - see msngr_send_attempt's own declaration,
+              // Messenger.h) - keeps the common first-try case uncluttered.
+              // Drops the "Sending" prefix in that case to leave room for
+              // the attempt count within status_buf's 24-byte budget.
               snprintf(status_buf, sizeof(status_buf), "%s (%u/%u)", method_name, (unsigned)msngr_send_attempt, (unsigned)msngr_max_retries);
             } else {
               snprintf(status_buf, sizeof(status_buf), "Sending %s", method_name);
