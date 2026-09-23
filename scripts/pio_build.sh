@@ -6,15 +6,22 @@
 # Why this exists: sdkconfig.defaults is a single shared file with no
 # per-env scoping under this platform version (espidf.py disables the
 # custom_sdkconfig mechanism whenever "espidf" is in an env's framework
-# list). heltec32v4pa_urns_ble's real PSRAM chip is Quad/2MB, not Octal, and
+# list). heltec32v4pa_urns's real PSRAM chip is Quad/2MB, not Octal, and
 # boots into a crash loop under the Octal settings meshadventurer_s3/
 # meshpoe_s3 need. This used to require a manual edit-build-revert dance
 # (see sdkconfig.defaults's own PSRAM comment and project memory
 # "Heltec32-V4 BLE-keyboard PSRAM crash") - skipping the revert step is what
 # breaks the real boards' PSRAM silently, and skipping the swap step is what
-# breaks heltec32v4pa_urns_ble silently (both have happened). This script
+# breaks heltec32v4pa_urns silently (both have happened). This script
 # makes both directions automatic so a mass-build loop can call `pio run`
 # for every env uniformly without knowing about this quirk.
+#
+# heltec32v4pa_urns used to be a plain-"arduino"-framework, URNS-only env
+# with a separate heltec32v4pa_urns_ble env layering LXMF+BLE HID host on
+# top via combined "arduino, espidf" mode. Merged back into one env (the
+# only shipped Heltec V4 URNS variant now always includes LXMF+BLE) -
+# combined mode (and so this quad-PSRAM override) is therefore needed
+# unconditionally here now, not just for a separate BLE-flavored env.
 #
 # Usage: scripts/pio_build.sh <env> [extra pio args, e.g. -t upload]
 set -euo pipefail
@@ -41,7 +48,7 @@ fi
 
 needs_quad_psram() {
   case "$1" in
-    heltec32v4pa_urns_ble) return 0 ;;
+    heltec32v4pa_urns) return 0 ;;
     *) return 1 ;;
   esac
 }

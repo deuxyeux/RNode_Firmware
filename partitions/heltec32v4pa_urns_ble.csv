@@ -1,15 +1,20 @@
 # Name,   Type, SubType, Offset,  Size, Flags
 #
-# [env:heltec32v4pa_urns_ble] variant of heltec32v4pa_urns.csv above -
-# app0 grown from 2MB to 3MB. HAS_BLE_HID_HOST adds the BLE HID host stack
+# [env:heltec32v4pa_urns] variant of heltec32v4pa_urns.csv above - app0
+# grown from 2MB to 3MB. HAS_BLE_HID_HOST adds the BLE HID host stack
 # (esp_hid, BLEKeyboardHost.h) on top of everything heltec32v4pa_urns.csv's
 # app0 already had to fit - meshadventurer_s3's own equivalent full build
 # (HAS_URNS+HAS_LXMF+HAS_BLE_HID_HOST) comes out to ~2.47MB, already past
 # this table's old 2MB app0, so it grew without even bothering to trim.
-# urns kept at the same 4MB heltec32v4pa_urns.csv used (this is a test/
-# experimental variant, not a production node - see that file's own
-# comment) - just shifted to the new offset after app0's extra 1MB. Board
-# has 16MB flash; total used here is ~7.1MB, still comfortable headroom.
+# urns kept at the same 4MB heltec32v4pa_urns.csv used - just shifted to the
+# new offset after app0's extra 1MB. Board has 16MB flash; total used here
+# is ~7.1MB, still comfortable headroom.
+#
+# Kept this filename across the [env:heltec32v4pa_urns]/
+# [env:heltec32v4pa_urns_ble] merge (platformio.ini) rather than renaming -
+# this is now the only Heltec V4 URNS partition table with BLE headroom,
+# used by the sole surviving env, but a rename would've meant re-checking
+# every reference to it for zero functional benefit.
 nvs,      data, nvs,     0x9000,  0x5000,
 otadata,  data, ota,     0xe000,  0x2000,
 app0,     app,  ota_0,   0x10000, 0x300000,

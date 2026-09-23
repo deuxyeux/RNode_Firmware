@@ -1,6 +1,6 @@
 # Name,   Type, SubType, Offset,  Size, Flags
 #
-# [env:heltec32v4pa_urns] variant of the stock no_ota.csv this board
+# [env:heltec32v4pa_r8_urns] variant of the stock no_ota.csv this board
 # otherwise uses - nvs/otadata/app0/coredump kept byte-identical (same
 # offsets/sizes, so board_upload.maximum_size=2097152 in platformio.ini
 # still matches app0). The stock "spiffs" partition is replaced with one
@@ -15,9 +15,13 @@
 # + the path_store's up-to-512KB (see meshadventurer_s3_urns.csv/
 # meshpoe_s3_urns.csv's own comments on why 512KB total was too tight in
 # practice), leaving real room for LXMF messages, without reaching for
-# those boards' full ~6.9MB (this is a test/experimental variant, not a
-# production node). Board has 16MB flash and the stock table only used the
-# first 4MB, so there's ample spare room for this without touching app0.
+# those boards' full ~6.9MB (this is a blind-build/no-hardware variant, not
+# a production node - see [env:heltec32v4pa_r8]'s own platformio.ini
+# comment). [env:heltec32v4pa_urns] used to share this same file too before
+# it merged with the BLE-enabled variant and moved to the bigger
+# heltec32v4pa_urns_ble.csv (own comment) - this file is now R8-only.
+# Board has 16MB flash and the stock table only used the first 4MB, so
+# there's ample spare room for this without touching app0.
 nvs,      data, nvs,     0x9000,  0x5000,
 otadata,  data, ota,     0xe000,  0x2000,
 app0,     app,  ota_0,   0x10000, 0x200000,

@@ -252,7 +252,7 @@
   // #ifndef-guarded (matching HAS_URNS's own global fallback further
   // down) so a test/experimental env can force it on via a plain
   // -DHAS_BLE_HID_HOST=true build flag (platformio.ini) without a
-  // board-specific Boards.h block - see [env:heltec32v4pa_urns_ble].
+  // board-specific Boards.h block - see [env:heltec32v4pa_urns].
   #ifndef HAS_BLE_HID_HOST
     #define HAS_BLE_HID_HOST false
   #endif
