@@ -42,7 +42,7 @@ typedef struct {
 } hid_report_params_t;
 
 typedef enum {
-    PARSE_WAIT_USAGE_PAGE, PARSE_WAIT_USAGE, PARSE_WAIT_COLLECTION_APPLICATION, PARSE_WAIT_END_COLLECTION
+    PARSE_WAIT_USAGE_PAGE, PARSE_WAIT_USAGE, PARSE_WAIT_COLLECTION_APPLICATION, PARSE_WAIT_END_COLLECTION, PARSE_SKIP_COLLECTION
 } s_parse_step_t;
 
 static s_parse_step_t s_parse_step = PARSE_WAIT_USAGE_PAGE;
@@ -249,13 +249,34 @@ static int handle_cmd(hid_report_cmd_t *cmd)
             return -1;
         }
         if (cmd->value != 1) {
-            ESP_LOGE(TAG, "expected APPLICATION, but got 0x%02x", cmd->value);
-            s_parse_step = PARSE_WAIT_USAGE_PAGE;
-            return -1;
+            // Not every top-level collection in a real-world report map is
+            // an Application collection - composite/multi-usage devices
+            // (e.g. remotes bundling a vendor OTA/config channel alongside
+            // their real Keyboard/Mouse/Consumer Control collections) use
+            // vendor-defined collection types (0x80-0xFF) for those extra
+            // channels. Skip just this one collection's subtree rather than
+            // aborting the whole report map parse - a hard error here used
+            // to throw away every report the device has, including the
+            // real ones later in the same descriptor.
+            ESP_LOGI(TAG, "skipping non-APPLICATION top-level collection 0x%02x", cmd->value);
+            s_collection_depth = 1;
+            s_parse_step = PARSE_SKIP_COLLECTION;
+            break;
         }
         s_report_params.report_id = 0;
         s_collection_depth = 1;
         s_parse_step = PARSE_WAIT_END_COLLECTION;
+        break;
+    }
+    case PARSE_SKIP_COLLECTION: {
+        if (cmd->cmd == HID_RM_COLLECTION) {
+            s_collection_depth += 1;
+        } else if (cmd->cmd == HID_RM_END_COLLECTION) {
+            s_collection_depth -= 1;
+            if (s_collection_depth == 0) {
+                s_parse_step = PARSE_WAIT_USAGE_PAGE;
+            }
+        }
         break;
     }
     case PARSE_WAIT_END_COLLECTION: {
