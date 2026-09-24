@@ -1,0 +1,1036 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RNode Firmware User Manual</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff;
+    --fg: #1c1e21;
+    --muted: #57606a;
+    --border: #d0d7de;
+    --code-bg: #f6f8fa;
+    --link: #0969da;
+    --table-stripe: #f6f8fa;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117;
+      --fg: #e6edf3;
+      --muted: #8b949e;
+      --border: #30363d;
+      --code-bg: #161b22;
+      --link: #4493f8;
+      --table-stripe: #161b22;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+  }
+  main {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 2.5rem 1.5rem 5rem;
+  }
+  h1, h2, h3 { line-height: 1.25; scroll-margin-top: 1rem; }
+  h1 { font-size: 2rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; }
+  h2 { font-size: 1.5rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; }
+  h3 { font-size: 1.15rem; margin-top: 1.75rem; }
+  a { color: var(--link); }
+  hr { border: none; border-top: 1px solid var(--border); margin: 2rem 0; }
+  code {
+    background: var(--code-bg);
+    padding: 0.15em 0.4em;
+    border-radius: 4px;
+    font-size: 0.9em;
+  }
+  pre {
+    background: var(--code-bg);
+    padding: 1rem;
+    border-radius: 6px;
+    overflow-x: auto;
+  }
+  pre code { padding: 0; background: none; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 1rem 0;
+    overflow-x: auto;
+    display: block;
+  }
+  th, td {
+    border: 1px solid var(--border);
+    padding: 0.5rem 0.75rem;
+    text-align: left;
+    vertical-align: middle;
+  }
+  tr:nth-child(even) { background: var(--table-stripe); }
+  ul, ol { padding-left: 1.5rem; }
+  li { margin: 0.25rem 0; }
+  img {
+    max-width: 100%;
+    height: auto;
+    image-rendering: pixelated;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    margin: 0.25rem 0.5rem 0.25rem 0;
+  }
+  em { color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+<h1 id="rnode-firmware-user-manual">RNode Firmware User Manual</h1>
+<p><img src="images/manual/rnode_iso.webp" alt="RNode logo" width="200" style="image-rendering:auto;border:none;border-radius:0;float:right;margin:0 0 1rem 1.5rem;">
+An RNode is a small portable device used as a LoRa-radio interface to communicate via <a href="https://reticulum.network/">Reticulum Network Stack</a>.</p>
+<p>This manual covers the <a href="https://rns.moscow">rns.moscow</a> <a href="https://flasher.rns.moscow">fork</a> of Mark Qvist's <a href="https://github.com/markqvist/RNode_Firmware">RNode_Firmware</a>. This firmware has expanded on the features and device support of the original firmware while staying fully backwards-compatible. The LoRa radio subsystem implementation hasn't been changed and it still uses the original SX-series driver code by Mark. For a quick overview of what this fork adds on top of upstream, see the <a href="../README.md">README</a>.</p>
+<div style="clear:both;"></div>
+
+<h2 id="table-of-contents">Table of Contents</h2>
+<ol>
+<li><a href="#getting-firmware-onto-a-device">Getting Firmware Onto a Device</a></li>
+<li><a href="#supported-devices">Supported Devices</a></li>
+<li><a href="#main-screen">Main Screen</a></li>
+<li><a href="#navigation">Navigation</a></li>
+<li><a href="#rnode-settings-menu">RNode Settings Menu</a></li>
+<li><a href="#urns-microreticulum-support">URNS (microReticulum) Support</a></li>
+<li><a href="#lxmf-messenger">LXMF Messenger</a></li>
+<li><a href="#radio-settings">Radio Settings</a></li>
+<li><a href="#esp-now-interface">ESP-NOW Interface</a></li>
+<li><a href="#wifi">WiFi</a></li>
+<li><a href="#buzzerbeeper-support">Buzzer/Beeper Support</a></li>
+<li><a href="#rotary-encoder-support">Rotary Encoder Support</a></li>
+<li><a href="#neopixel-status-led">NeoPixel Status LED</a></li>
+<li><a href="#hardware">Hardware</a></li>
+<li><a href="#bluetooth">Bluetooth</a></li>
+<li><a href="#bluetoothble-pairing">Bluetooth/BLE Pairing</a></li>
+<li><a href="#ble-keyboard-support">BLE Keyboard Support</a></li>
+<li><a href="#wired-ethernet-w5500-support">Wired Ethernet (W5500) Support</a></li>
+<li><a href="#gnss-receiver-support">GNSS Receiver Support</a></li>
+<li><a href="#rtc-clock">RTC Clock</a></li>
+<li><a href="#environment-sensor-support">Environment Sensor Support</a></li>
+<li><a href="#ota-firmware-update-support">OTA Firmware Update Support</a></li>
+<li><a href="#promiscuous-lora-mode-support-packet-analyzer">Promiscuous LoRa Mode Support / Packet Analyzer</a></li>
+<li><a href="#websocket-tcpip-kiss-interface">WebSocket &amp; TCP/IP KISS Interface</a></li>
+<li><a href="#building-from-source">Building From Source</a></li>
+<li><a href="#attribution-credits">Attribution &amp; Credits</a></li>
+</ol>
+<hr />
+<h2 id="getting-firmware-onto-a-device">Getting Firmware Onto a Device</h2>
+<h3 id="the-web-flasher">The Web Flasher</h3>
+<p><a href="https://flasher.rns.moscow">flasher.rns.moscow</a> flashes pre-built firmware to most of the boards in this fork directly from the browser over USB (WebSerial) - no toolchain install required. This is the recommended path for most users; it also takes care of setting the firmware hash for you, so the device won't report "Firmware Corrupt" afterward.</p>
+<p>Building from source instead? See <a href="#building-from-source">Building From Source</a> at the end of this manual.</p>
+<hr />
+<h2 id="supported-devices">Supported Devices</h2>
+<p>See <a href="https://rns.moscow/devices.html">rns.moscow/devices.html</a> for the full, up-to-date device catalog.</p>
+<p>In addition to everything upstream RNode_Firmware supports (the original RNode v1/v2, LilyGO T-Beam and T-Beam Supreme v1, T-Deck, Xiao S3, T3S3, T-Echo, RAK4631, Heltec WiFi LoRa 32 v1-v4, Heltec T114, and the generic ESP32/nRF52 targets), this fork adds:</p>
+<h3 id="community-devices">Community devices</h3>
+<table>
+<thead>
+<tr>
+<th>Device</th>
+<th>Origin</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>MeshPoE-S3</td>
+<td><a href="https://git.rns.moscow/deuxyeux/MeshPoE-S3">git.rns.moscow/deuxyeux/MeshPoE-S3</a> - Nickie Deuxyeux</td>
+</tr>
+<tr>
+<td>MeshAdventurer-S3</td>
+<td><a href="https://git.rns.moscow/deuxyeux/MeshAdventurer-S3">git.rns.moscow/deuxyeux/MeshAdventurer-S3</a> - Nickie Deuxyeux</td>
+</tr>
+<tr>
+<td>MeshAdventurer</td>
+<td><a href="https://github.com/chrismyers2000/MeshAdventurer">github.com/chrismyers2000/MeshAdventurer</a> - Frequency Labs</td>
+</tr>
+<tr>
+<td>Aethernode</td>
+<td><a href="https://github.com/ahedproductions/aethernode">github.com/ahedproductions/aethernode</a> - aetherlab LZ1SWE</td>
+</tr>
+<tr>
+<td>Aethernode-S3</td>
+<td><a href="https://github.com/ahedproductions/aethernodeS3">github.com/ahedproductions/aethernodeS3</a> - aetherlab LZ1SWE</td>
+</tr>
+<tr>
+<td>FakeTec / ProMicro</td>
+<td><a href="https://github.com/gargomoma/fakeTec_pcb">github.com/gargomoma/fakeTec_pcb</a> - gargomoma, ShimonHoranek, lupusworax</td>
+</tr>
+<tr>
+<td>DIY-V1</td>
+<td><a href="https://github.com/NanoVHF/Meshtastic-DIY/">github.com/NanoVHF/Meshtastic-DIY</a> - NanoVHF</td>
+</tr>
+</tbody>
+</table>
+<p>All seven are extensively tested on real hardware.</p>
+<h3 id="additional-lilygoheltecrak-devices">Additional LilyGO/Heltec/RAK devices</h3>
+<table>
+<thead>
+<tr>
+<th>Device</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>LilyGO T-Beam Supreme v3</td>
+<td>Validated</td>
+</tr>
+<tr>
+<td>Heltec WiFi LoRa 32 V4 R8 (Octal PSRAM SKU)</td>
+<td>Not Validated</td>
+</tr>
+<tr>
+<td>Heltec Mesh Node T096</td>
+<td>Validated</td>
+</tr>
+<tr>
+<td>LilyGO T-Beam 1W</td>
+<td>Not Validated</td>
+</tr>
+<tr>
+<td>Heltec Mesh Node T1</td>
+<td>Not Validated</td>
+</tr>
+<tr>
+<td>Heltec Wireless Tracker V2</td>
+<td>Not Validated</td>
+</tr>
+<tr>
+<td>RAK3401 (RAK13302 1W Booster)</td>
+<td>Not Validated</td>
+</tr>
+</tbody>
+</table>
+<p>"Not Validated" means different things depending on the device: for the T-Beam 1W, Heltec T1, Wireless Tracker V2, and RAK3401, pin mappings, FEM behavior, and power/battery sensing were carried over from documented reference designs (Meshtastic/MeshCore variant files) rather than confirmed on a physical unit. The V4 R8 is the same firmware as the already-validated Heltec V4, just built for an untested Octal-PSRAM SKU. All five compile clean and are included for anyone with the hardware to test - treat a first boot on one of these like bringing up a brand-new board, and please report back if you get one running.</p>
+<p>Some boards ship in more than one build variant (e.g. <code>heltec32v4pa</code> vs <code>heltec32v4pa_urns</code>, or <code>t3s3</code> vs <code>t3s3_sx127x</code>/<code>t3s3_sx1280_pa</code>) - these are firmware feature/radio-module variants of the same physical board, not different devices.</p>
+<hr />
+<h2 id="main-screen">Main Screen</h2>
+<p><img src="images/manual/mainmenu.png" alt="Main status screen" width="256"></p>
+<p><em>The main/status screen (this example is showing the Airtime/Channel Load page - see below).</em></p>
+<p>The exact layout varies by board (screen shape, whether GNSS/Ethernet/ESP-NOW are present), but the same pieces show up everywhere there's a display:</p>
+<h3 id="status-icons">Status icons</h3>
+<p>Four small boxed icons, one per corner:</p>
+<ul>
+<li><strong>Host connection</strong> (top-left) - a plain plug/cable icon showing whether a host (rnsd, Sideband, NomadNet, etc.) is currently attached, over whatever transport that happens to be. On boards with WiFi, this box becomes a WiFi icon instead once WiFi is turned on: in Station mode it shows searching vs. connected-to-your-network (with a small notch cut out of the icon if the WiFi link is up but no host is actually attached over it yet); in AP mode it shows waiting-for-client vs. a client connected</li>
+<li><strong>Radio</strong> (top-right) - LoRa on/off. On <code>HAS_URNS</code> boards, this box shows a blinking envelope instead whenever the <a href="#lxmf-messenger">LXMF Messenger</a> inbox has an unread message</li>
+<li><strong>Bluetooth</strong> (bottom-left, boards with Bluetooth) - off / on / pairing / connected</li>
+<li><strong>GNSS, Ethernet, or ESP-NOW</strong> (bottom-right, whichever the board actually has) - GNSS shows "GPS" plus OFF/ACQ/RDY; Ethernet shows link speed/duplex once connected, or "OFF"; ESP-NOW shows "ESP"/"NOW", filled in once it's the actively-claimed interface</li>
+</ul>
+<h3 id="qs-bars">Q/S bars</h3>
+<p>Two small 7-segment bars next to the icons, both based on the <em>most recently received packet</em> (not a continuous ambient measurement, so they stay empty until the radio has actually received something):</p>
+<p><img src="images/manual/qs-bars.png" alt="Q/S bars close-up" width="120"></p>
+<p><em>The Q and S bars, close up.</em></p>
+<ul>
+<li><strong>Q (Quality)</strong> - derived from that packet's SNR relative to the noise floor for the currently configured spreading factor</li>
+<li><strong>S (Signal)</strong> - derived from that packet's RSSI</li>
+</ul>
+<p><strong>S (Signal) bar ranges</strong> - the RSSI floor/ceiling depend on the modem:</p>
+<table>
+<thead>
+<tr>
+<th>Bars lit</th>
+<th>SX127x / SX126x boards</th>
+<th>SX1280 boards (2.4GHz)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><img src="images/manual/bars/signal-0.svg" alt="0 bars" width="60" style="image-rendering:auto;border:none;border-radius:0;"></td>
+<td>≤ -130.8 dBm</td>
+<td>≤ -102.2 dBm</td>
+</tr>
+<tr>
+<td><img src="images/manual/bars/signal-1.svg" alt="1 bar" width="60" style="image-rendering:auto;border:none;border-radius:0;"></td>
+<td>-130.8 to -123 dBm</td>
+<td>-102.2 to -97 dBm</td>
+</tr>
+<tr>
+<td><img src="images/manual/bars/signal-2.svg" alt="2 bars" width="60" style="image-rendering:auto;border:none;border-radius:0;"></td>
+<td>-123 to -115.2 dBm</td>
+<td>-97 to -91.8 dBm</td>
+</tr>
+<tr>
+<td><img src="images/manual/bars/signal-3.svg" alt="3 bars" width="60" style="image-rendering:auto;border:none;border-radius:0;"></td>
+<td>-115.2 to -107.4 dBm</td>
+<td>-91.8 to -86.6 dBm</td>
+</tr>
+<tr>
+<td><img src="images/manual/bars/signal-4.svg" alt="4 bars" width="60" style="image-rendering:auto;border:none;border-radius:0;"></td>
+<td>-107.4 to -99.6 dBm</td>
+<td>-86.6 to -81.4 dBm</td>
+</tr>
+<tr>
+<td><img src="images/manual/bars/signal-5.svg" alt="5 bars" width="60" style="image-rendering:auto;border:none;border-radius:0;"></td>
+<td>-99.6 to -91.8 dBm</td>
+<td>-81.4 to -76.2 dBm</td>
+</tr>
+<tr>
+<td><img src="images/manual/bars/signal-6.svg" alt="6 bars" width="60" style="image-rendering:auto;border:none;border-radius:0;"></td>
+<td>-91.8 to -84 dBm</td>
+<td>-76.2 to -71 dBm</td>
+</tr>
+<tr>
+<td><img src="images/manual/bars/signal-7.svg" alt="7 bars" width="60" style="image-rendering:auto;border:none;border-radius:0;"></td>
+<td>≥ -84 dBm</td>
+<td>≥ -71 dBm</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Q (Quality) bar ranges</strong> - based on SNR, but the floor shifts with the current Spreading Factor (a higher SF tolerates a weaker, more negative SNR for the same "full quality" reading), so there's no single fixed table. As a worked example, at <strong>SF8</strong>:</p>
+<table>
+<thead>
+<tr>
+<th>Bars lit</th>
+<th>SNR</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><img src="images/manual/bars/quality-0.svg" alt="0 bars" width="60" style="image-rendering:auto;border:none;border-radius:0;"></td>
+<td>≤ -25 dB</td>
+</tr>
+<tr>
+<td><img src="images/manual/bars/quality-1.svg" alt="1 bar" width="60" style="image-rendering:auto;border:none;border-radius:0;"></td>
+<td>-25 to -20.4 dB</td>
+</tr>
+<tr>
+<td><img src="images/manual/bars/quality-2.svg" alt="2 bars" width="60" style="image-rendering:auto;border:none;border-radius:0;"></td>
+<td>-20.4 to -15.7 dB</td>
+</tr>
+<tr>
+<td><img src="images/manual/bars/quality-3.svg" alt="3 bars" width="60" style="image-rendering:auto;border:none;border-radius:0;"></td>
+<td>-15.7 to -11.1 dB</td>
+</tr>
+<tr>
+<td><img src="images/manual/bars/quality-4.svg" alt="4 bars" width="60" style="image-rendering:auto;border:none;border-radius:0;"></td>
+<td>-11.1 to -6.4 dB</td>
+</tr>
+<tr>
+<td><img src="images/manual/bars/quality-5.svg" alt="5 bars" width="60" style="image-rendering:auto;border:none;border-radius:0;"></td>
+<td>-6.4 to -1.8 dB</td>
+</tr>
+<tr>
+<td><img src="images/manual/bars/quality-6.svg" alt="6 bars" width="60" style="image-rendering:auto;border:none;border-radius:0;"></td>
+<td>-1.8 to 2.9 dB</td>
+</tr>
+<tr>
+<td><img src="images/manual/bars/quality-7.svg" alt="7 bars" width="60" style="image-rendering:auto;border:none;border-radius:0;"></td>
+<td>≥ 2.9 dB</td>
+</tr>
+</tbody>
+</table>
+<p>Each step up in Spreading Factor shifts every one of these thresholds another 2dB lower.</p>
+<h3 id="battery-voltage">Battery / Voltage</h3>
+<p>A small battery icon fills in segments by charge percentage, and switches to a plug icon while charging, once charged, or if no PMU/fuel gauge is detected at all. Next to it, a plain voltage readout is shown, which gets visually flagged once it drops to the board's low-battery threshold. Boards with no battery/PMU at all (just a plain resistor-divider VSENSE circuit) show that raw input voltage in this same spot instead, alternating with CPU temperature every few seconds on boards that also have a temperature sensor.</p>
+<h3 id="waterfall">Waterfall</h3>
+<p><img src="images/manual/waterfall.png" alt="Waterfall close-up" width="60"></p>
+<p><em>The waterfall strip, close up.</em></p>
+<p>A scrolling vertical strip - one new row pushed every screen refresh, oldest rows scrolling off the top:</p>
+<ul>
+<li>A plain line, its width proportional to ambient RSSI - the channel's noise floor while idle</li>
+<li>A full-width solid line - an actual packet's carrier was detected</li>
+<li>A checkerboard pattern - the radio is transmitting</li>
+<li>A dotted/tinted pattern - interference detected on the channel</li>
+</ul>
+<p>The line width is scaled between a fixed lower and upper RSSI limit, clamped at either end rather than auto-ranging - so a completely empty line doesn't necessarily mean "no signal at all," just "at or below the lower limit." These limits are their own separate range, not the same one the <a href="#qs-bars">S bar</a> uses:</p>
+<table>
+<thead>
+<tr>
+<th>Boards</th>
+<th>Lower limit</th>
+<th>Upper limit</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Most boards</td>
+<td>-135 dBm</td>
+<td>-60 dBm</td>
+</tr>
+<tr>
+<td>LNA-equipped boards with a raised noise floor (Heltec T096, Heltec Wireless Tracker V2, Heltec T1)</td>
+<td>-120 dBm</td>
+<td>-40 dBm</td>
+</tr>
+</tbody>
+</table>
+<p>The LNA-equipped boards get a narrower, shifted-up range because their front-end's own noise floor already sits well above -135 dBm - without the shift, ambient idle noise would otherwise peg a fifth of the way up the graph instead of reading near zero.</p>
+<p>On boards where ESP-NOW is the active interface instead of LoRa, there's no continuous ambient RSSI to trace, so the waterfall instead marks discrete RX/TX events as they happen.</p>
+<h3 id="airtime-channel-load">Airtime &amp; Channel Load</h3>
+<p>A text page showing two duty-cycle-relevant stats, each as a short-term reading next to a long-term (rolling 1-hour) average:</p>
+<ul>
+<li><strong>Airtime</strong> - the percentage of time this device itself has spent transmitting</li>
+<li><strong>Channel Load</strong> - total channel occupancy: this device's own airtime plus other stations' activity the radio can hear, combined</li>
+</ul>
+<p>Useful for keeping an eye on transmit-time limits in duty-cycle-regulated bands. On GNSS-equipped boards, this page alternates with a GNSS info panel (Fix/Satellites/Latitude/Longitude/Altitude/Time) every 10 seconds; see <a href="#gnss-receiver-support">GNSS Receiver Support</a>.</p>
+<h3 id="banner-carousel">Banner carousel</h3>
+<p>A small rotating strip cycles through a few more things every several seconds: a checks-passed/hardware-OK status graphic, the firmware version and build number, the device's network IP once WiFi or Ethernet is connected, and the system clock once it's been set (by an <a href="#rtc-clock">RTC</a>, GNSS, or the flasher's browser sync).</p>
+<p><img src="images/manual/banner-carousel.png" alt="Banner carousel" width="256"></p>
+<p><em>The banner carousel showing "Hardware Init OK"/"TRX Ready" alongside the RNode ID and current date/time.</em></p>
+<hr />
+<h2 id="navigation">Navigation</h2>
+<p>RNode Firmware devices can be driven three ways, depending on what's populated on the board: the main button alone, a rotary encoder, or a paired BLE keyboard. All three drive the exact same on-screen menus - use whichever your board has.</p>
+<p><img src="images/manual/mainmenu.png" alt="Main status screen" width="256"></p>
+<p><em>The main/status screen. A long-press of the main button from here opens the Settings menu.</em></p>
+<h3 id="button-only-navigation">Button-only navigation</h3>
+<p>Every display-equipped board can be driven with just its main button:</p>
+<ul>
+<li><strong>Short tap</strong> - move the cursor forward one row/step</li>
+<li><strong>Quick double-tap</strong> - move back</li>
+<li><strong>Brief hold (~0.5s), inside a menu</strong> - select/confirm the currently highlighted row</li>
+<li>
+<p><strong>Long press from the main screen</strong> - opens one of several actions, depending on how long you hold. The longer you hold, the further down this list you go:</p>
+</li>
+<li>
+<p><strong>~1.5s - Messenger</strong> (boards with LXMF Messenger)</p>
+</li>
+<li><strong>~3s - Settings</strong></li>
+<li><strong>~5s - BT Pairing</strong> (boards with Bluetooth)</li>
+<li><strong>~7s - Sleep</strong> (boards with sleep support)</li>
+</ul>
+<p>A board only offers the tiers it actually supports - a board without Bluetooth just skips straight from Settings to Sleep, for example.</p>
+<p><img src="images/manual/mainmenu-carousel.png" alt="Hold-action carousel" width="256"></p>
+<p><em>While you hold the button from the main screen, a live indicator shows which action will fire if you release right now - keep holding to reach the next tier.</em></p>
+<p>The on-screen footer always shows which scheme is currently active.</p>
+<h3 id="rotary-encoder-navigation">Rotary encoder navigation</h3>
+<p>On boards with a populated or DIY-wired encoder (MeshAdventurer-S3, ProMicro/FakeTec), turn/click works as an alternate to the button once enabled via <strong>RNode Settings &gt; Encoder</strong>:</p>
+<ul>
+<li><strong>Turn</strong> - move the cursor, or step a value up/down on an edit screen</li>
+<li><strong>Click</strong> - select/confirm</li>
+<li><strong>Double-click, from the main screen</strong> - opens Messenger directly (two short clicks within about 400ms)</li>
+<li><strong>Hold, from the main screen</strong> - opens Settings</li>
+<li><strong>Hold, from anywhere inside Settings or Messenger</strong> - commits any staged changes and exits straight back to the main screen, no matter how deep in the menu you are</li>
+</ul>
+<p>The main button keeps working exactly as described above regardless of whether Encoder is turned on.</p>
+<h3 id="ble-keyboard-navigation">BLE keyboard navigation</h3>
+<p>On <code>HAS_URNS</code>-class ESP32 boards with PSRAM, a paired BLE keyboard (see <a href="#ble-keyboard-support">BLE Keyboard Support</a>) can drive the whole menu system too, in addition to being used for text entry.</p>
+<p><strong>Global shortcuts</strong> (work from almost anywhere, including the main screen):</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><img src="images/manual/keys/win.svg" alt="Windows/Super" width="36" style="vertical-align:middle;background:#2b2b2b;border-radius:4px;padding:3px;image-rendering:auto;"></td>
+<td>Open Settings, or close the currently open menu</td>
+</tr>
+<tr>
+<td><img src="images/manual/keys/alt.svg" alt="Alt" width="36" style="vertical-align:middle;background:#2b2b2b;border-radius:4px;padding:3px;image-rendering:auto;"><span style="margin:0 6px;">+</span><img src="images/manual/keys/tab.svg" alt="Tab" width="36" style="vertical-align:middle;background:#2b2b2b;border-radius:4px;padding:3px;image-rendering:auto;"></td>
+<td>Open Messenger, or close the currently open menu</td>
+</tr>
+<tr>
+<td><img src="images/manual/keys/ctrl.svg" alt="Ctrl" width="36" style="vertical-align:middle;background:#2b2b2b;border-radius:4px;padding:3px;image-rendering:auto;"><span style="margin:0 6px;">+</span><img src="images/manual/keys/a.svg" alt="A" width="36" style="vertical-align:middle;background:#2b2b2b;border-radius:4px;padding:3px;image-rendering:auto;">&nbsp;&nbsp;&nbsp;&nbsp;<img src="images/manual/keys/f2.svg" alt="F2" width="36" style="vertical-align:middle;background:#2b2b2b;border-radius:4px;padding:3px;image-rendering:auto;"></td>
+<td>Jump straight into a chat with the contact currently selected in Inbox/Bookmarks, or the one already open</td>
+</tr>
+<tr>
+<td>Brightness Up/Down</td>
+<td>Adjust display brightness</td>
+</tr>
+<tr>
+<td>Volume Up/Down</td>
+<td>Enable/disable the buzzer</td>
+</tr>
+<tr>
+<td>Play/Pause</td>
+<td>Toggle status-text marquee scrolling</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Inside a menu:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><img src="images/manual/keys/arrows_vertical.svg" alt="Up/Down" width="36" style="vertical-align:middle;background:#2b2b2b;border-radius:4px;padding:3px;image-rendering:auto;"></td>
+<td>Move the cursor between rows</td>
+</tr>
+<tr>
+<td><img src="images/manual/keys/arrows_horizontal.svg" alt="Left/Right" width="36" style="vertical-align:middle;background:#2b2b2b;border-radius:4px;padding:3px;image-rendering:auto;"></td>
+<td>Change a value on an edit screen</td>
+</tr>
+<tr>
+<td><img src="images/manual/keys/enter.svg" alt="Enter" width="36" style="vertical-align:middle;background:#2b2b2b;border-radius:4px;padding:3px;image-rendering:auto;"></td>
+<td>Select/confirm</td>
+</tr>
+<tr>
+<td><img src="images/manual/keys/escape.svg" alt="Escape" width="36" style="vertical-align:middle;background:#2b2b2b;border-radius:4px;padding:3px;image-rendering:auto;">&nbsp;&nbsp;&nbsp;&nbsp;<img src="images/manual/keys/backspace.svg" alt="Backspace" width="36" style="vertical-align:middle;background:#2b2b2b;border-radius:4px;padding:3px;image-rendering:auto;"></td>
+<td>Go back / close (Backspace works the same way on most screens)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>While composing text</strong> (a Messenger reply, WiFi credentials, etc.):</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><img src="images/manual/keys/enter.svg" alt="Enter" width="36" style="vertical-align:middle;background:#2b2b2b;border-radius:4px;padding:3px;image-rendering:auto;"></td>
+<td>Send/confirm</td>
+</tr>
+<tr>
+<td><img src="images/manual/keys/backspace.svg" alt="Backspace" width="36" style="vertical-align:middle;background:#2b2b2b;border-radius:4px;padding:3px;image-rendering:auto;"></td>
+<td>Delete a character</td>
+</tr>
+<tr>
+<td><img src="images/manual/keys/arrows_all.svg" alt="Arrow keys" width="36" style="vertical-align:middle;background:#2b2b2b;border-radius:4px;padding:3px;image-rendering:auto;"></td>
+<td>Move around the on-screen keyboard grid or text cursor</td>
+</tr>
+<tr>
+<td><img src="images/manual/keys/escape.svg" alt="Escape" width="36" style="vertical-align:middle;background:#2b2b2b;border-radius:4px;padding:3px;image-rendering:auto;"></td>
+<td>Leave without sending</td>
+</tr>
+<tr>
+<td><img src="images/manual/keys/alt.svg" alt="Alt" width="36" style="vertical-align:middle;background:#2b2b2b;border-radius:4px;padding:3px;image-rendering:auto;"><span style="margin:0 6px;">+</span><img src="images/manual/keys/shift.svg" alt="Shift" width="36" style="vertical-align:middle;background:#2b2b2b;border-radius:4px;padding:3px;image-rendering:auto;">&nbsp;&nbsp;&nbsp;&nbsp;<img src="images/manual/keys/ctrl.svg" alt="Ctrl" width="36" style="vertical-align:middle;background:#2b2b2b;border-radius:4px;padding:3px;image-rendering:auto;"><span style="margin:0 6px;">+</span><img src="images/manual/keys/shift.svg" alt="Shift" width="36" style="vertical-align:middle;background:#2b2b2b;border-radius:4px;padding:3px;image-rendering:auto;"></td>
+<td>Toggle EN/RU keyboard layout</td>
+</tr>
+</tbody>
+</table>
+<p><strong>In Dialog Mode</strong> (the full-screen chat view - open it with Ctrl+A/F2 above, or the peer screen's own Dialog Mode row):</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><img src="images/manual/keys/arrows_vertical.svg" alt="Up/Down" width="36" style="vertical-align:middle;background:#2b2b2b;border-radius:4px;padding:3px;image-rendering:auto;"> <img src="images/manual/keys/pgup.svg" alt="Page Up" width="36" style="vertical-align:middle;background:#2b2b2b;border-radius:4px;padding:3px;image-rendering:auto;"> <img src="images/manual/keys/pgdn.svg" alt="Page Down" width="36" style="vertical-align:middle;background:#2b2b2b;border-radius:4px;padding:3px;image-rendering:auto;"> <img src="images/manual/keys/home.svg" alt="Home" width="36" style="vertical-align:middle;background:#2b2b2b;border-radius:4px;padding:3px;image-rendering:auto;"> <img src="images/manual/keys/end.svg" alt="End" width="36" style="vertical-align:middle;background:#2b2b2b;border-radius:4px;padding:3px;image-rendering:auto;"></td>
+<td>From the compose box, switch focus to browsing message history and select a row (Page Up/Down jump several messages at a time, Home/End jump to the oldest/newest)</td>
+</tr>
+<tr>
+<td><img src="images/manual/keys/arrows_horizontal.svg" alt="Left/Right" width="36" style="vertical-align:middle;background:#2b2b2b;border-radius:4px;padding:3px;image-rendering:auto;"></td>
+<td>While browsing, return focus to the compose box (typing does this too)</td>
+</tr>
+<tr>
+<td><img src="images/manual/keys/enter.svg" alt="Enter" width="36" style="vertical-align:middle;background:#2b2b2b;border-radius:4px;padding:3px;image-rendering:auto;"></td>
+<td>While browsing, open the selected message full-screen</td>
+</tr>
+<tr>
+<td><img src="images/manual/keys/backspace.svg" alt="Backspace" width="36" style="vertical-align:middle;background:#2b2b2b;border-radius:4px;padding:3px;image-rendering:auto;"></td>
+<td>While browsing, delete the selected message (asks for confirmation)</td>
+</tr>
+<tr>
+<td><img src="images/manual/keys/escape.svg" alt="Escape" width="36" style="vertical-align:middle;background:#2b2b2b;border-radius:4px;padding:3px;image-rendering:auto;"></td>
+<td>Close the full-message view if one is open, otherwise leave Dialog Mode</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="rnode-settings-menu">RNode Settings Menu</h2>
+<p>Boards with a display and a main button get an on-device settings menu, opened with a long-press (3s) of the main button (or the equivalent encoder/BLE keyboard shortcut - see <a href="#navigation">Navigation</a>):</p>
+<p><img src="images/manual/settings-1.png" alt="Settings list, page 1" width="256"> <img src="images/manual/settings-2.png" alt="Settings list, page 2" width="256"></p>
+<p><em>The Settings list scrolls across multiple pages - which entries appear depends on what the board supports (the second page here adds Radio/WiFi/Bluetooth/GNSS).</em></p>
+<ul>
+<li><strong>Display Timeout</strong> - how long before the screen blanks</li>
+</ul>
+<p><img src="images/manual/display-timeout.png" alt="Display Timeout" width="200"></p>
+<ul>
+<li><strong>Brightness</strong> - display contrast/backlight level: a 3-step OFF/DIM/BRIGHT pick on OLED boards (contrast has no perceptually useful continuous range on real hardware), or a finer 5-step OFF/LOW/MED/HIGH/MAX backlight level on TFT/color-LCD boards (T096/T114/etc.)</li>
+<li><strong>Orientation</strong> - screen rotation, one of <strong>0</strong>, <strong>90</strong>, <strong>180</strong>, or <strong>270</strong> degrees. On boards with a 128x64 OLED panel, the RNode Settings Menu itself always renders in landscape while it's open, regardless of this setting - it switches back to whatever Orientation you've picked the moment you exit the menu. Boards with their own dedicated portrait-shaped menu layout (Heltec T096/T114) aren't affected by this and just use Orientation directly</li>
+<li><strong>Sound</strong> - toggles the buzzer on/off (defaults off on boards where the buzzer is a DIY add-on most builds skip, e.g. ProMicro/FakeTec; otherwise defaults on) - see <a href="#buzzerbeeper-support">Buzzer/Beeper Support</a></li>
+<li><strong>LED Brightness</strong> - boards with a NeoPixel/addressable status LED (e.g. the T-Beam family) can scale its brightness down without changing which color it shows - see <a href="#neopixel-status-led">NeoPixel Status LED</a> for what each color means</li>
+</ul>
+<p><img src="images/manual/led-brightness.png" alt="LED Brightness" width="200"></p>
+<ul>
+<li><strong>Encoder</strong> - on boards with encoder support built in (MeshAdventurer-S3, ProMicro/FakeTec), tells the menu whether a physical rotary encoder is actually populated. Defaults off since it's either a PCB-provisioned-but-optional part (MeshAdventurer-S3) or a DIY add-on (ProMicro/FakeTec) rather than something guaranteed present. Changes the on-screen footer hint (turn/press vs. tap/hold) and gates whether the encoder's turn/press input is read at all - off, so a board with no encoder wired up can't misread floating-pin noise as phantom input - see <a href="#rotary-encoder-support">Rotary Encoder Support</a> and <a href="#navigation">Navigation</a></li>
+<li><strong>WiFi</strong> - mode/SSID/PSK (ESP32 boards with WiFi only) - see <a href="#wifi">WiFi</a> for the full field list</li>
+<li><strong>Bluetooth</strong> - MAC address, Bonds, and advanced pairing settings (boards with Bluetooth only) - see <a href="#bluetooth">Bluetooth</a></li>
+<li><strong>Ethernet</strong> - link speed/duplex and static IP/netmask/gateway/DNS, or DHCP (MeshPoE-S3 only) - see <a href="#wired-ethernet-w5500-support">Wired Ethernet (W5500) Support</a></li>
+<li><strong>Hardware</strong> - CPU temperature, voltages, network MACs, memory usage, and (on ProMicro/FakeTec) GPIO reassignment - see <a href="#hardware">Hardware</a> below</li>
+</ul>
+<p>Changes are staged in RAM as you navigate and are only written to EEPROM (with the matching device reboot where needed) when you commit and exit the menu - browsing settings never triggers spurious reboots or writes. Navigation and button presses get short tick/click buzzer feedback (unless Sound is off).</p>
+<hr />
+<h2 id="urns-microreticulum-support">URNS (microReticulum) Support</h2>
+<p><code>HAS_URNS</code> boards (ESP32 boards with PSRAM) run a real, embedded Reticulum node - a portable C++ port of the <a href="https://reticulum.network/">Reticulum</a> stack, not just a KISS modem passthrough - independent of any host. This uses <a href="https://github.com/attermann/microReticulum">microReticulum</a> by Chad Attermann. URNS support is its own PlatformIO build environment per board (the <code>_urns</code> suffix) rather than something every build has - and not every one of those builds gets the full experience:</p>
+<table>
+<thead>
+<tr>
+<th>Board</th>
+<th>Messenger</th>
+<th>On-device URNS menu</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>MeshAdventurer-S3</td>
+<td>Yes</td>
+<td>Yes</td>
+<td>Hardware-validated</td>
+</tr>
+<tr>
+<td>MeshPoE-S3</td>
+<td>Yes</td>
+<td>Yes</td>
+<td>Hardware-validated</td>
+</tr>
+<tr>
+<td>Heltec WiFi LoRa 32 V4</td>
+<td>Yes</td>
+<td>Yes</td>
+<td>Hardware-validated</td>
+</tr>
+<tr>
+<td>Heltec WiFi LoRa 32 V4 R8</td>
+<td>No</td>
+<td>Yes</td>
+<td>Not validated (untested R8 SKU)</td>
+</tr>
+<tr>
+<td>LilyGO T-Beam 1W</td>
+<td>Yes</td>
+<td>Yes</td>
+<td>Not validated (no hardware to test on)</td>
+</tr>
+<tr>
+<td>LilyGO T-Beam Supreme</td>
+<td>No</td>
+<td>No - board has no Settings menu at all yet</td>
+<td>Not validated (base board is; this URNS build isn't)</td>
+</tr>
+<tr>
+<td>LilyGO T-Beam Supreme v3</td>
+<td>No</td>
+<td>No - board has no Settings menu at all yet</td>
+<td>Not validated (base board is; this URNS build isn't)</td>
+</tr>
+<tr>
+<td>Aethernode-S3</td>
+<td>No - no button on this board at all</td>
+<td>No - no button on this board at all</td>
+<td>Not validated (base board is; this URNS build isn't)</td>
+</tr>
+</tbody>
+</table>
+<p>The Heltec V4 R8 and Aethernode-S3/T-Beam Supreme boards above still run the onboard Reticulum node itself (transport, path table, provisioning) - they just can't run the LXMF Messenger app (needs a menu to display it) or, for the last two, be configured from the device's screen at all - URNS runs with its compiled-in defaults on those, and settings changes need to come over KISS from a connected host instead.</p>
+<p>It's configured under <strong>RNode Settings &gt; URNS</strong>, on boards that have that menu:</p>
+<p><img src="images/manual/urns-settings-1.png" alt="URNS settings, page 1" width="200"> <img src="images/manual/urns-settings-2.png" alt="URNS settings, page 2" width="200"> <img src="images/manual/urns-settings-3.png" alt="URNS settings, page 3" width="200"></p>
+<p><em>The URNS settings list scrolls across three pages.</em></p>
+<ul>
+<li><strong>Enabled</strong> - master on/off switch for the onboard Reticulum node. Turning it off also takes Transport Mode, the LXMF Messenger, and everything else in this section with it</li>
+<li><strong>Transport Mode</strong> - default off. Lets the onboard node relay other nodes' traffic and participate fully in path/announce propagation, instead of operating as a leaf/client-only node</li>
+<li><strong>Interface</strong> (boards with ESP-NOW) - <strong>LoRa</strong> / <strong>ESP-NOW</strong> / <strong>Both</strong> - which transport(s) the onboard node's Reticulum stack actually uses</li>
+<li><strong>Link MTU Discovery</strong> - default on. Lets Reticulum automatically negotiate a larger link MTU for faster transfers over links that support it</li>
+<li><strong>Remote Management</strong> - default on, but harmless by default: nothing can actually manage the node remotely until its allow list (empty by default) is populated</li>
+<li><strong>Probe Destination</strong> - default off. When enabled, lets the node reply to Reticulum probe requests from other tools (the same mechanism <a href="#lxmf-messenger">Ping</a> and <code>rnprobe</code> use), so others can measure reachability/RTT to it</li>
+<li><strong>PIN Protection</strong> - see <a href="#pin-protection-optional">PIN protection</a> under LXMF Messenger</li>
+<li><strong>Path Table</strong> - a live, read-only list of every destination this node currently has a path to</li>
+<li><strong>Free</strong> - remaining free space on the onboard storage partition, broken down by what's using it</li>
+</ul>
+<p>Changing Enabled, Transport Mode, Interface, Link MTU Discovery, or Remote Management requires a reboot to take effect, same as every other boot-only setting (staged, applied on <strong>SAVE &amp; EXIT</strong>).</p>
+<p><img src="images/manual/urns-pathtable.png" alt="Path Table" width="200"> <img src="images/manual/urns-pathdetail.png" alt="Path Detail" width="200"> <img src="images/manual/urns-free.png" alt="Free storage breakdown" width="200"></p>
+<p><em>Path Table (each entry shows its hop count; selecting one opens its full hash and remaining expiry), and the Free storage breakdown (Identity/Announce/Paths/Messages).</em></p>
+<hr />
+<h2 id="lxmf-messenger">LXMF Messenger</h2>
+<p>Boards with <code>HAS_URNS</code> (currently MeshPoE-S3 and MeshAdventurer-S3) run a full onboard <a href="https://github.com/markqvist/LXMF">LXMF</a> node and a bare-bones emergency messenger app on top of it - readable and usable entirely from the device's own screen, with no host PC or phone required.</p>
+<p>Open it from <strong>RNode Settings &gt; Messenger</strong>, or with a dedicated button-hold (1.5-3s, a shorter hold than the 3s Settings menu).</p>
+<p><img src="images/manual/messenger-menu.png" alt="Messenger menu" width="256"></p>
+<p><em>The Messenger menu: Inbox, Bookmarks, Announces, Announce Node.</em></p>
+<p><strong>What it can do:</strong></p>
+<ul>
+<li><strong>Inbox</strong> - received LXMF messages, stored on-device</li>
+<li><strong>Bookmarks</strong> - saved peer addresses for quick access - see <a href="#bookmarks">Bookmarks</a> below</li>
+<li><strong>Announces</strong> - the last 8 <code>lxmf.delivery</code> announces heard on-air from other LXMF nodes (this firmware, <a href="https://github.com/markqvist/Sideband">Sideband</a>, <a href="https://github.com/markqvist/NomadNet">NomadNet</a>, etc.)</li>
+<li><strong>Announce Node</strong> - immediately sends out an announce for your own LXMF delivery destination, rather than waiting for the next automatic one - useful right after setup, so other nodes can learn your address sooner</li>
+<li><strong>Send</strong> - quick presets (e.g. Hi / Bye / SOS) or a free-text "Compose message", to any bookmarked, announced, or inbox contact</li>
+<li><strong>Ping</strong> - measures round-trip time to any LXMF-reachable peer without sending an actual message (a raw link handshake, the same mechanism Reticulum's own <code>rnprobe</code> uses)</li>
+<li><strong>Sync to Prop</strong> - manually pulls any deferred messages waiting on your active Propagation Node - see <a href="#propagation-nodes">Propagation Nodes</a> below</li>
+<li><strong>Clear Conversation</strong> - wipes a contact's message history from the device</li>
+<li>A blinking envelope icon replaces the normal radio-status icon on the main screen whenever there's an unread message</li>
+</ul>
+<p><img src="images/manual/new-message-icon.png" alt="New message icon on the main screen" width="256"></p>
+<p><em>The main screen's blinking envelope, shown here as a new message arrives.</em></p>
+<p><img src="images/manual/messenger-inbox.png" alt="Inbox" width="200"> <img src="images/manual/messenger-peer.png" alt="Contact screen" width="200"> <img src="images/manual/messenger-peer-actions.png" alt="Contact screen, scrolled" width="200"></p>
+<p><em>Inbox, and the per-contact screen (recent messages, Send presets/Compose message/Ping at the top; scrolling down reaches Bookmark toggle/Clear Conversation/Dialog Mode).</em></p>
+<p><img src="images/manual/messenger-message-detail.png" alt="Message actions" width="200"> <img src="images/manual/messenger-full-message.png" alt="Full message view" width="200"> <img src="images/manual/messenger-ping-result.png" alt="Ping result" width="200"></p>
+<p><em>Selecting a message offers Reply/Delete/Full Message; Ping shows round-trip time once it completes.</em></p>
+<p>If you reply to or ping someone whose announce never reached your node (for example, over a network that rate-limits incoming announce propagation), the Messenger automatically issues a path request and waits, rather than failing instantly - delivery still depends on some node between you and the peer having a cached announce.</p>
+<h3 id="composing-text-tips-and-tricks">Composing text: tips and tricks</h3>
+<p><img src="images/manual/messenger-compose.png" alt="Message compose screen" width="256"></p>
+<p><em>The on-screen keyboard, used for composing messages, setting your display name, editing presets, and typing a bookmark's hash by hand.</em></p>
+<p>Move the highlight with a tap/turn and select it with a press/click - the same navigation as everywhere else (see <a href="#navigation">Navigation</a>). A few keys aren't obvious from the grid alone:</p>
+<ul>
+<li><strong>Capitals</strong> - tap <strong>Shift</strong> (the up-arrow key) to toggle it on for subsequent letters, like Caps Lock. On an encoder-equipped board, holding the encoder's button down while turning it inserts a one-off capital for whichever letter is highlighted, without toggling Shift at all.</li>
+<li><strong>Hidden symbols</strong> - <code>.</code> <code>,</code> <code>?</code> <code>-</code> <code>/</code> and <code>@</code> each hide a second symbol on the same key. Hold the key for about a second to insert <code>:</code> <code>;</code> <code>!</code> <code>+</code> <code>\</code> or <code>#</code> instead. The same press-and-turn gesture used for one-off capitals does this too, on an encoder.</li>
+<li><strong>EN/RU layout switch</strong> - hold <strong>Shift</strong> for about a second to flip the whole grid to a Cyrillic (ЙЦУКЕН) layout, arranged to match a real Russian keyboard. Hold it again (or press-and-turn Shift on an encoder, for an instant switch) to flip back.</li>
+<li><strong>Delete</strong> - tap once per character, or hold it down to auto-repeat.</li>
+<li>Typing a bookmark's hash by hand (<strong>Bookmarks &gt; Add by Hash</strong>) swaps in a shorter hex-only grid (0-9/A-F) instead of the full keyboard - there's no language switch there, since a hash is never Cyrillic.</li>
+</ul>
+<p>A paired BLE keyboard bypasses this on-screen grid entirely and types directly - see <a href="#ble-keyboard-navigation">BLE keyboard navigation</a> for its own Enter/Backspace/EN-RU shortcuts.</p>
+<h3 id="dialog-mode">Dialog Mode</h3>
+<p>With a paired BLE keyboard, <strong>Dialog Mode</strong> is a much quicker way to hold an actual back-and-forth conversation than the regular message flow: a full-screen chat view with the message history above and a compose box at the bottom, so you can read and reply in place instead of backing out to a separate screen for every message.</p>
+<p><img src="images/manual/dialog-mode.png" alt="Dialog Mode" width="256"></p>
+<p><em>Dialog Mode - message history above, composing a reply below.</em></p>
+<p>Open it with <strong>Ctrl+A</strong> or <strong>F2</strong> from Inbox, Bookmarks, or an already-open contact (jumps straight to that contact), or select <strong>Dialog Mode</strong> from a contact's own peer screen (scroll down past Send/Ping to find it). See <a href="#navigation">Navigation</a> for the full set of Dialog Mode keys - browsing message history with Up/Down/PgUp/PgDn/Home/End, replying, deleting, and leaving with Escape.</p>
+<h3 id="bookmarks">Bookmarks</h3>
+<p>Bookmarks are saved addresses for quick access from the Messenger, reached via <strong>Bookmarks</strong> on the Messenger main menu:</p>
+<p><img src="images/manual/bookmarks-list-add-by-hash.png" alt="Bookmarks list" width="256"></p>
+<p><em>The Bookmarks list - existing bookmarks, then Add by Hash, then BACK.</em></p>
+<h4 id="adding-peers">Adding peers</h4>
+<p>If you know someone's destination hash but haven't received their announce yet - or are unable to, because their network rate-limits/restricts incoming announce propagation - they won't show up anywhere to select from. Select <strong>Add by Hash</strong> from the Bookmarks list instead and type in their 32-character hash directly. The screen has a <strong>Type</strong> field, defaulting to <strong>LXMF</strong> for a regular contact:</p>
+<p><img src="images/manual/bookmarks-add-peer.png" alt="Add by Hash, Type: LXMF" width="220"></p>
+<p><em>Add by Hash, with Type set to LXMF - adds a regular contact.</em></p>
+<p>Once saved, the bookmark behaves exactly like one learned from a real announce - you can message it, and the Messenger's usual <a href="#lxmf-messenger">auto path-request</a> behavior still applies if it can't resolve the peer's identity yet.</p>
+<h3 id="propagation-nodes">Propagation Nodes</h3>
+<p>A Propagation Node is a store-and-forward LXMF relay: it holds messages for you when the recipient (or you) can't be reached directly, so you can sync them later. To use one, add it as a bookmark and mark it active.</p>
+<p><strong>Adding a bookmark</strong> - the same <strong>Add by Hash</strong> flow described in <a href="#bookmarks">Bookmarks</a> above, except set the <strong>Type</strong> field to <strong>Propagation</strong> instead of the default LXMF:</p>
+<p><img src="images/manual/bookmarks-add-prop.png" alt="Add by Hash, Type: Propagation" width="220"></p>
+<p><em>Add by Hash, with Type set to Propagation.</em></p>
+<p>Propagation-type bookmarks show up in the Bookmarks list with a distinct broadcast-tower icon, so they're easy to tell apart from regular contacts at a glance.</p>
+<p><strong>Making it active</strong> - open the propagation node's bookmark and select <strong>Set Active</strong>. Only one can be active at a time; picking a different one just replaces it, no need to unset the old one first. This active node is what <strong>Sync to Prop</strong>, periodic background sync, and the Messenger Settings' "Propagate on Fail" option all use - none of them do anything until a node is set active.</p>
+<p><img src="images/manual/propagation-peer.png" alt="Propagation bookmark screen" width="220"></p>
+<p><em>A propagation node's own bookmark screen: Sync, Show Hash, Set Active, Remove Bookmark.</em></p>
+<p><img src="images/manual/messenger-sync-to-prop.png" alt="Sync to Prop" width="256"></p>
+<p><em>Sync to Prop, on the Messenger main menu.</em></p>
+<p><strong>Syncing</strong> - <strong>Sync to Prop</strong> (Messenger's main menu) or <strong>Sync</strong> (on the propagation node's own bookmark screen, which also makes that node active first if it wasn't already) triggers a manual pull. It shows "Syncing..." live, then "Synced N Msg(s)" or "Sync Failed"; selecting Sync to Prop with no active node set instead shows "Prop Not Set".</p>
+<h3 id="pin-protection-optional">PIN protection (optional)</h3>
+<p>The Messenger's identity and message store can be encrypted at rest behind a numeric PIN or passphrase, enabled via <strong>RNode Settings &gt; URNS &gt; PIN Protection</strong> (opt-in, default off). Once enabled, the device shows a lock screen at boot; message content and identity key material stay encrypted until unlocked. Turning protection off decrypts everything back to plaintext.</p>
+<p><strong>There is currently no "forgot PIN" recovery.</strong> If you enable PIN protection and lose the PIN, the only way back in is a full factory reset of the device's identity and message store - there is no partial recovery. Only enable this if you're comfortable with that tradeoff.</p>
+<hr />
+<h2 id="radio-settings">Radio Settings</h2>
+<p>Available under <strong>RNode Settings &gt; Radio</strong> on any board with a display and menu - not just <code>HAS_URNS</code> boards. It sits right under URNS in the menu, but configures the same underlying LoRa parameters a connected host already sets over KISS when using the device as a plain TNC modem, so it works whether or not the onboard Reticulum node is enabled.</p>
+<p><img src="images/manual/radio-settings-1.png" alt="Radio settings, page 1" width="220"> <img src="images/manual/radio-settings-2.png" alt="Radio settings, page 2" width="220"></p>
+<p><em>The Radio settings list.</em></p>
+<ul>
+<li><strong>Frequency</strong> - center frequency, in MHz</li>
+<li><strong>Bandwidth</strong> - channel bandwidth</li>
+<li><strong>Spreading Factor</strong></li>
+<li><strong>Coding Rate</strong> - shown as 4/N</li>
+<li><strong>TX Power</strong> - in dBm</li>
+<li><strong>Auto Start</strong> - default on. Whether the radio starts automatically at boot using these settings; turn it off to leave the radio stopped until a host explicitly starts it, or until you use <strong>Start Radio</strong> below</li>
+<li><strong>Start Radio / Stop Radio</strong> - a live, immediate action (not staged like the fields above) - manually starts or stops the radio right now with the currently configured parameters. Reads <strong>HOST ATTACHED</strong> instead if a connected host already owns the radio</li>
+<li><strong>Clear Settings</strong> - immediately resets Frequency/Bandwidth/Spreading Factor/Coding Rate/TX Power back to "Unset" and stops the radio if it was running - no reboot needed to see it take effect</li>
+</ul>
+<p>Frequency/Bandwidth/Spreading Factor/Coding Rate/TX Power/Auto Start are staged and only take effect after <strong>SAVE &amp; EXIT</strong> (which reboots the device); Start Radio/Stop Radio/Clear Settings act immediately instead.</p>
+<h2 id="esp-now-interface">ESP-NOW Interface</h2>
+<p>ESP32 boards with <code>HAS_ESPNOW</code> (currently MeshPoE-S3 and MeshAdventurer-S3) can expose a second, virtual "RNode" interface over <a href="https://www.espressif.com/en/solutions/low-power-solution/esp-now">ESP-NOW</a> - a direct radio-to-radio protocol on the same WiFi silicon, alongside the real LoRa radio. A connected host sees it as an additional interface via the standard RNode Multi-Interface protocol. It's much faster and lower-latency than LoRa, at the cost of far shorter range.</p>
+<p>Configure it under <strong>RNode Settings &gt; ESP-NOW</strong>:</p>
+<p><img src="images/manual/espnow-settings.png" alt="ESP-NOW settings" width="256"></p>
+<p><em>ESP-NOW settings.</em></p>
+<ul>
+<li><strong>Enabled</strong> - default off</li>
+<li><strong>Version</strong> - <strong>v1.0</strong> (classic, chunked framing) or <strong>v2.0</strong> (unfragmented). Locked to <strong>v2.0 (URNS)</strong> automatically whenever URNS's own Interface setting (below) uses ESP-NOW, since the onboard node only ever speaks the unfragmented v2 framing</li>
+<li><strong>LR Mode</strong> - 802.11 Long Range PHY mode, trading bandwidth for range, independent of Version. Turning it on disables WiFi Remote, since the two can't share the radio at once - the menu requires an explicit confirmation before accepting that change</li>
+<li><strong>Channel</strong> - the WiFi channel both ends need to agree on</li>
+</ul>
+<p>The onboard <a href="#urns-microreticulum-support">URNS</a> node can also use ESP-NOW instead of (or alongside) LoRa for its own traffic, via <strong>RNode Settings &gt; URNS &gt; Interface</strong>:</p>
+<p><img src="images/manual/urns-interface-espnow.png" alt="URNS Interface set to ESP-NOW" width="256"></p>
+<p><em>Setting URNS's own Interface to ESP-NOW.</em></p>
+<h2 id="wifi">WiFi</h2>
+<p>ESP32 boards with WiFi are configured under <strong>RNode Settings &gt; WiFi</strong>:</p>
+<p><img src="images/manual/wifi-settings-1.png" alt="WiFi settings, page 1" width="220"> <img src="images/manual/wifi-settings-2.png" alt="WiFi settings, page 2" width="220"> <img src="images/manual/wifi-settings-3.png" alt="WiFi settings, page 3" width="220"></p>
+<p><em>The WiFi settings list scrolls across three pages.</em></p>
+<ul>
+<li><strong>Mode</strong> - <strong>Off</strong> / <strong>Station</strong> (join an existing network) / <strong>AP</strong> (the device hosts its own)</li>
+<li><strong>SSID</strong> / <strong>PSK</strong> - network name and password</li>
+<li><strong>Channel</strong> - only meaningful in AP mode. Shared with <a href="#esp-now-interface">ESP-NOW</a> - both use the same underlying WiFi channel setting, so changing it here also moves ESP-NOW</li>
+<li><strong>IP Address</strong> / <strong>Netmask</strong> / <strong>Gateway</strong> / <strong>DNS</strong> - DHCP by default; set any of them to switch that field to a static value</li>
+<li><strong>Clear Static</strong> - resets IP Address/Netmask/Gateway/DNS back to DHCP in one step</li>
+</ul>
+<p>All fields are staged and take effect on <strong>SAVE &amp; EXIT</strong> (which reboots the device).</p>
+<p><strong>WiFi and ESP-NOW's LR Mode can't be used at the same time</strong> - they can't share the radio. Turning LR Mode on (under <strong>RNode Settings &gt; ESP-NOW</strong>) disables WiFi entirely, with a confirmation prompt before it's accepted; plain ESP-NOW (LR Mode off, either Version) coexists with WiFi normally.</p>
+<h2 id="buzzerbeeper-support">Buzzer/Beeper Support</h2>
+<p>Boards with a populated (or DIY-added) buzzer get audible feedback: a boot melody, menu navigation ticks/clicks, Bluetooth pairing/connect chirps, and a chirp on RNS host link connect/disconnect (serial, BLE, or WiFi - whichever the host is currently attached over). Muted entirely via <strong>RNode Settings &gt; Sound</strong>, or - on boards with <a href="#ble-keyboard-support">BLE Keyboard Support</a> - directly from a paired keyboard's Volume Up/Down keys, without opening any menu (see <a href="#navigation">Navigation</a>).</p>
+<h2 id="rotary-encoder-support">Rotary Encoder Support</h2>
+<p>Boards with a populated or DIY-wired rotary encoder (MeshAdventurer-S3, ProMicro/FakeTec) can use it as an alternate to the main button, once enabled via <strong>RNode Settings &gt; Encoder</strong>. See <a href="#navigation">Navigation</a> for how it drives the menus.</p>
+<h2 id="neopixel-status-led">NeoPixel Status LED</h2>
+<p>On boards with a NeoPixel/addressable status LED, its color indicates what the radio is currently doing:</p>
+<table>
+<thead>
+<tr>
+<th>Color</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#00ff00;"></span> Green</td>
+<td>Receiving a packet over LoRa (RX)</td>
+</tr>
+<tr>
+<td><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#0000ff;"></span> Blue</td>
+<td>Transmitting a packet over LoRa (TX)</td>
+</tr>
+<tr>
+<td><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#ffff00;"></span> Yellow flash</td>
+<td>Receiving a packet over <a href="#esp-now-interface">ESP-NOW</a> (RX)</td>
+</tr>
+<tr>
+<td><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#ff5000;"></span> Orange flash</td>
+<td>Transmitting a packet over <a href="#esp-now-interface">ESP-NOW</a> (TX)</td>
+</tr>
+<tr>
+<td><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#900070;"></span> Purple</td>
+<td>Interference detected on the channel</td>
+</tr>
+<tr>
+<td><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#400000;"></span> Dim red glow</td>
+<td>Airtime/duty-cycle limit reached - TX is being held back</td>
+</tr>
+<tr>
+<td><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#ffffff;border:1px solid #888;"></span> White, slow breathing pulse</td>
+<td>Idle - radio ready and waiting</td>
+</tr>
+<tr>
+<td><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#ff0000;"></span> Red, breathing pulse</td>
+<td>Radio not ready/not configured</td>
+</tr>
+<tr>
+<td><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#ffffff;border:1px solid #888;"></span> White, solid</td>
+<td>Fatal boot error</td>
+</tr>
+</tbody>
+</table>
+<p>LoRa and ESP-NOW are independent interfaces that can both be active at once - green/blue and yellow/orange can appear close together rather than one replacing the other.</p>
+<p>Its overall brightness is independently controlled by <strong>LED Brightness</strong> (see <a href="#rnode-settings-menu">RNode Settings Menu</a>), without changing which color is shown.</p>
+<h2 id="hardware">Hardware</h2>
+<p>Read-only diagnostic info under <strong>RNode Settings &gt; Hardware</strong> - what's shown depends on what the board actually has:</p>
+<p><img src="images/manual/hardware.png" alt="Hardware info" width="220"> <img src="images/manual/memory.png" alt="Memory submenu" width="220"></p>
+<p><em>Hardware, and its Memory submenu.</em></p>
+<p><img src="images/manual/memory-heap-detail.png" alt="Heap detail" width="200"> <img src="images/manual/memory-psram-detail.png" alt="PSRAM detail" width="200"></p>
+<p><em>Heap and PSRAM detail screens: Total/Used/Free/Min Free.</em></p>
+<ul>
+<li><strong>CPU Temp</strong> - ESP32-S3 and nRF52 boards only</li>
+<li><strong>Input Voltage</strong> - on boards with a resistor-divider VSENSE circuit, opens a <strong>Voltage Divider</strong> ratio field (staged, applied immediately - no reboot needed). Real resistor tolerances drift from the nominal divider math, so this lets you correct the reading against a multimeter if it's consistently off, without needing a firmware change</li>
+</ul>
+<p><img src="images/manual/voltage-divider.png" alt="Voltage Divider field" width="220"></p>
+<p><em>The Voltage Divider field, opened from Input Voltage.</em></p>
+<ul>
+<li><strong>Battery Level</strong> / <strong>Battery Voltage</strong> - read "N/A" on boards with no battery monitoring. Boards without a real VSENSE divider on the battery line (e.g. ProMicro/FakeTec) get a separate battery-scale percentage field here instead, for the same kind of per-unit calibration</li>
+<li><strong>WiFi IP</strong> / <strong>Netmask</strong> - "N/A" when not connected</li>
+<li><strong>WiFi</strong> - the WiFi radio's MAC address</li>
+<li><strong>Eth</strong> - the Ethernet MAC address (MeshPoE-S3 only)</li>
+<li><strong>GPIO</strong> - DIY-only, currently only applicable to ProMicro/FakeTec. On boards where the builder solders peripherals to whichever spare pad they used, lets you reassign a peripheral - the buzzer, and the encoder's Up/Down/Press pins - to a different physical GPIO from a short list of genuinely free pins. Refuses to assign the same pin to two peripherals at once. Takes effect on the next boot</li>
+</ul>
+<p><img src="images/manual/gpio-settings.png" alt="GPIO settings" width="200"></p>
+<p><em>GPIO reassignment (ProMicro/FakeTec only).</em></p>
+<ul>
+<li><strong>Memory</strong> - opens a live breakdown for Heap, and PSRAM on boards that have it: <strong>Total</strong>, <strong>Used</strong>, <strong>Free</strong>, and (ESP32 boards only) <strong>Min Free</strong> - the lowest free heap seen since boot, useful for spotting a slow leak that a single snapshot wouldn't show</li>
+<li><strong>Node Uptime</strong> - time since last boot, as HH:MM:SS</li>
+</ul>
+<p>Bluetooth's own MAC address is shown on the <a href="#bluetooth">Bluetooth</a> screen instead of here.</p>
+<h2 id="bluetooth">Bluetooth</h2>
+<p>Boards with Bluetooth are configured under <strong>RNode Settings &gt; Bluetooth</strong>:</p>
+<p><img src="images/manual/bluetooth.png" alt="Bluetooth settings" width="256"></p>
+<p><em>The Bluetooth screen: MAC address, Settings, Bonds, Forget Bonds.</em></p>
+<ul>
+<li><strong>MAC</strong> - the device's Bluetooth address</li>
+<li><strong>Settings</strong> - see below</li>
+<li><strong>Bonds</strong> - how many devices are currently bonded (paired)</li>
+<li><strong>Forget Bonds</strong> - unpairs everything, with a confirmation prompt</li>
+</ul>
+<p><img src="images/manual/bluetooth-advanced.png" alt="Bluetooth Settings (advanced)" width="256"></p>
+<p><em>Bluetooth Settings.</em></p>
+<ul>
+<li><strong>Legacy Pairing</strong> (ESP32 boards) - default off. Falls back to the older BLE pairing method for clients that don't support modern Secure Connections pairing</li>
+<li><strong>Just Works</strong> (ESP32 boards) - default off. Opt-in, lower-security pairing (no PIN/MITM protection) for clients that can't do authenticated pairing at all</li>
+<li><strong>Auto Start</strong> (ESP32 boards) - default off. Whether Bluetooth powers on automatically at boot, rather than waiting for it to be turned on manually</li>
+<li><strong>Battery Service</strong> (Experimental) - exposes the device's battery level over the standard BLE Battery Service, so phones/OSes can show it in their own Bluetooth device list. Most mobile OSes don't surface this out of the box, so don't expect to see it without extra support on the client side</li>
+</ul>
+<h2 id="bluetoothble-pairing">Bluetooth/BLE Pairing</h2>
+<p>This covers pairing the device itself to a host - a phone or computer running Sideband, NomadNet, or any other Reticulum/KISS client over Bluetooth. (Pairing a BLE keyboard <em>to</em> the device is the reverse direction - see <a href="#ble-keyboard-support">BLE Keyboard Support</a>.)</p>
+<p><strong>Manually arming pairing isn't required.</strong> There are two ways to start:</p>
+<ul>
+<li><strong>On the device</strong> - hold the main button for about 5 seconds from the main screen (the <strong>BT Pairing</strong> tier - see <a href="#navigation">Navigation</a> for the full hold-tier list)</li>
+<li><strong>From the other side</strong> - just start pairing from your phone or computer's own Bluetooth settings. The device accepts an incoming pairing request on its own and shows the same passcode screen automatically, even if you never touched the button first</li>
+</ul>
+<p>Either way, the screen shows <strong>PAIRING</strong> along with a live 6-digit passcode - confirm it matches what your phone or computer is showing to complete the pairing:</p>
+<p><img src="images/manual/bluetooth-pairing.png" alt="On-device pairing screen" width="256"></p>
+<p><em>The on-device pairing screen, with its 6-digit passcode.</em></p>
+<p>The passcode is randomly generated fresh each time, and the pairing window closes on its own after about 35 seconds if nothing completes it.</p>
+<p><strong>From the RNode Flasher web tool</strong> - while connected over USB, flasher.rns.moscow's <strong>Node Configuration &gt; BT</strong> tab can also arm pairing remotely and displays the same live passcode in the browser - useful if you'd rather not use the device's own controls, or the board has no display:</p>
+<p><img src="images/manual/flasher-bluetooth-pairing.png" alt="RNode Flasher Bluetooth pairing panel" width="480" style="image-rendering: auto;"></p>
+<p><em>Arming pairing and reading the passcode from the RNode Flasher web tool.</em></p>
+<p>If a client can't complete the modern passcode-confirm flow, see <strong>Legacy Pairing</strong> and <strong>Just Works</strong> under <a href="#bluetooth">Bluetooth</a> above.</p>
+<h2 id="ble-keyboard-support">BLE Keyboard Support</h2>
+<p>Boards with URNS and Messenger support can pair with a standard BLE HID keyboard and use it for menu navigation and text entry (for example, composing Messenger replies) instead of the button/encoder. This isn't limited to dedicated keyboards - BLE TV remotes with an integrated keyboard (the small QWERTY remotes bundled with many Android TV/streaming boxes) work the same way, since they advertise as the same HID keyboard device class.</p>
+<p><img src="images/manual/ble-keyboard.png" alt="BLE Keyboard settings" width="256"></p>
+<p><em>RNode Settings &gt; Bluetooth &gt; BLE Keyboard.</em></p>
+<p><strong>To pair and connect a keyboard:</strong></p>
+<ol>
+<li>Open <strong>RNode Settings &gt; Bluetooth &gt; BLE Keyboard</strong> and set <strong>Enabled</strong> to ON</li>
+<li>Select <strong>Scan for Keyboard</strong> - the device lists nearby HID-advertising keyboards as it finds them</li>
+<li>Select yours from the list, then confirm on the PAIR/CANCEL screen</li>
+<li>A live status shows Pairing... then Paired! (or Failed, if it didn't complete) and auto-dismisses on success</li>
+<li><strong>Status</strong> on the BLE Keyboard screen reflects the current state: Disabled / Not Paired / Not Connected / Connected</li>
+</ol>
+<p>Once paired, the device automatically reconnects to that one keyboard every time Bluetooth powers on - no re-pairing needed. <strong>Forget Keyboard</strong> removes just that pairing (with a confirmation prompt) without affecting any other Bluetooth bonds, like a paired phone.</p>
+<p>See <a href="#navigation">Navigation</a> for the full key mapping once connected.</p>
+<h2 id="wired-ethernet-w5500-support">Wired Ethernet (W5500) Support</h2>
+<p>MeshPoE-S3 only. A W5500 Ethernet controller provides a wired, power-over-Ethernet-capable network link as an alternative or complement to WiFi. DHCP is used by default (with an automatic <code>rnode-xxxx</code> hostname derived from the device's Bluetooth MAC); static IP/netmask/gateway/DNS can be set instead via <strong>RNode Settings &gt; Ethernet</strong>. The main screen shows a link-state icon and a rotating page with the current Ethernet IP.</p>
+<h2 id="gnss-receiver-support">GNSS Receiver Support</h2>
+<p>Boards with a built-in or wired GNSS module report position, altitude, satellite count, and fix status. Available on:</p>
+<ul>
+<li>Heltec Mesh Node T096 (built-in UC6580)</li>
+<li>Heltec T114 (Quectel L76K)</li>
+<li>MeshAdventurer-S3 (AT6558)</li>
+<li>Heltec WiFi LoRa 32 V4 (Quectel L76K)</li>
+</ul>
+<p>View live GNSS data and toggle it on/off under <strong>RNode Settings &gt; GNSS</strong>. On the main screen, an airtime/statistics panel alternates with a GNSS info panel every 10 seconds on boards that have both.</p>
+<ul>
+<li><strong>Enabled</strong> - immediate-commit toggle; powers the GNSS module on/off live, no reboot needed</li>
+<li><strong>Update Interval</strong> (boards that can gate GNSS power) - how often the receiver wakes to get a fresh fix, trading position freshness for power: <strong>Continuous</strong>, or a duty-cycled 5/15/60-minute preset (some boards also offer 1 minute). Continuous keeps the receiver always on</li>
+<li><strong>Duty State</strong> - read-only: <strong>ACTIVE</strong> (powered, acquiring), <strong>HOLD</strong> (about to sleep), or <strong>SLEEP</strong> (powered down between intervals). On a board that can't duty-cycle, this just reads ACTIVE (or OFF when GNSS is disabled)</li>
+<li><strong>Fix</strong> / <strong>Satellites</strong> / <strong>Latitude</strong> / <strong>Longitude</strong> / <strong>Altitude</strong> - read-only, from the current fix</li>
+<li><strong>Time</strong> - read-only UTC time from the receiver. This populates independently of Fix/position - a GNSS receiver typically locks time before it ever gets a position fix, so Time being valid while Fix/Satellites still read zero tells you the receiver and its NMEA parsing are working fine, and what's missing is just sky visibility. The first time GNSS gets a valid time reference after boot, the device automatically seeds its system clock from it, with no manual sync needed - see <a href="#rtc-clock">RTC Clock</a> for why a correct clock matters. This seeding happens once per boot, not continuously; on boards with a real RTC chip, the RTC takes priority and this is just a fallback</li>
+<li><strong>Timezone</strong> - the same display-only UTC offset field as <a href="#rtc-clock">RTC Clock</a>'s Timezone (shared setting, editable from either screen) - relevant here since GNSS is a real time source in its own right on boards with no RTC chip at all</li>
+<li><strong>Diagnostics</strong> (Heltec T096, Heltec T114, MeshAdventurer-S3) - a verbose page for troubleshooting reception, not needed for normal use:</li>
+<li>Module (chip identity), Fix Quality, Fix Mode, HDOP/PDOP/VDOP (dilution of precision), Speed, Course, Date</li>
+<li>Sats Used vs. <strong>Sats In View</strong> - Sats Used is what the current fix is actually built from; Sats In View opens a live per-satellite list (PRN/elevation/azimuth/SNR) so you can tell a genuinely empty sky from a receiver that sees satellites but can't get a good enough fix from them</li>
+<li>Checksum Passed/Failed/Rate, and Chars (raw bytes received) - for confirming the serial link between the MCU and GNSS module itself is healthy, independent of antenna/sky conditions</li>
+<li>On boards that can duty-cycle: Duty State (same as the main page), Lock Count/Fail Count (successful vs. failed re-acquisitions since boot), Predicted (next scheduled wake), and Wake Countdown (counts down only while actually in SLEEP)</li>
+<li><strong>Show Banner</strong> - a one-shot action (not a toggle, and not reversible without a reboot): pins the GNSS info panel on the main screen full-time, replacing its normal alternation with the airtime panel</li>
+</ul>
+<h2 id="rtc-clock">RTC Clock</h2>
+<p>Boards with a real-time clock (currently MeshPoE-S3 and MeshAdventurer-S3) keep the date and time under <strong>RNode Settings &gt; RTC</strong>:</p>
+<p><img src="images/manual/rtc-1.png" alt="RTC settings, page 1" width="220"> <img src="images/manual/rtc-2.png" alt="RTC settings, page 2" width="220"></p>
+<p><em>The RTC screen: current Time/Date/Timezone, and the Set/Sync actions.</em></p>
+<ul>
+<li><strong>Time</strong> / <strong>Date</strong> - read-only, shown in local time (shifted by Timezone below)</li>
+<li><strong>Timezone</strong> - a display-only UTC offset; changes how Time/Date are shown here, takes effect immediately</li>
+<li><strong>Set Time/Date</strong> - a sequential Year/Month/Day/Hour/Minute/Second editor that writes straight to the RTC chip on confirm, no reboot needed</li>
+<li><strong>Sync via NTP</strong> (ESP32 boards with WiFi or Ethernet) - fetches the time over the network. Briefly blocks with a live "Connecting.../Resolving.../Syncing..." status</li>
+<li><strong>Sync via GNSS</strong> (boards with GNSS) - sets the clock from the GNSS receiver's own NMEA time, using whatever fix it already has - if you haven't got a GNSS fix yet, this won't have anything to sync from</li>
+</ul>
+<p>You can also set the clock from a browser, without opening any on-device menu: connect the device to <a href="https://flasher.rns.moscow">flasher.rns.moscow</a> over USB and use its <strong>Sync from Browser</strong> (uses your computer's clock) or <strong>Sync from NTP</strong> button.</p>
+<p><img src="images/manual/rtc-flasher-sync.png" alt="RTC sync from the RNode Flasher web page" width="480" style="image-rendering: auto;"></p>
+<p><em>The RTC panel on flasher.rns.moscow.</em></p>
+<p><strong>Why this matters:</strong> having a correct clock isn't required for the radio or Reticulum routing to work - packets still send and relay fine either way. But on <code>HAS_URNS</code> boards, this clock (RTC if present, GNSS otherwise) is exactly what feeds the onboard Reticulum node's sense of "now", which shows up in two places: <strong>LXMF message timestamps</strong> (a wrong clock means messages show the wrong time, or all cluster around 1970-01-01 if the clock was never set at all), and less obviously, <strong>path/announce record expiry</strong> - the Path Table's own entries are aged out based on this same clock, so a badly wrong one can make entries look expired when they aren't, or never expire when they should.</p>
+<h2 id="environment-sensor-support">Environment Sensor Support</h2>
+<p>Boards with I2C support can have an environment sensor connected to them, auto-detected at boot - no configuration needed. Currently supported:</p>
+<ul>
+<li><strong>Bosch BMP280</strong> - temperature + pressure</li>
+<li><strong>Bosch BME280</strong> - temperature + humidity + pressure</li>
+</ul>
+<p><img src="images/manual/sensors.png" alt="Sensors screen" width="256"></p>
+<p><em>The Sensors screen, reading a live BME280.</em></p>
+<p>Values are shown read-only under <strong>RNode Settings &gt; Sensors</strong> (Humidity reads "N/A" on a BMP280, which has no humidity element) and can also be queried over the KISS serial protocol.</p>
+<h2 id="ota-firmware-update-support">OTA Firmware Update Support</h2>
+<p>Network-based firmware updates, available on boards with sufficient flash for two app partitions (currently MeshPoE-S3 and MeshAdventurer-S3, both <code>HAS_OTA</code>). No USB cable needed - updates install over whatever network connection the device already has (WiFi or, on MeshPoE-S3, Ethernet).</p>
+<p><strong>On the device</strong>, under <strong>RNode Settings &gt; F/W Update</strong>, a status page shows the current and latest available version and lets you trigger an install directly from the screen.</p>
+<p><img src="images/manual/fw-update.png" alt="F/W Update screen" width="220"> <img src="images/manual/fw-update-confirm.png" alt="Update confirmation" width="220"></p>
+<p><em>The on-device F/W Update screen, and its Update/Cancel confirmation.</em></p>
+<p>Both the on-device screen and the update page below check for and pull new firmware straight from <a href="https://flasher.rns.moscow">flasher.rns.moscow</a>, the same site the <a href="#getting-firmware-onto-a-device">web flasher</a> is hosted on.</p>
+<p><strong>From a browser</strong>, each <code>HAS_OTA</code> device also runs its own update page at:</p>
+<pre><code>http://&lt;device-ip&gt;:8080/
+</code></pre>
+<p>(find the device's IP under <strong>RNode Settings &gt; WiFi</strong> or <strong>&gt; Ethernet</strong>). The page shows the device's short ID, current firmware version, and live radio/host-connection status badges, and offers two ways to update:</p>
+<p><img src="images/manual/fw-update-webpage.png" alt="OTA update web page" width="480" style="image-rendering: auto;"></p>
+<p><em>The :8080 update page - status badges, a caution banner while the radio/a host is active, Check for Update/Install Latest, and manual upload.</em></p>
+<ul>
+<li><strong>Install Latest</strong> - checks flasher.rns.moscow and only enables itself once a genuinely newer build is available there; installs over the network with a progress indicator</li>
+<li><strong>Manual upload</strong> - pick a <code>.bin</code> file from your own machine and upload it directly to the device, with a live progress bar. Bare OTA <code>.bin</code> files for every <code>HAS_OTA</code> board are published at <a href="https://flasher.rns.moscow/firmware/classic/latest/OTA/">flasher.rns.moscow/firmware/classic/latest/OTA/</a>, if you'd rather download one yourself than rely on Install Latest</li>
+</ul>
+<p>If the radio or a host is actively connected when you start an update, the page shows a caution prompt before proceeding, since flashing interrupts normal operation. A recovery button-hold at power-on can force-boot the previous firmware partition if a new install doesn't come up cleanly.</p>
+<h2 id="promiscuous-lora-mode-support-packet-analyzer">Promiscuous LoRa Mode Support / Packet Analyzer</h2>
+<p>A LoRa packet monitor mode (<code>CMD_PROMISC</code> over KISS): instead of the normal RNode packet framing/reassembly, every raw LoRa packet received is passed straight to the host along with its RSSI/SNR, letting a connected tool observe raw on-air traffic rather than just Reticulum-framed data intended for this node.</p>
+<p><a href="https://loramon.rns.moscow"><strong>LoRaMon-Web</strong></a> is a browser-based capture/decode tool built for this mode - connect an RNode over USB (Web Serial) or Bluetooth (Web Bluetooth), no install required, and it puts the device into promiscuous mode and streams captured packets live, with a hex+ASCII view and per-packet RSSI/SNR/size. It decodes and classifies traffic from three protocols - Reticulum (e.g. tagging LXMF announces), Meshcore, and Meshtastic - rather than just showing raw bytes. It's hosted at <a href="https://loramon.rns.moscow">loramon.rns.moscow</a>; for self-hosting, the source is at <a href="https://git.rns.moscow/deuxyeux/LoRaMon-web">git.rns.moscow/deuxyeux/LoRaMon-web</a>.</p>
+<p><img src="images/manual/loramon-web.png" alt="LoRaMon-Web" width="600" style="image-rendering: auto;"></p>
+<p><em>LoRaMon-Web monitoring a connected RNode.</em></p>
+<p><img src="images/manual/loramon-onscreen.png" alt="On-device LoRaMon indicator" width="256"></p>
+<p><em>The device's own screen switches to this LoRaMon banner while a LoRaMon-Web session is actively running against it, so anyone holding it can tell it's in capture mode rather than operating normally.</em></p>
+<p>Starting monitoring lets you set the frequency, bandwidth, spreading factor, coding rate, and sync word to capture on - independently of whatever the device is normally configured for. This is a live, temporary change (not written to the device's EEPROM) that disrupts any real traffic on a node actually in use until you stop monitoring or disconnect, at which point its original configuration is restored automatically.</p>
+<hr />
+<h2 id="websocket-tcpip-kiss-interface">WebSocket &amp; TCP/IP KISS Interface</h2>
+<p>Boards with WiFi (or, on MeshPoE-S3, Ethernet) expose the exact same KISS byte stream normally carried over USB serial as two additional network transports. Both come up automatically the moment the network connection is up - no pairing, no separate menu toggle to turn them on:</p>
+<ul>
+<li><strong>Raw TCP, port 7633</strong> - for desktop Reticulum and any other tool that can open a plain TCP socket. Point RNS's <code>TCPClientInterface</code> at the device's IP address and this port, exactly as you'd point a serial-based interface at a USB port - it's the same KISS framing (FEND/FESC-escaped), just carried over TCP instead of a serial line</li>
+<li><strong>WebSocket, port 7634</strong> - the identical KISS byte stream, wrapped for browser-based tools that can't open a raw TCP socket at all (browser sandboxing blocks that). This is what lets a tool like <a href="#promiscuous-lora-mode-support-packet-analyzer">LoRaMon-Web</a> reach a network-connected device instead of requiring a USB or Bluetooth connection</li>
+</ul>
+<p><strong>Only one client total</strong> can be connected across both at any given time - a second connection attempt (TCP or WebSocket, doesn't matter which) is refused outright while the first is still attached, rather than kicking it off. This is because both transports feed the same underlying KISS parser a serial connection would, and two hosts writing to it at once would interleave and corrupt both streams. Disconnect (or let the existing connection time out) before a second tool can connect.</p>
+<p>To find the device's IP address, check <strong>RNode Settings &gt; WiFi</strong> (or <strong>&gt; Ethernet</strong> on MeshPoE-S3), or the <a href="#banner-carousel">banner carousel</a> on the main screen.</p>
+<hr />
+<h2 id="building-from-source">Building From Source</h2>
+<p>The source is at <a href="https://git.rns.moscow/deuxyeux/RNode_Firmware">git.rns.moscow/deuxyeux/RNode_Firmware</a>. This fork builds with <a href="https://platformio.org/">PlatformIO</a>:</p>
+<pre><code>pio run -e &lt;env&gt; -t upload
+</code></pre>
+<p>This builds and flashes in one step. Environment names come from <code>platformio.ini</code> - list them with:</p>
+<pre><code>grep '^\[env:' platformio.ini
+</code></pre>
+<p>Upload port auto-detects; pass <code>--upload-port &lt;port&gt;</code> if it picks the wrong one.</p>
+<p>A few boards (older extended-LED variants, <code>mega2560</code>) don't have a PlatformIO environment yet and still build via the classic <code>arduino-cli</code>/<code>Makefile</code> flow:</p>
+<pre><code>make firmware-&lt;board&gt;     # build - do this last, immediately before upload
+make upload-&lt;board&gt;       # flash over USB serial
+</code></pre>
+<h3 id="clearing-firmware-corrupt-after-a-manual-flash">Clearing "Firmware Corrupt" after a manual flash</h3>
+<p>The web flasher sets the device's firmware hash automatically. A manual PlatformIO/<code>make</code> flash does not - the device will report <strong>Firmware Corrupt</strong> until the hash is set. Using <a href="https://github.com/markqvist/Reticulum"><code>rnodeconf</code></a> (installed via <code>pip install rns</code>), read the firmware's actual hash back from the device and write it in as the target:</p>
+<pre><code>rnodeconf -p &lt;port&gt; -L                 # prints &quot;The actual firmware hash is: &lt;hex&gt;&quot;
+rnodeconf -p &lt;port&gt; -H &lt;hex from above&gt;
+</code></pre>
+<p>If the board is brand new and has never been provisioned (blank EEPROM - typical for a freshly-assembled DIY board), provision it first with <code>rnodeconf -p &lt;port&gt; -r</code>, then set the hash as above.</p>
+<hr />
+<h2 id="attribution-credits">Attribution &amp; Credits</h2>
+<p>This firmware builds on the work of a lot of people beyond this fork's own contributors.</p>
+<p><strong>Original firmware and protocols</strong></p>
+<ul>
+<li><a href="https://unsigned.io/">Mark Qvist</a> - author of the original <a href="https://github.com/markqvist/RNode_Firmware">RNode_Firmware</a>, and creator of the <a href="https://reticulum.network/">Reticulum</a> network stack and <a href="https://github.com/markqvist/LXMF">LXMF</a> message format this firmware implements. The LoRa radio subsystem itself is untouched from upstream - it's still Mark's original SX127x/SX126x/SX128x driver code.</li>
+</ul>
+<p><strong>Embedded Reticulum/LXMF stack</strong> (see <a href="#urns-microreticulum-support">URNS (microReticulum) Support</a>)</p>
+<ul>
+<li><a href="https://github.com/attermann">Chad Attermann</a> - <a href="https://github.com/attermann/microReticulum">microReticulum</a> (the C++ Reticulum port this firmware's onboard node runs on) and <a href="https://github.com/attermann/microStore">microStore</a> (its key-value storage backend)</li>
+<li><a href="https://github.com/torlando-tech">Torlando Tech LLC</a> - <a href="https://github.com/torlando-tech/microLXMF">microLXMF</a>, the LXMF implementation layered on top of microReticulum</li>
+</ul>
+<p><strong>Community device designs</strong> (see <a href="#supported-devices">Supported Devices</a>)</p>
+<ul>
+<li><a href="https://git.rns.moscow/deuxyeux">Nickie Deuxyeux</a> - MeshPoE-S3, MeshAdventurer-S3</li>
+<li>aetherlab LZ1SWE - <a href="https://github.com/ahedproductions/aethernode">Aethernode</a>, <a href="https://github.com/ahedproductions/aethernodeS3">Aethernode-S3</a></li>
+<li>Frequency Labs (<a href="https://github.com/chrismyers2000">chrismyers2000</a>) - <a href="https://github.com/chrismyers2000/MeshAdventurer">MeshAdventurer</a></li>
+<li>gargomoma, ShimonHoranek, lupusworax - <a href="https://github.com/gargomoma/fakeTec_pcb">FakeTec / ProMicro</a></li>
+<li><a href="https://github.com/NanoVHF">NanoVHF</a> - <a href="https://github.com/NanoVHF/Meshtastic-DIY/">DIY-V1</a></li>
+</ul>
+<p><strong>Reference designs</strong> - pin mappings and hardware behavior for the boards in this fork with no physical unit to test against yet (see <a href="#supported-devices">Supported Devices</a>) were cross-checked against these projects' own variant/board definitions rather than guessed:</p>
+<ul>
+<li><a href="https://meshtastic.org/">Meshtastic</a></li>
+<li><a href="https://github.com/ripplebiz/MeshCore">MeshCore</a></li>
+</ul>
+<p><strong>Third-party libraries</strong></p>
+<ul>
+<li>Adafruit - GFX Library, BusIO, NeoPixel, SSD1306, SH110X, ST7735/ST7789, BME280, BMP280, and Unified Sensor libraries</li>
+<li><a href="https://github.com/bblanchon">Benoit Blanchon</a> - ArduinoJson</li>
+<li><a href="https://github.com/hideakitai">Hideaki Tai</a> - MsgPack</li>
+<li><a href="https://github.com/mikalhart">Mikal Hart</a> - TinyGPSPlus</li>
+<li><a href="https://github.com/lewisxhe">Lewis He</a> - XPowersLib</li>
+<li><a href="https://github.com/links2004">Markus Sattler</a> - WebSockets</li>
+<li><a href="https://github.com/ZinggJM">Jean-Marc Zingg</a> - GxEPD2</li>
+<li><a href="https://github.com/rweather">Rhys Weatherley</a> - the original Crypto library microReticulum's own dependency is forked from</li>
+<li>Julian Seward - bzip2/libbzip2, vendored inside microReticulum for LXMF Resource decompression</li>
+<li>Espressif and the Arduino-ESP32 core team, and Adafruit's nRF52 core team, for the underlying platforms this firmware builds on</li>
+</ul>
+<p><strong>Fonts used on-device</strong></p>
+<ul>
+<li>Sebastian Weber - Picopixel, the small status-box/icon-label font</li>
+<li>Orgdot (<a href="https://www.orgdot.com/aliasfonts/">orgdot.com/aliasfonts</a>) - Org_01, the main menu/UI font. Its Cyrillic block is a separate addition, converted from the public-domain X11 "5x7" font (Janne V. Kujala / Markus Kuhn's <code>ucs-fonts</code>, <code>misc-fixed</code> 7px)</li>
+<li>Scott Fial (<a href="http://www.fial.com/~scott/tamsyn-font/">fial.com/~scott/tamsyn-font</a>) - Tamsyn 6x12</li>
+<li>YukiPixels (<a href="https://yukipixels.itch.io/boldpixels">yukipixels.itch.io/boldpixels</a>) - BoldPixels, rasterized for the large BLE pairing PIN digits, licensed <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a></li>
+</ul>
+<p><strong>Assets</strong></p>
+<ul>
+<li><a href="https://kenney.nl/">Kenney</a> - the Input Prompts icon pack (CC0), used for the keyboard key icons in this manual's <a href="#navigation">Navigation</a> section</li>
+<li>Mark Qvist / <a href="https://unsigned.io/">unsigned.io</a> - the RNode logo used at the top of this manual</li>
+<li>Zenith (<a href="https://github.com/RFnexus/">RFnexus</a>) - the Heltec T114's boot logo, from <a href="https://rns.recipes">rns.recipes</a></li>
+</ul>
+</main>
+</body>
+</html>

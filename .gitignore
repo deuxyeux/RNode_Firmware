@@ -28,3 +28,8 @@ dependencies.lock
 # now that the src restructure separates them).
 /CMakeLists.txt
 /RNode_Firmware/CMakeLists.txt
+# Full Kenney "Input Prompts" CC0 pack, kept on disk as a reference/source
+# library for future icon picks. Only the handful of icons actually used in
+# the manual are tracked, pre-extracted and renamed under
+# Documentation/images/manual/keys/.
+/Documentation/images/keys/
