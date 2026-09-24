@@ -1,0 +1,28 @@
+# Name,   Type, SubType, Offset,  Size, Flags
+#
+# Same layout as partitions/meshadventurer_s3_urns.csv - see that file's own
+# comment for the full app0/app1/urns sizing reasoning. Reused verbatim
+# rather than re-derived: Aethernode-S3 is built on the same devboard as
+# MeshAdventurer-S3 (user-confirmed 2026-09-23) - same 16MB flash, same 8MB
+# Octal PSRAM - and gets the same HAS_CONSOLE=false treatment (Boards.h's
+# BOARD_AETHERNODE_S3 block, #ifndef-guarded - see [env:aethernode_s3_urns]'s
+# own comment on why), so the same "spiffs partition is entirely dead, fold
+# it into urns" reasoning applies unchanged.
+#
+# Same HAS_OTA caveat as partitions/tbeam_1w_urns.csv: HAS_OTA is NOT set
+# for BOARD_AETHERNODE_S3 (Boards.h - global default stays false), so app1
+# is unused dead space here too, unlike MeshAdventurer-S3 itself where
+# OTA.h's esp_https_ota updater writes into it. Kept anyway for the same
+# reason as that file - no physical unit to validate a more aggressive
+# layout against, costs nothing today, leaves room for HAS_OTA support
+# later without a second partition-table/identity-reset migration.
+#
+# NOTE: same as meshadventurer_s3_urns.csv - the urns partition's offset
+# means its LittleFS filesystem (and the node's persisted identity) starts
+# fresh on first boot.
+nvs,      data, nvs,     0x9000,  0x5000,
+otadata,  data, ota,     0xe000,  0x2000,
+app0,     app,  ota_0,   0x10000, 0x600000,
+app1,     app,  ota_1,   0x610000,0x300000,
+urns,     data, spiffs,  0x910000,0x6E0000,
+coredump, data, coredump,0xFF0000,0x10000,

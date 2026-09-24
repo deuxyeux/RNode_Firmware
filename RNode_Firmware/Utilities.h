@@ -339,15 +339,63 @@ void buzzer_wait_for_melody();
   #include "Vault.h"
   // Boot-unlock PIN entry screen - must also come before URNS.h, since
   // RNode_Firmware.ino's setup() calls vault_unlock_boot_screen() (defined
-  // here) right before urns_init() (URNS.h).
-  #include "VaultUnlock.h"
+  // here) right before urns_init() (URNS.h). Needs HAS_INPUT - the whole
+  // file is a button/encoder-driven PIN pad (button_state/input_read(),
+  // Input.h, only declared under HAS_INPUT), unlike Vault.h itself (the
+  // storage/crypto layer just above, no input dependency at all). First
+  // surfaced building [env:aethernode_s3_urns] (Aethernode-S3, HAS_INPUT
+  // false, is the first HAS_URNS board with no physical button/encoder at
+  // all) - every other HAS_URNS board has one, so this was previously
+  // latent. vault_enabled (Vault.h) can in practice never become true on a
+  // board like this anyway - the only way to enroll is Menu.h's
+  // vault_enroll_flow(), itself unreachable without HAS_MENU, which also
+  // needs HAS_INPUT - but RNode_Firmware.ino's setup() still calls
+  // vault_unlock_boot_screen() unconditionally whenever vault_enabled is
+  // true, so it needs to at least link; stubbed below, same "always false,
+  // no vault" precedent as Encoder.h's own HAS_URNS==false stub block for
+  // vault_unlock_active/vault_suppress_next_release.
+  #if HAS_INPUT == true
+    #include "VaultUnlock.h"
+  #else
+    inline void vault_unlock_boot_screen() {}
+  #endif
   #include "URNS.h"
   // KISS identity export/import - needs urns_ready (URNS.h, just above)
   // plus Vault.h/VaultUnlock.h's PIN-entry plumbing, but nothing from
   // Messenger.h - identity transfer applies regardless of whether this
   // board also has HAS_LXMF, so it isn't nested under that guard the way
-  // Messenger.h itself is just below.
-  #include "IdentityTransfer.h"
+  // Messenger.h itself is just below. Also needs HAS_INPUT, same as
+  // VaultUnlock.h just above - its export flow's "hold button to confirm"
+  // safety gate and its own PIN-prompt screens (vault_unlock_prompt() etc.)
+  // are built on the same button/encoder primitives, unconditionally, even
+  // when Vault PIN protection itself isn't in use. First surfaced building
+  // [env:aethernode_s3_urns], same reasoning as VaultUnlock.h's own comment.
+  // Stubbed on the false branch with the exact same "empty blob"/"0x00 ok
+  // byte" wire replies kiss_indicate_identity_export(RNS::Bytes::NONE)/
+  // kiss_indicate_identity_import_result(false) send on any other failure
+  // path (IdentityTransfer.h) - the host-side tooling gets a well-formed
+  // "not supported here" response instead of a silent timeout.
+  #if HAS_INPUT == true
+    #include "IdentityTransfer.h"
+  #else
+    inline void on_identity_export_request() {
+      #if HAS_ESPNOW == true
+        kiss_select_interface(0);
+      #endif
+      serial_write(FEND);
+      serial_write(CMD_IDENTITY_EXPORT);
+      serial_write(FEND);
+    }
+    inline void on_identity_import_request(const uint8_t* buf, size_t len) {
+      #if HAS_ESPNOW == true
+        kiss_select_interface(0);
+      #endif
+      serial_write(FEND);
+      serial_write(CMD_IDENTITY_IMPORT);
+      serial_write((uint8_t)0x00);
+      serial_write(FEND);
+    }
+  #endif
   #if HAS_LXMF == true
     #include "Messenger.h"
   #endif

@@ -727,7 +727,17 @@
       #define HAS_BLE true
       #undef HAS_WIFI
       #define HAS_WIFI true
-      #define HAS_CONSOLE true
+      // Guarded (unlike this board's other unconditional defines) so
+      // [env:tbeam_1w_urns] (platformio.ini) can force it off with
+      // -DHAS_CONSOLE=false - same HAS_BLUETOOTH false/HAS_BLE true
+      // NimBLE-only setup as MeshAdventurer-S3/MeshPoE-S3, which hit the
+      // Console/BLE LittleFS-corruption crash (see
+      // feedback_console_ble_crash_littlefs_corruption memory) and disabled
+      // Console for exactly this reason - same #ifndef mechanism as
+      // BOARD_HELTEC32_V4's own HAS_CONSOLE guard above.
+      #ifndef HAS_CONSOLE
+        #define HAS_CONSOLE true
+      #endif
       #undef HAS_EEPROM
       #define HAS_EEPROM true
       #define HAS_BUSY true
@@ -899,7 +909,17 @@
       #define HAS_BLUETOOTH false
       #define HAS_BLE true
       #define HAS_WIFI true
-      #define HAS_CONSOLE true
+      // Guarded (unlike this board's other unconditional defines) so
+      // [env:aethernode_s3_urns] (platformio.ini) can force it off with
+      // -DHAS_CONSOLE=false - same HAS_BLUETOOTH false/HAS_BLE true
+      // NimBLE-only setup as MeshAdventurer-S3/MeshPoE-S3/T-Beam 1W, which
+      // hit the Console/BLE LittleFS-corruption crash and disabled Console
+      // for exactly this reason (see
+      // feedback_console_ble_crash_littlefs_corruption memory) - same
+      // #ifndef mechanism as BOARD_HELTEC32_V4's own HAS_CONSOLE guard.
+      #ifndef HAS_CONSOLE
+        #define HAS_CONSOLE true
+      #endif
       #define HAS_EEPROM true
       #define HAS_BUSY true
       #define HAS_INPUT false
@@ -1277,7 +1297,17 @@
     #elif BOARD_MODEL == BOARD_T3S3
       #define IS_ESP32S3 true
       #define HAS_DISPLAY true
-      #define HAS_CONSOLE true
+      // Guarded (unlike this board's other unconditional defines) so
+      // [env:tbeam_supreme_urns]/[env:tbeam_supreme_v3_urns] (platformio.ini)
+      // can force it off with -DHAS_CONSOLE=false - same HAS_BLUETOOTH
+      // false/HAS_BLE true NimBLE-only setup as MeshAdventurer-S3/MeshPoE-S3/
+      // T-Beam 1W/Aethernode-S3, which hit the Console/BLE LittleFS-
+      // corruption crash and disabled Console for exactly this reason (see
+      // feedback_console_ble_crash_littlefs_corruption memory) - same
+      // #ifndef mechanism as BOARD_HELTEC32_V4's own HAS_CONSOLE guard.
+      #ifndef HAS_CONSOLE
+        #define HAS_CONSOLE true
+      #endif
       #define HAS_WIFI true
       #define HAS_BLUETOOTH false
       #define HAS_BLE true
@@ -1408,7 +1438,17 @@
       #define OCP_TUNED 0x38
 
       #define HAS_DISPLAY true
-      #define HAS_CONSOLE true
+      // Guarded (unlike this board's other unconditional defines) so
+      // [env:tbeam_supreme_urns]/[env:tbeam_supreme_v3_urns] (platformio.ini)
+      // can force it off with -DHAS_CONSOLE=false - same HAS_BLUETOOTH
+      // false/HAS_BLE true NimBLE-only setup as MeshAdventurer-S3/MeshPoE-S3/
+      // T-Beam 1W/Aethernode-S3, which hit the Console/BLE LittleFS-
+      // corruption crash and disabled Console for exactly this reason (see
+      // feedback_console_ble_crash_littlefs_corruption memory) - same
+      // #ifndef mechanism as BOARD_HELTEC32_V4's own HAS_CONSOLE guard.
+      #ifndef HAS_CONSOLE
+        #define HAS_CONSOLE true
+      #endif
       #define HAS_WIFI true
       #define HAS_BLUETOOTH false
       #define HAS_BLE true
@@ -1461,7 +1501,17 @@
       #define OCP_TUNED 0x38
 
       #define HAS_DISPLAY true
-      #define HAS_CONSOLE true
+      // Guarded (unlike this board's other unconditional defines) so
+      // [env:tbeam_supreme_urns]/[env:tbeam_supreme_v3_urns] (platformio.ini)
+      // can force it off with -DHAS_CONSOLE=false - same HAS_BLUETOOTH
+      // false/HAS_BLE true NimBLE-only setup as MeshAdventurer-S3/MeshPoE-S3/
+      // T-Beam 1W/Aethernode-S3, which hit the Console/BLE LittleFS-
+      // corruption crash and disabled Console for exactly this reason (see
+      // feedback_console_ble_crash_littlefs_corruption memory) - same
+      // #ifndef mechanism as BOARD_HELTEC32_V4's own HAS_CONSOLE guard.
+      #ifndef HAS_CONSOLE
+        #define HAS_CONSOLE true
+      #endif
       #define HAS_WIFI true
       #define HAS_BLUETOOTH false
       #define HAS_BLE true

@@ -1,0 +1,30 @@
+# Name,   Type, SubType, Offset,  Size, Flags
+#
+# [env:tbeam_supreme_urns] variant of partitions/tbeam_supreme.csv - see
+# that file's own comment for the base 8MB-real-flash reasoning (user-
+# confirmed 2026-09-22). app0 kept at the same 4MB (comfortable headroom
+# over any URNS+LXMF build seen on other boards so far, ~2.1-2.2MB).
+#
+# HAS_CONSOLE=false for this env (Boards.h's BOARD_TBEAM_S_V1 block,
+# #ifndef-guarded - see [env:tbeam_supreme_urns]'s own comment on why, same
+# Console/BLE LittleFS-corruption reasoning as every other HAS_URNS board in
+# this file), so the dedicated "spiffs" partition (only ever used to hold
+# console_image.bin) is entirely dead here - folded into a new "urns"
+# LittleFS partition together with the ~1.875MB previously left as spare
+# margin. No app1/OTA slot to preserve either way - tbeam_supreme.csv never
+# had one (HAS_OTA is not set for this board, Boards.h).
+#
+# Net: urns = 8MB total flash - nvs - otadata - app0 - coredump =
+# 0x3E0000 (~3.875MB) - smaller than the 16MB-flash boards' ~6.9MB urns
+# partitions, but this board only has half the flash to begin with.
+#
+# UNTESTED ON REAL HARDWARE - same caution as tbeam_supreme.csv's own: the
+# 8MB flash-size correction came from the user, not a live boot/flash
+# confirmation, and this board has PSRAM (8MB Quad/QSPI - see
+# [env:tbeam_supreme_urns]'s own comment) that's never been runtime-
+# verified via psramFound() on real hardware either.
+nvs,      data, nvs,     0x9000,  0x5000,
+otadata,  data, ota,     0xe000,  0x2000,
+app0,     app,  ota_0,   0x10000, 0x400000,
+urns,     data, spiffs,  0x410000,0x3E0000,
+coredump, data, coredump,0x7F0000,0x10000,

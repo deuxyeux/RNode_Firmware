@@ -3615,7 +3615,13 @@ void button_event(uint8_t event, unsigned long duration) {
   // single button on encoder-less boards (MeshPoE-S3) - same redirect
   // Encoder.h does for encoder_process() on encoder boards. Only the
   // release-with-duration event matters to VaultUnlock.h's tap/hold tiers.
-  #if HAS_URNS == true
+  // Also requires HAS_INPUT - EVENT_BUTTON_CLICK (Input.h) is only defined
+  // when HAS_INPUT is true (Utilities.h gates the #include), and this
+  // function itself is otherwise dead code on a board with no button
+  // (nothing under HAS_INPUT == false ever calls button_event()) - first
+  // surfaced building [env:aethernode_s3_urns] (Aethernode-S3, HAS_INPUT
+  // false, is the first HAS_URNS board without a physical button).
+  #if HAS_URNS == true && HAS_INPUT == true
     if (vault_unlock_active) {
       if (event == EVENT_BUTTON_CLICK) {
         vault_unlock_button_press(duration);

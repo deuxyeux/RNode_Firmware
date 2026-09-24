@@ -1,0 +1,30 @@
+# Name,   Type, SubType, Offset,  Size, Flags
+#
+# Same layout as partitions/meshadventurer_s3_urns.csv/meshpoe_s3_urns.csv -
+# see those files' own comments for the full app0/app1/urns sizing
+# reasoning. Reused verbatim rather than re-derived: this board is also a
+# 16MB-flash ESP32-S3 with 8MB Octal PSRAM, and gets the same
+# HAS_CONSOLE=false treatment as those two boards (Boards.h's
+# BOARD_TBEAM_1W block, #ifndef-guarded - see [env:tbeam_1w_urns]'s own
+# comment on why), so the same "spiffs partition is entirely dead, fold it
+# into urns" reasoning applies unchanged.
+#
+# One difference from those two boards: HAS_OTA is NOT set for
+# BOARD_TBEAM_1W (Boards.h - global default stays false), so app1 (the
+# ota_1/second OTA slot) is actually unused dead space here, unlike on
+# MeshAdventurer-S3/MeshPoE-S3 where OTA.h's esp_https_ota updater writes
+# into it. Kept anyway rather than also folding it into urns - this board
+# has no physical unit to validate a more aggressive layout against, and
+# leaving the slot in place costs nothing today while keeping the door open
+# for HAS_OTA support later without a second partition-table/identity-reset
+# migration.
+#
+# NOTE: same as meshadventurer_s3_urns.csv/meshpoe_s3_urns.csv - the urns
+# partition's offset means its LittleFS filesystem (and the node's
+# persisted identity) starts fresh on first boot.
+nvs,      data, nvs,     0x9000,  0x5000,
+otadata,  data, ota,     0xe000,  0x2000,
+app0,     app,  ota_0,   0x10000, 0x600000,
+app1,     app,  ota_1,   0x610000,0x300000,
+urns,     data, spiffs,  0x910000,0x6E0000,
+coredump, data, coredump,0xFF0000,0x10000,
