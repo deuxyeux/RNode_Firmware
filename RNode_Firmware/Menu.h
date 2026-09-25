@@ -329,6 +329,9 @@
     #define MENU_STATE_BLEKBD_FORGET_CONFIRM 65 // FORGET/CANCEL list before the stored peer's EEPROM entry is erased and its bond deleted (ble_store_util_delete_peer(), NOT bt_debond_all()) - same pattern as MENU_STATE_BT_UNPAIR_CONFIRM
     #define MENU_STATE_MSNGR_CHAT 66 // leaner BLE-keyboard-only chat view for an LXMF conversation - no title/footer chrome, last 5 messages (msngr_peer_cache) above a persistent compose box, Enter sends directly via msngr_chat_do_send(), opened from MENU_STATE_MSNGR_PEER's MSNGR_PEER_FIXED_ACTION_CHAT row
   #endif
+  #define MENU_STATE_URNS_PATH_DELETE_CONFIRM 67 // DELETE/CANCEL list before a single path-table entry is actually removed (HAS_URNS boards) - same pattern as MENU_STATE_MSNGR_DELETE_CONFIRM, opened from MENU_STATE_URNS_PATH_DETAIL's Delete Path row
+  #define MENU_STATE_URNS_IDENTITIES 68 // fixed list of this node's own identity hash + registered destinations (HAS_URNS boards) - read-only, rows open the shared MENU_STATE_URNS_PATH_HASH_VIEW, opened from MENU_STATE_URNS_LIST's Identities row
+  #define MENU_STATE_HW_REBOOT_CONFIRM 69 // REBOOT/CANCEL list before hard_reset() actually runs - same pattern as MENU_STATE_FWUPD_CONFIRM, opened from MENU_STATE_HW_LIST's Reboot row
 
   // The Hardware page used to only exist when there was board-level info
   // worth showing (battery/voltage sensing via HAS_PMU, or an ESP32-S3's
@@ -865,6 +868,17 @@
     // RNS::Transport's live path table (destination hash + hop count),
     // same "own submenu, only BACK does anything" shape as SENSORS_LIST.
     #define URNS_ITEM_PATHS (URNS_ITEM_VAULT + 1)
+    // Opens MENU_STATE_URNS_IDENTITIES - a fixed, read-only list of this
+    // node's own identity hash and registered destinations (rnode.onboard,
+    // plus lxmf.delivery on HAS_LXMF boards), same "own submenu, only BACK
+    // does anything, rows open the shared full-hash view" shape as
+    // URNS_ITEM_PATHS/URNS_PATH_DETAIL. Not a generic RNS::Transport::
+    // destinations() dump - Destination has no public accessor for the
+    // app_name/aspects string that would be needed to label an arbitrary
+    // entry (see its private _name field, Destination.h), so this lists
+    // exactly the destinations this firmware itself constructs (URNS.h/
+    // LXMRouter.cpp) instead.
+    #define URNS_ITEM_IDENTITIES (URNS_ITEM_PATHS + 1)
     // Read-only info row - remaining free space on the "urns" LittleFS
     // partition (identity/path-table persistence + the LXMF MessageStore,
     // see MessageStore.h). LittleFS.usedBytes()/totalBytes() report for
@@ -876,7 +890,7 @@
     // does anything" shape as URNS_PATH_DETAIL/SENSORS_LIST. Computed
     // once on entry (urns_free_detail_refresh(), Menu.h) rather than in
     // the draw path - see the row's own draw-code comment for why.
-    #define URNS_ITEM_FREE (URNS_ITEM_PATHS + 1)
+    #define URNS_ITEM_FREE (URNS_ITEM_IDENTITIES + 1)
     #define URNS_ITEM_BACK (URNS_ITEM_FREE + 1)
     #define URNS_ITEM_COUNT (URNS_ITEM_BACK + 1)
 
@@ -914,11 +928,30 @@
     // Hash here shows a longer preview and is itself enterable, opening
     // MENU_STATE_URNS_PATH_HASH_VIEW for the full 32 hex chars with
     // nothing else on screen. Expiry shows time remaining until
-    // RNS::Persistence::DestinationEntry's own _expires timestamp.
+    // RNS::Persistence::DestinationEntry's own _expires timestamp. Delete
+    // Path opens MENU_STATE_URNS_PATH_DELETE_CONFIRM - a DELETE/CANCEL
+    // dialog, same pattern as MENU_STATE_MSNGR_DELETE_CONFIRM - before
+    // actually removing the entry from RNS::Transport::new_path_table()
+    // via RNS::Transport::remove_path().
     #define URNS_PATH_DETAIL_ITEM_HASH   0
     #define URNS_PATH_DETAIL_ITEM_EXPIRY 1
-    #define URNS_PATH_DETAIL_ITEM_BACK   2
-    #define URNS_PATH_DETAIL_ITEM_COUNT  3
+    #define URNS_PATH_DETAIL_ITEM_DELETE 2
+    #define URNS_PATH_DETAIL_ITEM_BACK   3
+    #define URNS_PATH_DETAIL_ITEM_COUNT  4
+
+    // MENU_STATE_URNS_IDENTITIES rows - see URNS_ITEM_IDENTITIES' own
+    // comment for why this is a fixed list rather than a generic
+    // RNS::Transport::destinations() dump.
+    #define URNS_ID_ITEM_NODE_IDENTITY 0
+    #define URNS_ID_ITEM_RNODE_DEST    1
+    #if HAS_LXMF == true
+      #define URNS_ID_ITEM_LXMF_DEST (URNS_ID_ITEM_RNODE_DEST + 1)
+      #define URNS_ID_NEXT_A (URNS_ID_ITEM_LXMF_DEST + 1)
+    #else
+      #define URNS_ID_NEXT_A (URNS_ID_ITEM_RNODE_DEST + 1)
+    #endif
+    #define URNS_ID_ITEM_BACK  URNS_ID_NEXT_A
+    #define URNS_ID_ITEM_COUNT (URNS_ID_ITEM_BACK + 1)
 
   #if HAS_LXMF == true
     // Messenger app (Messenger.h) - MENU_STATE_MSNGR_LIST's own item rows.
@@ -1448,7 +1481,15 @@
     #define HW_ITEM_UPTIME HW_NEXT_E
     #define HW_NEXT_F      (HW_NEXT_E + 1)
 
-    #define HW_ITEM_BACK  HW_NEXT_F
+    // Plain action row, needs no hardware capability at all (same reasoning
+    // as Node Uptime just above) - opens MENU_STATE_HW_REBOOT_CONFIRM, a
+    // REBOOT/CANCEL dialog (same pattern as MENU_STATE_FWUPD_CONFIRM/
+    // MENU_STATE_MSNGR_DELETE_CONFIRM) before actually calling hard_reset()
+    // (Utilities.h).
+    #define HW_ITEM_REBOOT HW_NEXT_F
+    #define HW_NEXT_G      (HW_NEXT_F + 1)
+
+    #define HW_ITEM_BACK  HW_NEXT_G
     #define HW_ITEM_COUNT (HW_ITEM_BACK + 1)
 
     #if HAS_GPIO_MENU == true
@@ -2018,6 +2059,10 @@
 
     uint8_t urns_paths_menu_cursor = 0;
     uint8_t urns_path_detail_cursor = 0;
+    // 0 = DELETE, 1 = CANCEL - same list-with-cursor pattern as
+    // msngr_delete_confirm_cursor, defaulting to CANCEL for the same reason.
+    uint8_t urns_path_delete_confirm_cursor = 1;
+    uint8_t urns_identities_cursor = 0;
     uint8_t urns_free_detail_cursor = URNS_FREE_DETAIL_ITEM_BACK;
     // Cached breakdown, computed once by urns_free_detail_refresh() when
     // MENU_STATE_URNS_FREE_DETAIL is entered - see URNS_ITEM_FREE's own
@@ -3356,6 +3401,9 @@
 
   #if MENU_HAS_HW_PAGE == true
     uint8_t hw_menu_cursor = 0;
+    // 0 = REBOOT, 1 = CANCEL - same list-with-cursor pattern as
+    // fwupd_confirm_cursor, defaulting to CANCEL for the same reason.
+    uint8_t hw_reboot_confirm_cursor = 1;
     #if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
       uint8_t mem_menu_cursor = 0;
       uint8_t mem_detail_cursor = 0;
@@ -4960,6 +5008,12 @@
       } else if (menu_state == MENU_STATE_URNS_PATH_DETAIL) {
         buzzer_encoder_tick_melody();
         urns_path_detail_cursor = menu_clamp_cursor(urns_path_detail_cursor, dir, URNS_PATH_DETAIL_ITEM_COUNT, wrap);
+      } else if (menu_state == MENU_STATE_URNS_PATH_DELETE_CONFIRM) {
+        buzzer_encoder_tick_melody();
+        urns_path_delete_confirm_cursor = menu_clamp_cursor(urns_path_delete_confirm_cursor, dir, 2, wrap);
+      } else if (menu_state == MENU_STATE_URNS_IDENTITIES) {
+        buzzer_encoder_tick_melody();
+        urns_identities_cursor = menu_clamp_cursor(urns_identities_cursor, dir, URNS_ID_ITEM_COUNT, wrap);
       } else if (menu_state == MENU_STATE_URNS_FREE_DETAIL) {
         buzzer_encoder_tick_melody();
         urns_free_detail_cursor = menu_clamp_cursor(urns_free_detail_cursor, dir, URNS_FREE_DETAIL_ITEM_COUNT, wrap);
@@ -5107,6 +5161,9 @@
       else if (menu_state == MENU_STATE_HW_LIST) {
         buzzer_encoder_tick_melody();
         hw_menu_cursor = menu_clamp_cursor(hw_menu_cursor, dir, HW_ITEM_COUNT, wrap);
+      } else if (menu_state == MENU_STATE_HW_REBOOT_CONFIRM) {
+        buzzer_encoder_tick_melody();
+        hw_reboot_confirm_cursor = menu_clamp_cursor(hw_reboot_confirm_cursor, dir, 2, wrap);
       }
       #if HAS_VSENSE == true || HAS_BATTERY_DIVIDER == true
         else if (menu_state == MENU_STATE_HW_EDIT) {
@@ -6189,6 +6246,9 @@
         } else if (urns_menu_cursor == URNS_ITEM_PATHS) {
           menu_state = MENU_STATE_URNS_PATHS;
           urns_paths_menu_cursor = 0;
+        } else if (urns_menu_cursor == URNS_ITEM_IDENTITIES) {
+          urns_identities_cursor = 0;
+          menu_state = MENU_STATE_URNS_IDENTITIES;
         } else if (urns_menu_cursor == URNS_ITEM_FREE) {
           urns_free_detail_refresh();
           urns_free_detail_cursor = URNS_FREE_DETAIL_ITEM_BACK;
@@ -6230,12 +6290,53 @@
           menu_state = MENU_STATE_URNS_PATH_DETAIL;
         }
       } else if (menu_state == MENU_STATE_URNS_PATH_DETAIL) {
-        // Expiry is read-only info - only Hash (opens the full-hash view)
-        // and BACK do anything.
+        // Expiry is read-only info - Hash (opens the full-hash view),
+        // Delete Path (opens the DELETE/CANCEL confirm dialog), and BACK
+        // are the only rows that do anything.
         if (urns_path_detail_cursor == URNS_PATH_DETAIL_ITEM_BACK) {
           menu_state = MENU_STATE_URNS_PATHS;
         } else if (urns_path_detail_cursor == URNS_PATH_DETAIL_ITEM_HASH) {
           menu_hash_view_return_state = MENU_STATE_URNS_PATH_DETAIL;
+          menu_state = MENU_STATE_URNS_PATH_HASH_VIEW;
+        } else if (urns_path_detail_cursor == URNS_PATH_DETAIL_ITEM_DELETE) {
+          urns_path_delete_confirm_cursor = 1; // default CANCEL
+          menu_state = MENU_STATE_URNS_PATH_DELETE_CONFIRM;
+        }
+      } else if (menu_state == MENU_STATE_URNS_PATH_DELETE_CONFIRM) {
+        if (urns_path_delete_confirm_cursor == 0) { // DELETE
+          // Real flash I/O (TypedStore::remove(), microStore) on the same
+          // "urns" LittleFS partition the DIO0 RX ISR's own handleDio0Rise()
+          // can be interrupted into mid-SPI-transfer - same hazard as
+          // MessageStore's own delete_message()/delete_conversation() (see
+          // MENU_STATE_MSNGR_DELETE_CONFIRM's own comment), so mask around
+          // it the same way.
+          LoRa->maskDio0();
+          RNS::Transport::remove_path(urns_path_detail_hash);
+          LoRa->unmaskDio0();
+          // The path list this was opened from just shrank by one - land
+          // back at the top of it rather than risking a stale index into a
+          // now-shorter list, same reasoning as the Messenger delete flows.
+          urns_paths_menu_cursor = 0;
+          menu_open_popup("DELETED", MENU_STATE_URNS_PATHS);
+          menu_popup_auto_dismiss_at = millis() + ACTION_POPUP_MS;
+        } else { // CANCEL
+          menu_state = MENU_STATE_URNS_PATH_DETAIL;
+        }
+      } else if (menu_state == MENU_STATE_URNS_IDENTITIES) {
+        if (urns_identities_cursor == URNS_ID_ITEM_BACK) {
+          menu_state = MENU_STATE_URNS_LIST;
+        } else {
+          if (urns_identities_cursor == URNS_ID_ITEM_NODE_IDENTITY) {
+            urns_path_detail_hash = urns_identity.hash();
+          } else if (urns_identities_cursor == URNS_ID_ITEM_RNODE_DEST) {
+            urns_path_detail_hash = urns_destination.hash();
+          }
+          #if HAS_LXMF == true
+          else if (urns_identities_cursor == URNS_ID_ITEM_LXMF_DEST && urns_lxmf_router) {
+            urns_path_detail_hash = urns_lxmf_router->delivery_destination().hash();
+          }
+          #endif
+          menu_hash_view_return_state = MENU_STATE_URNS_IDENTITIES;
           menu_state = MENU_STATE_URNS_PATH_HASH_VIEW;
         }
       } else if (menu_state == MENU_STATE_URNS_PATH_HASH_VIEW) {
@@ -6831,6 +6932,16 @@
             mem_menu_cursor = MEM_ITEM_BACK; // read-only info screen - default to BACK, not the first graph row
           }
         #endif
+        else if (hw_menu_cursor == HW_ITEM_REBOOT) {
+          hw_reboot_confirm_cursor = 1; // default CANCEL
+          menu_state = MENU_STATE_HW_REBOOT_CONFIRM;
+        }
+      } else if (menu_state == MENU_STATE_HW_REBOOT_CONFIRM) {
+        if (hw_reboot_confirm_cursor == 0) { // REBOOT
+          hard_reset(); // never returns
+        } else { // CANCEL
+          menu_state = MENU_STATE_HW_LIST;
+        }
       }
       #if HAS_VSENSE == true || HAS_BATTERY_DIVIDER == true
         else if (menu_state == MENU_STATE_HW_EDIT) {
@@ -9730,6 +9841,9 @@
         labels[URNS_ITEM_PATHS] = "Path Table";
         sprintf(valbufs[URNS_ITEM_PATHS], "%u", (unsigned)RNS::Transport::new_path_table().size());
 
+        labels[URNS_ITEM_IDENTITIES] = "Identities";
+        sprintf(valbufs[URNS_ITEM_IDENTITIES], ">"); // opens a submenu, not an inline value
+
         labels[URNS_ITEM_FREE] = "Free";
         {
           // update_display() (RNode_Firmware.ino) calls draw_settings_menu_disp()
@@ -9881,10 +9995,50 @@
           }
         }
 
+        labels[URNS_PATH_DETAIL_ITEM_DELETE] = "Delete Path";
+        valbufs[URNS_PATH_DETAIL_ITEM_DELETE][0] = 0;
+
         labels[URNS_PATH_DETAIL_ITEM_BACK] = "BACK";
         valbufs[URNS_PATH_DETAIL_ITEM_BACK][0] = 0;
 
         draw_menu_list_disp("PATH DETAIL", labels, valbufs, URNS_PATH_DETAIL_ITEM_COUNT, urns_path_detail_cursor);
+      } else if (menu_state == MENU_STATE_URNS_PATH_DELETE_CONFIRM) {
+        // Plain 2-item list, same draw_menu_list_disp() as everywhere else -
+        // same pattern as F/W Update's UPDATE/CANCEL (MENU_STATE_FWUPD_CONFIRM).
+        const char *labels[2] = { "DELETE", "CANCEL" };
+        char valbufs[2][24];
+        valbufs[0][0] = 0;
+        valbufs[1][0] = 0;
+        draw_menu_list_disp("DELETE PATH?", labels, valbufs, 2, urns_path_delete_confirm_cursor);
+      } else if (menu_state == MENU_STATE_URNS_IDENTITIES) {
+        // Fixed 3-4 row list (Node Identity + rnode.onboard, plus lxmf.
+        // delivery on HAS_LXMF boards) - see URNS_ID_ITEM_* comment for why
+        // this isn't a generic RNS::Transport::destinations() dump. Each
+        // row's value is the same 8-hex-char preview convention the Path
+        // Table list uses for its own rows; selecting one opens the shared
+        // full-hash view (MENU_STATE_URNS_PATH_HASH_VIEW).
+        const char *labels[URNS_ID_ITEM_COUNT];
+        char valbufs[URNS_ID_ITEM_COUNT][24];
+
+        labels[URNS_ID_ITEM_NODE_IDENTITY] = "Node Identity";
+        snprintf(valbufs[URNS_ID_ITEM_NODE_IDENTITY], 24, "%s", urns_identity.hexhash().substr(0, 8).c_str());
+
+        labels[URNS_ID_ITEM_RNODE_DEST] = "rnode.onboard";
+        snprintf(valbufs[URNS_ID_ITEM_RNODE_DEST], 24, "%s", urns_destination.hash().toHex().substr(0, 8).c_str());
+
+        #if HAS_LXMF == true
+          labels[URNS_ID_ITEM_LXMF_DEST] = "lxmf.delivery";
+          if (urns_lxmf_router) {
+            snprintf(valbufs[URNS_ID_ITEM_LXMF_DEST], 24, "%s", urns_lxmf_router->delivery_destination().hash().toHex().substr(0, 8).c_str());
+          } else {
+            sprintf(valbufs[URNS_ID_ITEM_LXMF_DEST], "N/A");
+          }
+        #endif
+
+        labels[URNS_ID_ITEM_BACK] = "BACK";
+        valbufs[URNS_ID_ITEM_BACK][0] = 0;
+
+        draw_menu_list_disp("IDENTITIES", labels, valbufs, URNS_ID_ITEM_COUNT, urns_identities_cursor);
       } else if (menu_state == MENU_STATE_URNS_PATH_HASH_VIEW) {
         draw_menu_urns_path_hash_disp();
       }
@@ -11030,10 +11184,21 @@
             (unsigned long)(up_s/3600), (unsigned long)((up_s/60)%60), (unsigned long)(up_s%60));
         }
 
+        labels[HW_ITEM_REBOOT] = "Reboot";
+        sprintf(valbufs[HW_ITEM_REBOOT], ">"); // opens a confirm dialog, not an inline value
+
         labels[HW_ITEM_BACK] = "BACK";
         valbufs[HW_ITEM_BACK][0] = 0;
 
         draw_menu_list_disp("HARDWARE", labels, valbufs, HW_ITEM_COUNT, hw_menu_cursor);
+      } else if (menu_state == MENU_STATE_HW_REBOOT_CONFIRM) {
+        // Plain 2-item list, same draw_menu_list_disp() as everywhere else -
+        // same pattern as F/W Update's UPDATE/CANCEL (MENU_STATE_FWUPD_CONFIRM).
+        const char *labels[2] = { "REBOOT", "CANCEL" };
+        char valbufs[2][24];
+        valbufs[0][0] = 0;
+        valbufs[1][0] = 0;
+        draw_menu_list_disp("REBOOT?", labels, valbufs, 2, hw_reboot_confirm_cursor);
       }
       #if HAS_VSENSE == true || HAS_BATTERY_DIVIDER == true
         else if (menu_state == MENU_STATE_HW_EDIT) {
