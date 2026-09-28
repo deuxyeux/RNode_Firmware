@@ -1313,19 +1313,22 @@ void Link::receive(const Packet& packet) {
 					try {
 						const Bytes packed_response = decrypt(packet.data());
 						if (packed_response) {
-							//p unpacked_response = umsgpack.unpackb(packed_response)
-							//p request_id = unpacked_response[0]
-							//p response_data = unpacked_response[1]
-                            //p transfer_size = len(umsgpack.packb(response_data))-2
-							MsgPack::Unpacker unpacker;
-							unpacker.feed(packed_response.data(), packed_response.size());
-							MsgPack::bin_t<uint8_t> request_id;
-							MsgPack::bin_t<uint8_t> response_data;
-							unpacker.from_array(request_id, response_data);
-							MsgPack::Packer packer;
-							packer.serialize(response_data);
-							size_t transfer_size = packer.size() - 2;
-							handle_response(Bytes(request_id.data(), request_id.size()), Bytes(response_data.data(), response_data.size()), transfer_size, transfer_size);
+							// response_data is the raw msgpack encoding of whatever the
+							// response payload is (array, map, str, bin, ...), appended
+							// as-is after [bin(request_id)] -- see pack_response_envelope()
+							// above. It must NOT be deserialized as a bin_t itself (that
+							// only happens to work when the payload's outer type is bin,
+							// and throws a type error -- silently dropping the response --
+							// for any other type, e.g. the propagation node's message-list
+							// array response).
+							Bytes request_id;
+							Bytes response_data;
+							if (!unpack_response_envelope(packed_response, request_id, response_data)) {
+								DEBUG("Failed to parse incoming response packet envelope");
+								break;
+							}
+							size_t transfer_size = response_data.size();
+							handle_response(request_id, response_data, transfer_size, transfer_size);
 						}
 					}
 					catch (const std::exception& e) {
