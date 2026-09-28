@@ -836,6 +836,24 @@
     messenger_bookmarks_save();
   }
 
+  // RNode Settings > Messenger > Bookmarks > <a Propagation-type bookmark>
+  // > Rename (Menu.h, MSNGR_PEER_PROP_ACTION_RENAME) - a propagation node
+  // never gets an automatic display name the way an LXMF peer does
+  // (messenger_peer_display_name()'s MessageStore-cache/announce-list
+  // fallbacks are both LXMF-delivery concepts; a propagation destination
+  // never appears in either), so without this it's permanently stuck
+  // showing truncated hex on the Bookmarks list. Setting a non-empty name
+  // here makes messenger_peer_display_name()'s existing bookmark-name
+  // check (its very first, highest-priority one) pick it up everywhere
+  // that function is already used - no separate propagation-node-name
+  // display path needed.
+  void messenger_bookmark_rename(const RNS::Bytes &hash, const std::string &name) {
+    int8_t idx = messenger_bookmark_find(hash);
+    if (idx < 0) return;
+    messenger_store_name(msngr_bookmarks[idx].name, name);
+    messenger_bookmarks_save();
+  }
+
   // Same save/load shape as messenger_bookmarks_save/_load above, just a
   // plain array of strings instead of hash+name objects - order matters
   // here (it's the same order MENU_STATE_MSNGR_PEER shows the Send:

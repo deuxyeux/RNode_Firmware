@@ -1060,9 +1060,10 @@
     #define MSNGR_PEER_PROP_ACTION_SYNC       0 // manually syncs against THIS bookmark's node specifically, making it active first if it wasn't already - msngr_prop_sync_start()
     #define MSNGR_PEER_PROP_ACTION_SHOW_HASH  1 // opens MENU_STATE_URNS_PATH_HASH_VIEW (reused as-is) against this bookmark's hash, same full two-line hex view URNS Path Table's own Hash row uses
     #define MSNGR_PEER_PROP_ACTION_SET_ACTIVE 2 // label switches Set/Unset Active - messenger_prop_node_set_active()/_clear_active()
-    #define MSNGR_PEER_PROP_ACTION_REMOVE     3 // messenger_bookmark_remove() - same action MSNGR_PEER_FIXED_ACTION_BOOKMARK's "Remove Bookmark" wording does for an LXMF peer, just unconditional here (a Propagation-type bookmark is always bookmarked - that's the only way one exists)
-    #define MSNGR_PEER_PROP_ACTION_BACK       4
-    #define MSNGR_PEER_PROP_ACTION_COUNT      5
+    #define MSNGR_PEER_PROP_ACTION_RENAME     3 // opens MENU_STATE_MSNGR_TEXT_ENTRY (MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_RENAME) - messenger_bookmark_rename(), the only way a propagation node ever gets a friendly display name (see that function's own comment, Messenger.h)
+    #define MSNGR_PEER_PROP_ACTION_REMOVE     4 // messenger_bookmark_remove() - same action MSNGR_PEER_FIXED_ACTION_BOOKMARK's "Remove Bookmark" wording does for an LXMF peer, just unconditional here (a Propagation-type bookmark is always bookmarked - that's the only way one exists)
+    #define MSNGR_PEER_PROP_ACTION_BACK       5
+    #define MSNGR_PEER_PROP_ACTION_COUNT      6
 
     // Worst-case row count for MENU_STATE_MSNGR_PEER's local draw arrays -
     // message rows + every preset slot filled + all fixed actions, even
@@ -1112,9 +1113,11 @@
     // MENU_STATE_MSNGR_TEXT_ENTRY is reused for editing the LXMF display
     // name (RNode Settings > Messenger > Settings > Display Name), adding/
     // editing a preset message (RNode Settings > Messenger > Settings >
-    // Preset Messages), composing a message, and typing a bookmark's raw
+    // Preset Messages), composing a message, typing a bookmark's raw
     // destination hash (RNode Settings > Messenger > Bookmarks > Add by
-    // Hash) - this tracks which, since the Send key's actual action, the
+    // Hash), and renaming a Propagation-type bookmark (RNode Settings >
+    // Messenger > Bookmarks > <a Propagation-type bookmark> > Rename) -
+    // this tracks which, since the Send key's actual action, the
     // exit/discard target, and (for BOOKMARK_HASH) the active keyboard
     // layout itself all differ. All the actual typing mechanics (grid
     // cursor/shift/buffer, declared further down) are identical regardless
@@ -1122,10 +1125,11 @@
     // MSNGR_KB_LAYOUT below, so msngr_kb_active_layout()/msngr_kb_active_
     // rows() (and every hold-gesture poller that needs to know which
     // layout is live right now) can reference it.
-    #define MSNGR_TEXT_ENTRY_PURPOSE_MESSAGE       0
-    #define MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME  1
-    #define MSNGR_TEXT_ENTRY_PURPOSE_PRESET        2
-    #define MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH 3 // MSNGR_BOOKMARKS' "Add by Hash" row - typing an arbitrary peer's destination hash directly, not learned from an announce/message
+    #define MSNGR_TEXT_ENTRY_PURPOSE_MESSAGE         0
+    #define MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME    1
+    #define MSNGR_TEXT_ENTRY_PURPOSE_PRESET          2
+    #define MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH   3 // MSNGR_BOOKMARKS' "Add by Hash" row - typing an arbitrary peer's destination hash directly, not learned from an announce/message
+    #define MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_RENAME 4 // MSNGR_PEER_PROP_ACTION_RENAME - a friendly name for a Propagation-type bookmark, which (unlike an LXMF peer) never gets one automatically
     uint8_t msngr_text_entry_purpose = MSNGR_TEXT_ENTRY_PURPOSE_MESSAGE;
 
     // Which kind of bookmark MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH's SAVE
@@ -2404,7 +2408,8 @@
       size_t max_len = msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH
         ? (size_t)(LXMF::PEER_HASH_SIZE * 2)
         : (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME ||
-           msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_PRESET)
+           msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_PRESET ||
+           msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_RENAME)
           ? MSNGR_NAME_MAX_LEN : MSNGR_TEXT_ENTRY_MAX_LEN;
       size_t text_len = strlen(msngr_text_entry_buf);
       if (text_len < max_len) {
@@ -2526,7 +2531,8 @@
       size_t max_len = msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH
         ? (size_t)(LXMF::PEER_HASH_SIZE * 2)
         : (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME ||
-           msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_PRESET)
+           msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_PRESET ||
+           msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_RENAME)
           ? MSNGR_NAME_MAX_LEN : MSNGR_TEXT_ENTRY_MAX_LEN;
       size_t text_len = strlen(msngr_text_entry_buf);
       if (text_len < max_len) {
@@ -2746,6 +2752,14 @@
           menu_open_popup("INVALID HASH", MENU_STATE_MSNGR_TEXT_ENTRY);
           menu_popup_auto_dismiss_at = millis() + ACTION_POPUP_MS;
         }
+      } else if (text_len > 0 && msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_RENAME) {
+        // No UTF-8 expansion, same reasoning PRESET below gets away with
+        // skipping it - this name never goes out over the air (unlike
+        // Display Name's announce), it's purely local, so it's stored
+        // exactly as typed, same as every other bookmark name.
+        messenger_bookmark_rename(msngr_active_peer_hash, msngr_text_entry_buf);
+        msngr_text_entry_buf[0] = 0;
+        menu_state = MENU_STATE_MSNGR_PEER;
       } else if (text_len > 0 && msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_PRESET) {
         // No UTF-8 expansion needed here unlike the display-name/message
         // branches - this text never leaves the device, same reasoning
@@ -6563,6 +6577,20 @@
           } else {
             messenger_prop_node_set_active(msngr_active_peer_hash);
           }
+        } else if (msngr_peer_cursor == MSNGR_PEER_PROP_ACTION_RENAME) {
+          // Pre-populated with whatever name is already set (blank for a
+          // never-renamed node, same "real starting value, never blank
+          // when there is one" intent as Display Name's own prefill
+          // above) so re-opening Rename to tweak a name doesn't require
+          // retyping it from scratch.
+          msngr_text_entry_purpose = MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_RENAME;
+          msngr_text_entry_buf[0] = 0;
+          int8_t bm = messenger_bookmark_find(msngr_active_peer_hash);
+          if (bm >= 0) snprintf(msngr_text_entry_buf, MSNGR_TEXT_ENTRY_MAX_LEN + 1, "%s", msngr_bookmarks[bm].name);
+          msngr_kb_cursor = 0;
+          msngr_kb_shift_on = false;
+          msngr_kb_lang_ru = false;
+          menu_state = MENU_STATE_MSNGR_TEXT_ENTRY;
         } else if (msngr_peer_cursor == MSNGR_PEER_PROP_ACTION_REMOVE) {
           messenger_bookmark_remove(msngr_active_peer_hash);
           menu_state = msngr_peer_return_state;
@@ -8183,7 +8211,8 @@
       MENU_GFX.setCursor(6, header_y);
       MENU_GFX.print(msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME ? "Name" :
                      msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_PRESET ? "Preset" :
-                     msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH ? "Add Hash" : "Send Msg");
+                     msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH ? "Add Hash" :
+                     msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_RENAME ? "Rename" : "Send Msg");
 
       // Byte count, right-aligned on the same title line - "(N bytes)",
       // the actual UTF-8 payload size this buffer would send/save as
@@ -10258,6 +10287,8 @@
         bool is_active = messenger_prop_node_is_active(msngr_active_peer_hash);
         labels[MSNGR_PEER_PROP_ACTION_SET_ACTIVE] = is_active ? "Unset Active" : "Set Active";
         valbufs[MSNGR_PEER_PROP_ACTION_SET_ACTIVE][0] = 0;
+        labels[MSNGR_PEER_PROP_ACTION_RENAME] = "Rename";
+        valbufs[MSNGR_PEER_PROP_ACTION_RENAME][0] = 0;
         labels[MSNGR_PEER_PROP_ACTION_REMOVE] = "Remove Bookmark";
         valbufs[MSNGR_PEER_PROP_ACTION_REMOVE][0] = 0;
         labels[MSNGR_PEER_PROP_ACTION_BACK] = "BACK";
@@ -10709,7 +10740,8 @@
         char valbufs[2][24];
         valbufs[0][0] = 0;
         valbufs[1][0] = 0;
-        const char *discard_title = (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH) ? "DISCARD HASH?" : "DISCARD MSG?";
+        const char *discard_title = (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH) ? "DISCARD HASH?" :
+                                     (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_RENAME) ? "DISCARD NAME?" : "DISCARD MSG?";
         draw_menu_list_disp(discard_title, labels, valbufs, 2, msngr_discard_confirm_cursor);
       } else if (menu_state == MENU_STATE_MSNGR_PING_RESULT) {
         // Reads msngr_ping_state/msngr_ping_rtt fresh on every redraw -
