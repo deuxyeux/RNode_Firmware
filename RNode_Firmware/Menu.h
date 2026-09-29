@@ -1119,7 +1119,11 @@
     // that isn't bookmarked - see that function's own comment.
     #define MSNGR_PEER_FIXED_ACTION_DELIVERY_MODE 2
     #define MSNGR_PEER_FIXED_ACTION_BOOKMARK    3 // label switches Add/Remove Bookmark
-    #define MSNGR_PEER_FIXED_ACTION_CLEAR       4 // opens MENU_STATE_MSNGR_CLEAR_CONFIRM
+    // Opens MENU_STATE_URNS_PATH_HASH_VIEW (reused as-is) against
+    // msngr_active_peer_hash - same full two-line hex view MSNGR_PEER_PROP_
+    // ACTION_SHOW_HASH already uses for a Propagation-type bookmark.
+    #define MSNGR_PEER_FIXED_ACTION_SHOW_HASH   4
+    #define MSNGR_PEER_FIXED_ACTION_CLEAR       (MSNGR_PEER_FIXED_ACTION_SHOW_HASH + 1) // opens MENU_STATE_MSNGR_CLEAR_CONFIRM
     #if HAS_BLE_HID_HOST == true
       // Opens MENU_STATE_MSNGR_CHAT - leaner BLE-keyboard-only compose view
       // (no on-screen grid, no title/footer chrome) - only meaningful on a
@@ -2398,11 +2402,11 @@
     uint8_t msngr_ping_result_cursor = 1;
 
     // MENU_STATE_MSNGR_SEND_RESULT - 2-row screen (status + BACK) normally,
-    // growing to 3 (status + Retry + BACK) only once the send has reached
-    // a terminal failure state (TIMEOUT/UNRESOLVED/FAILED) - Retry doesn't
-    // exist before then, not just hidden-but-inert, so it can't be
-    // selected on an in-flight or successful send. Default cursor on BACK
-    // (last row, whichever index that currently is).
+    // growing to 4 (status + Retry + Retry via Prop + BACK) only once the
+    // send has reached a terminal failure state (TIMEOUT/UNRESOLVED/
+    // FAILED) - neither Retry row exists before then, not just hidden-but-
+    // inert, so they can't be selected on an in-flight or successful send.
+    // Default cursor on BACK (last row, whichever index that currently is).
     uint8_t msngr_send_result_cursor = 1;
 
     // True once the currently-tracked send has hit a terminal failure -
@@ -5488,7 +5492,7 @@
         msngr_ping_result_cursor = menu_clamp_cursor(msngr_ping_result_cursor, dir, 2, wrap);
       } else if (menu_state == MENU_STATE_MSNGR_SEND_RESULT) {
         buzzer_encoder_tick_melody();
-        msngr_send_result_cursor = menu_clamp_cursor(msngr_send_result_cursor, dir, msngr_send_result_failed() ? 3 : 2, wrap);
+        msngr_send_result_cursor = menu_clamp_cursor(msngr_send_result_cursor, dir, msngr_send_result_failed() ? 4 : 2, wrap);
       } else if (menu_state == MENU_STATE_MSNGR_SETTINGS) {
         buzzer_encoder_tick_melody();
         msngr_settings_cursor = menu_clamp_cursor(msngr_settings_cursor, dir, MSNGR_SETTINGS_ITEM_COUNT, wrap);
@@ -7078,6 +7082,10 @@
               } else {
                 messenger_bookmark_add(msngr_active_peer_hash, messenger_peer_display_name(msngr_active_peer_hash));
               }
+            } else if (fixed_action == MSNGR_PEER_FIXED_ACTION_SHOW_HASH) {
+              urns_path_detail_hash = msngr_active_peer_hash;
+              menu_hash_view_return_state = MENU_STATE_MSNGR_PEER;
+              menu_state = MENU_STATE_URNS_PATH_HASH_VIEW;
             } else if (fixed_action == MSNGR_PEER_FIXED_ACTION_CLEAR) {
               msngr_clear_confirm_cursor = 1; // default CANCEL - see its own declaration
               menu_state = MENU_STATE_MSNGR_CLEAR_CONFIRM;
@@ -7213,18 +7221,27 @@
         }
       } else if (menu_state == MENU_STATE_MSNGR_SEND_RESULT) {
         // Row 0 (status) is read-only. Row 1 is BACK normally (2-row
-        // layout) but becomes Retry once the send has reached a terminal
-        // failure state, with BACK pushed to row 2 (3-row layout, draw
-        // code above) - msngr_send_result_failed() is the single source
-        // of truth both places agree on.
+        // layout) but becomes Retry, with Retry via Prop right below it
+        // and BACK pushed to row 3 (4-row layout, draw code above), once
+        // the send has reached a terminal failure state -
+        // msngr_send_result_failed() is the single source of truth both
+        // places agree on.
         bool send_result_failed = msngr_send_result_failed();
-        uint8_t back_row = send_result_failed ? 2 : 1;
+        uint8_t back_row = send_result_failed ? 3 : 1;
         if (send_result_failed && msngr_send_result_cursor == 1) {
-          // Retry - re-fires the exact same destination/content
+          // Retry - re-fires the exact same destination/content, using
+          // whatever delivery method the peer's own setting calls for
           // (msngr_send_pending_dest_hash/_content, Messenger.h, populated
           // unconditionally by every messenger_send_lxmf() call) rather
           // than making the user back out and retype the message.
           messenger_send_lxmf(msngr_send_pending_dest_hash, msngr_send_pending_content);
+        } else if (send_result_failed && msngr_send_result_cursor == 2) {
+          // Retry via Prop - same re-fire, but forces PROPAGATED for this
+          // one send regardless of the peer's Send Direct/Send Propagated
+          // setting (messenger_send_lxmf()'s forced_method, Messenger.h) -
+          // useful when a direct/opportunistic attempt just timed out and
+          // a propagation node is known to be reachable instead.
+          messenger_send_lxmf(msngr_send_pending_dest_hash, msngr_send_pending_content, LXMF::Type::Message::PROPAGATED);
         } else if (msngr_send_result_cursor == back_row) {
           // BACK. If the packet's already gone out (PENDING/DELIVERED/
           // TIMEOUT) there's nothing to tear down, same as Ping - this just
@@ -7598,7 +7615,7 @@
         else if (menu_state == MENU_STATE_MSNGR_CLEAR_CONFIRM)    msngr_clear_confirm_cursor = 1;
         else if (menu_state == MENU_STATE_MSNGR_DISCARD_CONFIRM)  msngr_discard_confirm_cursor = 1;
         else if (menu_state == MENU_STATE_MSNGR_PING_RESULT)      msngr_ping_result_cursor = 1;
-        else if (menu_state == MENU_STATE_MSNGR_SEND_RESULT)      msngr_send_result_cursor = msngr_send_result_failed() ? 2 : 1;
+        else if (menu_state == MENU_STATE_MSNGR_SEND_RESULT)      msngr_send_result_cursor = msngr_send_result_failed() ? 3 : 1;
         else if (menu_state == MENU_STATE_MSNGR_SETTINGS)         msngr_settings_cursor = MSNGR_SETTINGS_ITEM_COUNT - 1;
         else if (menu_state == MENU_STATE_MSNGR_PRESETS)          msngr_presets_cursor = msngr_presets_row_count() - 1;
         else if (menu_state == MENU_STATE_MSNGR_PRESET_DETAIL)    msngr_preset_detail_cursor = 2;
@@ -11016,6 +11033,11 @@
         icons[fixed_base + MSNGR_PEER_FIXED_ACTION_BOOKMARK] = is_bookmarked ? bm_menu_icon_msngr_remove_bookmark : bm_menu_icon_msngr_bookmarks;
         icon_widths[fixed_base + MSNGR_PEER_FIXED_ACTION_BOOKMARK] = is_bookmarked ? MENU_ICON_W_MSNGR_REMOVE_BOOKMARK : MENU_ICON_W_MSNGR_BOOKMARKS;
 
+        labels[fixed_base + MSNGR_PEER_FIXED_ACTION_SHOW_HASH] = "Show Hash";
+        valbufs[fixed_base + MSNGR_PEER_FIXED_ACTION_SHOW_HASH][0] = 0;
+        icons[fixed_base + MSNGR_PEER_FIXED_ACTION_SHOW_HASH] = bm_menu_icon_msngr_add_by_hash;
+        icon_widths[fixed_base + MSNGR_PEER_FIXED_ACTION_SHOW_HASH] = MENU_ICON_W_MSNGR_ADD_BY_HASH;
+
         labels[fixed_base + MSNGR_PEER_FIXED_ACTION_CLEAR] = "Clear Conversation";
         valbufs[fixed_base + MSNGR_PEER_FIXED_ACTION_CLEAR][0] = 0;
         icons[fixed_base + MSNGR_PEER_FIXED_ACTION_CLEAR] = bm_menu_icon_msngr_delete;
@@ -11355,17 +11377,17 @@
         // this file) - unlike Ping, no manual BACK needed to see the
         // outcome and move on, matching the Announce/GPS-Sync/NTP-Sync
         // popups' own auto-dismiss convention.
-        const char *labels[3];
-        char valbufs[3][24];
+        const char *labels[4];
+        char valbufs[4][24];
         char status_buf[24];
         // Per user request: same OK/FAIL icons as MSNGR_PING_RESULT above -
         // OK on confirmed delivery, FAIL on any of the three terminal
         // failure/uncertain-failure states. RESOLVING/PENDING are still
         // in-progress, no outcome yet, left nullptr (no icon), same
-        // reasoning as Ping's own RESOLVING/ESTABLISHING. Retry/BACK rows
-        // never carry an icon.
-        const uint8_t *icons[3] = { nullptr, nullptr, nullptr };
-        uint8_t icon_widths[3] = { 0, 0, 0 };
+        // reasoning as Ping's own RESOLVING/ESTABLISHING. BACK never
+        // carries an icon; Retry/Retry via Prop do (below).
+        const uint8_t *icons[4] = { nullptr, nullptr, nullptr, nullptr };
+        uint8_t icon_widths[4] = { 0, 0, 0, 0 };
         switch (msngr_send_state) {
           case MSNGR_SEND_RESOLVING:  snprintf(status_buf, sizeof(status_buf), "Resolving..."); break;
           case MSNGR_SEND_PENDING: {
@@ -11482,9 +11504,18 @@
           valbufs[1][0] = 0;
           icons[1] = bm_menu_icon_msngr_retry;
           icon_widths[1] = MENU_ICON_W_MSNGR_RETRY;
-          labels[2] = "BACK";
+          // Forces PROPAGATED for this one send regardless of the peer's
+          // own Send Direct/Send Propagated setting - see messenger_send_
+          // lxmf()'s forced_method parameter, Messenger.h. Reuses the same
+          // icon MSNGR_PEER_FIXED_ACTION_DELIVERY_MODE's "Send Propagated"
+          // label uses above.
+          labels[2] = "Retry via Prop";
           valbufs[2][0] = 0;
-          row_count = 3;
+          icons[2] = bm_menu_icon_msngr_prop_node;
+          icon_widths[2] = MENU_ICON_W_MSNGR_PROP_NODE;
+          labels[3] = "BACK";
+          valbufs[3][0] = 0;
+          row_count = 4;
         } else {
           labels[1] = "BACK";
           valbufs[1][0] = 0;
@@ -11493,7 +11524,7 @@
         // Same fixed-column overlap fix as MSNGR_PING_RESULT above - the
         // wider ping-fail icon needs the label pushed right a bit further
         // than the narrower ping-ok icon does.
-        const int8_t text_dx[3] = { (int8_t)(icon_widths[0] > MENU_ICON_W_MSNGR_PING_OK ? icon_widths[0] - MENU_ICON_W_MSNGR_PING_OK : 0), 0, 0 };
+        const int8_t text_dx[4] = { (int8_t)(icon_widths[0] > MENU_ICON_W_MSNGR_PING_OK ? icon_widths[0] - MENU_ICON_W_MSNGR_PING_OK : 0), 0, 0, 0 };
 
         char title[24];
         snprintf(title, sizeof(title), "SEND: %s", messenger_peer_display_name(msngr_active_peer_hash).c_str());

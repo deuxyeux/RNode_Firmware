@@ -1432,6 +1432,14 @@
   RNS::Bytes msngr_send_pending_dest_hash;
   char msngr_send_pending_content[MSNGR_SEND_CONTENT_MAX_LEN + 1];
   unsigned long msngr_send_resolve_started_ms = 0;
+  // 0 = no override, use messenger_current_delivery_mode() as normal -
+  // otherwise an explicit LXMF::Type::Message::Method (e.g. PROPAGATED for
+  // MENU_STATE_MSNGR_SEND_RESULT's "Retry via Prop" row, Menu.h) that wins
+  // regardless of the peer's own Send Direct/Send Propagated setting, for
+  // this one send only. Remembered alongside the other msngr_send_pending_*
+  // fields so it survives the RESOLVING wait too (messenger_send_process()
+  // below passes it through once Identity::recall() comes good).
+  uint8_t msngr_send_pending_forced_method = 0;
   // Set by messenger_send_lxmf_resolved() whenever it actually saves a new
   // outgoing message - consumed by Menu.h's msngr_send_result_process()
   // (polled from loop() same as this file's own messenger_send_process())
@@ -1596,7 +1604,7 @@
   // passed in rather than re-recalled since both callers already have it
   // in hand. Defined before messenger_send_process() since that function
   // calls it.
-  void messenger_send_lxmf_resolved(const RNS::Bytes &dest_hash, RNS::Identity &dest_identity, const char *content) {
+  void messenger_send_lxmf_resolved(const RNS::Bytes &dest_hash, RNS::Identity &dest_identity, const char *content, uint8_t forced_method = 0) {
     RNS::Destination dest(dest_identity, RNS::Type::Destination::OUT, RNS::Type::Destination::SINGLE, "lxmf", "delivery");
     // Send Direct (the default, requests OPPORTUNISTIC - LXMRouter silently
     // upgrades to DIRECT for anything over LORA_ENCRYPTED_PACKET_MDU, see
@@ -1605,10 +1613,12 @@
     // active propagation node instead of ever attempting delivery to
     // dest_hash directly) - MENU_STATE_MSNGR_PEER's own row, right below
     // Ping. See messenger_current_delivery_mode()'s own comment for the
-    // bookmarked-vs-session-only distinction.
-    LXMF::Type::Message::Method desired_method =
-      (messenger_current_delivery_mode(dest_hash) == MSNGR_DELIVERY_MODE_PROPAGATED)
-        ? LXMF::Type::Message::PROPAGATED : LXMF::Type::Message::OPPORTUNISTIC;
+    // bookmarked-vs-session-only distinction. forced_method (non-zero)
+    // overrides both - see msngr_send_pending_forced_method's own comment.
+    LXMF::Type::Message::Method desired_method = forced_method != 0
+      ? (LXMF::Type::Message::Method)forced_method
+      : ((messenger_current_delivery_mode(dest_hash) == MSNGR_DELIVERY_MODE_PROPAGATED)
+          ? LXMF::Type::Message::PROPAGATED : LXMF::Type::Message::OPPORTUNISTIC);
     // Defensive refresh, every PROPAGATED send - see this function's own
     // declaration for why. Must happen before handle_outbound() below:
     // send_propagated() (LXMRouter.cpp) reads _outbound_propagation_stamp_
@@ -1695,7 +1705,7 @@
     } else if (msngr_send_state == MSNGR_SEND_RESOLVING) {
       RNS::Identity dest_identity = RNS::Identity::recall(msngr_send_pending_dest_hash);
       if (dest_identity) {
-        messenger_send_lxmf_resolved(msngr_send_pending_dest_hash, dest_identity, msngr_send_pending_content);
+        messenger_send_lxmf_resolved(msngr_send_pending_dest_hash, dest_identity, msngr_send_pending_content, msngr_send_pending_forced_method);
       } else if (millis() - msngr_send_resolve_started_ms > MSNGR_SEND_RESOLVE_TIMEOUT_MS) {
         msngr_send_state = MSNGR_SEND_UNRESOLVED;
         msngr_send_result_at_ms = millis();
@@ -1709,7 +1719,7 @@
   // destination hash instead of the hardcoded Phase 1 test one. Persists
   // the sent message to urns_message_store on success so it shows up in
   // that peer's thread alongside anything they send back.
-  uint8_t messenger_send_lxmf(const RNS::Bytes &dest_hash, const char *content) {
+  uint8_t messenger_send_lxmf(const RNS::Bytes &dest_hash, const char *content, uint8_t forced_method = 0) {
     // Let the confirm-click that triggered this Send finish playing
     // before the TX below can freeze it mid-note - see
     // buzzer_wait_for_melody()'s own comment (Utilities.h).
@@ -1721,10 +1731,12 @@
     // Remembered unconditionally (not just on the RESOLVING path below) so
     // a later manual Retry from MENU_STATE_MSNGR_SEND_RESULT (Menu.h) can
     // always re-fire the exact same destination/content without the caller
-    // having to keep its own copy around.
+    // having to keep its own copy around. forced_method rides along the
+    // same way - see msngr_send_pending_forced_method's own comment.
     msngr_send_pending_dest_hash = dest_hash;
     strncpy(msngr_send_pending_content, content, MSNGR_SEND_CONTENT_MAX_LEN);
     msngr_send_pending_content[MSNGR_SEND_CONTENT_MAX_LEN] = 0;
+    msngr_send_pending_forced_method = forced_method;
 
     RNS::Identity dest_identity = RNS::Identity::recall(dest_hash);
     if (!dest_identity) {
@@ -1746,7 +1758,7 @@
       return URNS_LXMF_SEND_RESOLVING;
     }
 
-    messenger_send_lxmf_resolved(dest_hash, dest_identity, content);
+    messenger_send_lxmf_resolved(dest_hash, dest_identity, content, forced_method);
     return URNS_LXMF_SEND_OK;
   }
 
