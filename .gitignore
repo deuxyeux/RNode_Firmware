@@ -33,3 +33,7 @@ dependencies.lock
 # the manual are tracked, pre-extracted and renamed under
 # Documentation/images/manual/keys/.
 /Documentation/images/keys/
+# Russian manual translation - only intended for the rns.moscow website,
+# not published in this repo.
+/Documentation/MANUAL_RU.md
+/Documentation/MANUAL_RU.html

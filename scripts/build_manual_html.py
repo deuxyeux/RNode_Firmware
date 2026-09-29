@@ -1,19 +1,23 @@
 #!/usr/bin/env python3
-# Renders Documentation/MANUAL.md to a standalone Documentation/MANUAL.html -
-# self-contained (inline CSS, no external requests), theme-aware (light/dark
-# via prefers-color-scheme). Re-run this after any edit to MANUAL.md to keep
-# the HTML in sync; the .html is generated output, not hand-edited.
+# Renders a manual markdown file (default Documentation/MANUAL.md) to a
+# standalone HTML file - self-contained (inline CSS, no external requests),
+# theme-aware (light/dark via prefers-color-scheme). Re-run this after any
+# edit to the source .md to keep the .html in sync; the .html is generated
+# output, not hand-edited.
 #
 # Usage:
 #     pip install markdown
 #     python3 scripts/build_manual_html.py
+#     python3 scripts/build_manual_html.py Documentation/MANUAL_RU.md Documentation/MANUAL_RU.html
 
 import pathlib
+import sys
 import markdown
+from markdown.extensions.toc import slugify_unicode
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-SRC = ROOT / "Documentation" / "MANUAL.md"
-DST = ROOT / "Documentation" / "MANUAL.html"
+SRC = ROOT / (sys.argv[1] if len(sys.argv) > 1 else "Documentation/MANUAL.md")
+DST = ROOT / (sys.argv[2] if len(sys.argv) > 2 else "Documentation/MANUAL.html")
 
 TEMPLATE = """<!doctype html>
 <html lang="en">
@@ -116,7 +120,7 @@ def main():
     body = markdown.markdown(
         md_text,
         extensions=["tables", "fenced_code", "toc"],
-        extension_configs={"toc": {"anchorlink": False}},
+        extension_configs={"toc": {"anchorlink": False, "slugify": slugify_unicode}},
     )
     title = md_text.splitlines()[0].lstrip("# ").strip()
     DST.write_text(TEMPLATE.format(title=title, body=body), encoding="utf-8")
