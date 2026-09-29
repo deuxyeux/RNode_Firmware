@@ -773,6 +773,8 @@ const unsigned char bm_hg_high [] PROGMEM = {
 #define MENU_ICON_W_MSNGR_PING_OK 13
 #define MENU_ICON_W_MSNGR_PING_FAIL 18
 #define MENU_ICON_W_MSNGR_WAITING 9
+#define MENU_ICON_W_MSNGR_DIRECT 11
+#define MENU_ICON_W_MSNGR_RETRY 11
 
 const unsigned char bm_menu_icon_bt_legacy_pairing [] PROGMEM = {
   0x00, 0x00,
@@ -1399,6 +1401,46 @@ const unsigned char bm_menu_icon_msngr_prop_node [] PROGMEM = {
   0x7f, 0xc0,
   0x04, 0x00,
   0x7f, 0xc0,
+  0x00, 0x00,
+};
+
+// MENU_STATE_MSNGR_PEER's "Send Direct" row (Menu.h, MSNGR_PEER_FIXED_
+// ACTION_DELIVERY_MODE, in place of bm_menu_icon_msngr_prop_node when the
+// peer's delivery mode is DIRECT) - a diagonal lightning-bolt/straight-path
+// glyph, from ~/Downloads/Icons/rnode-settings-direct.c (11x10 Piskel
+// export), converted to this project's 1bpp/PROGMEM format the same way
+// every other icon here is (see bm_menu_icon_msngr_settings's comment
+// above). "Send Propagated" reuses bm_menu_icon_msngr_prop_node above
+// rather than getting its own icon - same broadcast-tower glyph the
+// Bookmarks list already uses for a propagation node.
+const unsigned char bm_menu_icon_msngr_direct [] PROGMEM = {
+  0x00, 0x00,
+  0x01, 0xc0,
+  0x01, 0x40,
+  0x03, 0xc0,
+  0x06, 0x00,
+  0x0c, 0x00,
+  0x78, 0x00,
+  0x50, 0x00,
+  0x70, 0x00,
+  0x00, 0x00,
+};
+
+// Retry row icon (MENU_STATE_MSNGR_SEND_RESULT, once a propagated send has
+// failed) - a circular-arrow/retry glyph, from ~/Downloads/Icons/
+// rnode-settings-retry.c (11x10 Piskel export), converted to this
+// project's 1bpp/PROGMEM format the same way as bm_menu_icon_msngr_direct
+// above.
+const unsigned char bm_menu_icon_msngr_retry [] PROGMEM = {
+  0x00, 0x00,
+  0x01, 0x00,
+  0x00, 0x80,
+  0x1f, 0xc0,
+  0x20, 0x80,
+  0x41, 0x00,
+  0x40, 0x00,
+  0x20, 0x00,
+  0x1f, 0x80,
   0x00, 0x00,
 };
 

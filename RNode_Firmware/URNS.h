@@ -116,6 +116,18 @@ bool urns_enqueue_outgoing(const uint8_t* data, uint16_t len);
   // messenger_on_delivery()/messenger_on_delivered() above.
   void messenger_on_failed(LXMF::LXMessage& msg);
 
+  // Outbound-proof-of-SENT counterpart, PROPAGATED-only - fires once
+  // static_propagation_resource_concluded() (lib/microLXMF's LXMRouter.cpp)
+  // confirms this device's message actually reached the active propagation
+  // node (python LXMF semantics: PROPAGATED "delivered" means delivered to
+  // the PN, not the final recipient, so the library reports it via SENT/
+  // this callback rather than DELIVERED/messenger_on_delivered()). Also
+  // fires for OPPORTUNISTIC/DIRECT, immediately at transmission rather than
+  // on confirmation - messenger_on_sent() itself (Messenger.h) is what
+  // filters those out. Forward-declared for the same reason as messenger_
+  // on_delivery() above.
+  void messenger_on_sent(LXMF::LXMessage& msg);
+
   // Periodic propagation-node sync tick - polled from urns_lxmf_loop()
   // below, right after urns_lxmf_router->process_sync(). Forward-declared
   // for the same reason as messenger_on_delivery() above.
@@ -292,7 +304,6 @@ RNS::Interface urns_lora_interface({RNS::Type::NONE});
 #if HAS_ESPNOW == true
   RNS::Interface urns_espnow_interface({RNS::Type::NONE});
 #endif
-RNS::Destination urns_destination({RNS::Type::NONE});
 #if HAS_LXMF == true
   LXMF::LXMRouter::Ptr urns_lxmf_router;
 #endif
@@ -631,10 +642,6 @@ void urns_init() {
   }
 #endif
 
-  DEBUG_LOG("[URNS] step 13: creating destination\r\n");
-  urns_destination = RNS::Destination(urns_identity, RNS::Type::Destination::IN, RNS::Type::Destination::SINGLE, "rnode", "onboard");
-  urns_destination.set_proof_strategy(RNS::Type::Destination::PROVE_ALL);
-
   // Used to register a custom UrnsAnnounceHandler here purely to log
   // "[URNS] RX announce from ..." - removed as redundant once
   // RNS::loglevel() was raised to LOG_TRACE (urns_init(), above): the
@@ -663,6 +670,10 @@ void urns_init() {
   urns_lxmf_router->register_failed_callback([](LXMF::LXMessage& msg) {
     DEBUG_LOG("[URNS] LXMF delivery failed (attempts exhausted) for %s\r\n", msg.hash().toHex().c_str());
     messenger_on_failed(msg);
+  });
+  urns_lxmf_router->register_sent_callback([](LXMF::LXMessage& msg) {
+    DEBUG_LOG("[URNS] LXMF sent callback for %s (method %d)\r\n", msg.hash().toHex().c_str(), (int)msg.method());
+    messenger_on_sent(msg);
   });
 
   std::string display_name = urns_lxmf_display_name();
