@@ -45,21 +45,15 @@
   #define MSNGR_MAX_BOOKMARKS  12
   #define MSNGR_MAX_ANNOUNCES  8
   #define MSNGR_PEER_MAX_MSG_ROWS 5
-  // Scratch size for msngr_kb_decode_utf8() output when decoding a full
-  // message body (messenger_refresh_msg_detail_cache() below) - well
-  // past Menu.h's own MSNGR_MSG_DETAIL_MAX_LINES*_CHARS_PER_LINE (140,
-  // not visible from this file - Messenger.h is included before Menu.h,
-  // see msngr_kb_decode_utf8()'s own comment), which is all the detail
-  // screen can ever actually show regardless of how much more of a
-  // longer incoming message this leaves undecoded.
-  #define MSNGR_CONTENT_DECODE_BUF_LEN 256
 
   // Cap for MessengerPeerMsgCacheRow's own snippet below - wide enough for
   // the marquee-scroll feature (MENU_STATE_MSNGR_PEER, Menu.h) to have real
-  // hidden tail text to reveal on a long message, without going as far as
-  // MSNGR_CONTENT_DECODE_BUF_LEN's own full-message allowance (that's a
-  // single on-demand buffer for MSG_DETAIL; this one is x5, permanently
-  // resident for as long as MENU_STATE_MSNGR_PEER's cache is populated).
+  // hidden tail text to reveal on a long message. Deliberately short (this
+  // is x5, permanently resident for as long as MENU_STATE_MSNGR_PEER's
+  // cache is populated) - unlike messenger_refresh_msg_detail_cache()'s own
+  // MSG_DETAIL/MSG_VIEW cache below, which decodes the message's full
+  // stored length on demand into a buffer sized off the content itself, so
+  // a long message is never truncated there.
   #define MSNGR_PEER_SNIPPET_CAP 160
 
   // A bookmark is either an LXMF peer (the default - Ping/Send Hi-Bye-SOS/
@@ -671,9 +665,15 @@
     if (!urns_message_store) return;
     LXMF::MessageStore::MessageMetadata meta = urns_message_store->load_message_metadata(message_hash);
     if (meta.valid) {
-      char content_decoded[MSNGR_CONTENT_DECODE_BUF_LEN];
-      msngr_kb_decode_utf8(meta.content.c_str(), content_decoded, sizeof(content_decoded));
-      msngr_msg_detail_cache_content = content_decoded;
+      // Decoding only ever shrinks length (msngr_kb_decode_utf8()'s own
+      // comment), so content.size()+1 is always enough - unlike the old
+      // fixed MSNGR_CONTENT_DECODE_BUF_LEN scratch buffer (256 bytes),
+      // this can't silently drop the tail of a message longer than that
+      // (reported: a 588-char Cyrillic message truncated to ~249 chars
+      // on-screen even though the full text was stored on flash intact).
+      std::vector<char> content_decoded(meta.content.size() + 1);
+      msngr_kb_decode_utf8(meta.content.c_str(), content_decoded.data(), content_decoded.size());
+      msngr_msg_detail_cache_content = content_decoded.data();
     } else {
       msngr_msg_detail_cache_content = "(unavailable)";
     }

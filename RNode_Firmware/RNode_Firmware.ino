@@ -3655,27 +3655,12 @@ void button_event(uint8_t event, unsigned long duration) {
     } else if (menu_is_open()) {
       // Settings menu owns the screen - don't let the main button's
       // sleep/BT-pairing/console tiers fire while the user is mid-edit.
-      // Doubles as an alternate control everywhere except WiFi SSID/PSK
-      // text entry, where it stays a dedicated backspace key instead (see
-      // menu_main_button_del()) - but only when there's an actual encoder
-      // doing the character-wheel/save duty instead. On a button-only
-      // board (or an encoder board with the encoder runtime-disabled,
-      // encoder_enabled) this button IS the only input, so it has to stay
-      // on the normal menu_button_press() dispatch (tap=next char,
-      // double-tap=previous char, hold=confirm char/DEL/save - same
-      // primitives wheel_move()/menu_confirm_select() already use for the
-      // encoder path) or WiFi SSID/PSK entry is otherwise entirely stuck.
-      #if HAS_ENCODER == true
-        bool wifi_text_edit_has_encoder = encoder_enabled;
-      #else
-        bool wifi_text_edit_has_encoder = false;
-      #endif
-      if (menu_state == MENU_STATE_WIFI_TEXT_EDIT && wifi_text_edit_has_encoder) {
-        menu_main_button_del();
-        display_unblank();
-      } else {
-        menu_button_press(duration);
-      }
+      // Doubles as an alternate control on encoder boards, or the only
+      // control on button-only ones (or an encoder board with the encoder
+      // runtime-disabled, encoder_enabled) - always the normal
+      // menu_button_press() dispatch (tap=next, double-tap=previous,
+      // hold=confirm/select).
+      menu_button_press(duration);
     #endif
     } else if (device_init_done) {
       // Every tier below can reach real hardware init (bt_start()'s NimBLE

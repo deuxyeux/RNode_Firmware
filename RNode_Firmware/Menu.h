@@ -16,8 +16,10 @@
 #ifndef MENU_H
   #define MENU_H
 
-  // Used only for the WiFi SSID/PSK text-entry screen (draw_menu_text_edit_disp),
-  // and only there - every other menu screen stays on SMALL_FONT/Org_01.
+  // Used by the IP-octet/datetime editors (draw_menu_addr_edit_disp(),
+  // draw_menu_datetime_edit_disp()) and as BOARD_HELTEC_T114's own
+  // MENU_FONT (see below) - every other menu screen stays on SMALL_FONT/
+  // Org_01 unless it's one of these two exceptions.
   #include "Fonts/Tamsyn6x12.h"
   #define TEXT_ENTRY_FONT &Tamsyn6x12
 
@@ -260,8 +262,11 @@
   #define MENU_STATE_EDIT           2   // editing a top-level field
   #define MENU_STATE_WIFI_LIST      3   // WiFi submenu list
   #define MENU_STATE_WIFI_EDIT      4   // editing the WiFi Mode field
-  #define MENU_STATE_WIFI_TEXT_EDIT 5   // editing WiFi SSID/PSK via character wheel
-  #define MENU_STATE_WIFI_TEXT_CONFIRM 6 // "Save?" dialog, long-press from text edit
+  // 5/6 formerly MENU_STATE_WIFI_TEXT_EDIT/_TEXT_CONFIRM (character-wheel
+  // SSID/PSK entry) - removed, WiFi SSID/PSK entry now reuses Messenger's
+  // on-screen keyboard (MENU_STATE_MSNGR_TEXT_ENTRY, MSNGR_TEXT_ENTRY_
+  // PURPOSE_WIFI_SSID/_WIFI_PSK). Left unassigned rather than renumbering
+  // every state after it.
   #define MENU_STATE_HW_LIST        7   // Hardware submenu list (read-only info)
   #define MENU_STATE_HW_EDIT        8   // editing the Input Voltage/Battery Cal field
   #define MENU_STATE_GPIO_LIST      9   // Hardware > GPIO submenu list
@@ -278,7 +283,7 @@
   #define MENU_STATE_GNSS_EDIT      20  // editing the Enabled field
   #define MENU_STATE_SENSORS_LIST   21  // Sensors submenu list (HAS_SENSORS boards) - read-only, no edit state
   #define MENU_STATE_FWUPD_LIST     22  // F/W Update submenu list (HAS_OTA boards) - Current/Latest/Update/Back
-  #define MENU_STATE_FWUPD_CONFIRM  23  // UPDATE/CANCEL list before Update actually runs - same pattern as MENU_STATE_WIFI_TEXT_CONFIRM
+  #define MENU_STATE_FWUPD_CONFIRM  23  // UPDATE/CANCEL list before Update actually runs - same pattern as MENU_STATE_MSNGR_DISCARD_CONFIRM
   #define MENU_STATE_MEM_LIST       24  // Hardware > Memory submenu - Heap (MCU_ESP32 also gets PSRAM) bar graphs, read-only
   #define MENU_STATE_MEM_DETAIL     25  // Memory > Heap or PSRAM detail readout (Total/Used/Free, MCU_ESP32 also gets Min Free), read-only
   #define MENU_STATE_ESPNOW_LIST    26  // ESP-NOW submenu list (HAS_ESPNOW boards) - Enabled/Mode/Back
@@ -565,7 +570,7 @@
   #if HAS_OTA == true
     #define FWUPD_ITEM_CURRENT 0  // read-only - the running build (BUILD_NUMBER)
     #define FWUPD_ITEM_LATEST  1  // read-only - fetched from the update server once, on opening this list (see menu_confirm_select())
-    #define FWUPD_ITEM_UPDATE  2  // opens MENU_STATE_FWUPD_CONFIRM - a plain UPDATE/CANCEL list, same pattern as WiFi's SAVE/DISCARD (MENU_STATE_WIFI_TEXT_CONFIRM)
+    #define FWUPD_ITEM_UPDATE  2  // opens MENU_STATE_FWUPD_CONFIRM - a plain UPDATE/CANCEL list, same pattern as Messenger's DISCARD/CANCEL (MENU_STATE_MSNGR_DISCARD_CONFIRM)
     #define FWUPD_ITEM_BACK    3
     #define FWUPD_ITEM_COUNT   4
   #endif
@@ -817,7 +822,14 @@
     #define BLEKBD_ITEM_COUNT   5
   #endif
 
-  #if HAS_URNS == true
+  // Widened to HAS_WIFI too (not just HAS_URNS) - this block is pure
+  // #defines/state down through MSNGR_TOP_ITEM_* (genuinely URNS/LXMF-
+  // only, stays nested in its own #if HAS_LXMF==true below) and then the
+  // shared on-screen-keyboard grid tables/purpose enum (MSNGR_KB_ROWS
+  // etc., widened to their own "HAS_LXMF==true || HAS_WIFI==true" guard
+  // further down) - WiFi SSID/PSK entry reuses those regardless of
+  // whether this board also has HAS_URNS.
+  #if HAS_URNS == true || HAS_WIFI == true
     #define URNS_ITEM_ENABLED   0   // editable - staged only, no self-reboot until SAVE & EXIT
     // Editable - RNS::Reticulum::transport_enabled() (urns_init(), URNS.h;
     // ADDR_CONF_URNS_TRANSPORT, ROM.h). Same "staged, no self-reboot until
@@ -1163,7 +1175,16 @@
     // MENU_STATE_MSNGR_DELETE_CONFIRM) and one BACK row, same "split across
     // several label rows" shape as URNS_PATH_DETAIL's two-row hash above.
     #define MSNGR_MSG_DETAIL_MAX_LINES 7
+  #endif
 
+  // Shared on-screen keyboard mechanics (grid layouts, cursor/shift state,
+  // insert/backspace primitives) - reused by both the LXMF Messenger app
+  // (compose/display-name/preset/bookmark/identity-restore purposes) and
+  // WiFi SSID/PSK entry (MSNGR_TEXT_ENTRY_PURPOSE_WIFI_SSID/_WIFI_PSK,
+  // Menu.h's WIFI_ITEM_SSID/PSK), hence available on either HAS_LXMF or
+  // HAS_WIFI boards rather than gated to HAS_LXMF alone like the rest of
+  // the Messenger app around it.
+  #if HAS_LXMF == true || HAS_WIFI == true
     // MENU_STATE_MSNGR_TEXT_ENTRY - on-screen keyboard for composing a
     // free-text message, ported from meshtastic_firmware's
     // graphics/VirtualKeyboard (a 4-row/11-col grid designed for real
@@ -1204,14 +1225,57 @@
     #define MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH   3 // MSNGR_BOOKMARKS' "Add by Hash" row - typing an arbitrary peer's destination hash directly, not learned from an announce/message
     #define MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_RENAME 4 // MSNGR_PEER_PROP_ACTION_RENAME - a friendly name for a Propagation-type bookmark, which (unlike an LXMF peer) never gets one automatically
     #define MSNGR_TEXT_ENTRY_PURPOSE_IDENTITY_RESTORE 5 // URNS_KEYS_ITEM_RESTORE - typing the raw 64-byte identity private key as its VAULT_IDENTITY_KEY_BASE32_LEN-char Base32 encoding (IdentityTransfer.h), using its own dedicated MSNGR_KB_LAYOUT_BASE32 grid (not the hex one - identity keys aren't hex)
+    #define MSNGR_TEXT_ENTRY_PURPOSE_WIFI_SSID       6 // WIFI_ITEM_SSID (MENU_STATE_WIFI_LIST) - reuses this same on-screen keyboard for WiFi SSID entry instead of the old character-wheel dialog, available whenever HAS_WIFI is true regardless of HAS_LXMF (see the widened-guard comments throughout this file's keyboard mechanics)
+    #define MSNGR_TEXT_ENTRY_PURPOSE_WIFI_PSK        7 // WIFI_ITEM_PSK (MENU_STATE_WIFI_LIST) - same as WIFI_SSID above, for the passphrase field
     uint8_t msngr_text_entry_purpose = MSNGR_TEXT_ENTRY_PURPOSE_MESSAGE;
+
+    // MENU_STATE_MSNGR_TEXT_ENTRY - linear (row-major) cursor into
+    // MSNGR_KB_LAYOUT, a persistent Shift toggle (caps-lock style, not
+    // meshtastic's one-shot long-press), and the message/credential being
+    // composed. Reset (cursor to 0, shift off, buffer cleared) every time
+    // the screen is opened fresh. Declared up here, alongside msngr_text_
+    // entry_purpose, rather than down with the rest of the keyboard
+    // mechanics (msngr_kb_active_layout() etc., further below) - Chat's
+    // own compose functions (msngr_chat_insert_char() etc., HAS_BLE_HID_
+    // HOST-only, below) and the WiFi SSID/PSK vars (staged_wifi_ssid/psk,
+    // also below) both need msngr_text_entry_buf declared before their own
+    // point in the file, and those two land on opposite sides of where
+    // the rest of the keyboard mechanics itself has to sit (see that
+    // block's own comment on why it can't move any earlier than
+    // staged_wifi_ssid/psk) - so the buffer/cursor state alone has to
+    // live earlier than all three.
+    uint8_t msngr_kb_cursor = 0;
+    bool msngr_kb_shift_on = false;
+    // Latin/Cyrillic layout toggle - lives on the same Shift key as case
+    // (see MSNGR_KB_ALT_HOLD_MS), not a separate grid cell (the grid is
+    // already full - 4x11 with no spare slot). Reset alongside cursor/shift
+    // every time the screen is opened fresh, same as those.
+    bool msngr_kb_lang_ru = false;
+    char msngr_text_entry_buf[MSNGR_TEXT_ENTRY_MAX_LEN + 1] = {0};
+
+    // MSNGR_TEXT_ENTRY_PURPOSE_WIFI_PSK only - draw_msngr_compose_box()
+    // masks every character with '*' except the one just typed, which
+    // stays in plain text for this long before masking too (same "briefly
+    // show the last digit" convention phone PIN entry uses). 0 (its reset
+    // value - both here and after every backspace, see msngr_kb_do_
+    // backspace()) means "nothing recently typed", so a freshly-opened
+    // screen with a preloaded saved password shows fully masked from the
+    // very first frame, never briefly revealing it.
+    #define MSNGR_KB_PSK_REVEAL_MS 800
+    unsigned long msngr_kb_last_insert_ms = 0;
 
     // Which kind of bookmark MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH's SAVE
     // key will create - toggled via the Type cell on MSNGR_KB_LAYOUT_HEX's
     // own row 2 (MSNGR_KB_TYPE_TOGGLE below). Reset to LXMF every time the
     // Add by Hash screen is (re-)opened (MENU_STATE_MSNGR_BOOKMARKS' row-
     // select handler), same as msngr_kb_cursor/shift/lang_ru are.
-    uint8_t msngr_kb_bookmark_type = MSNGR_BOOKMARK_TYPE_LXMF;
+    // MSNGR_BOOKMARK_TYPE_LXMF/_PROPAGATION (Messenger.h, HAS_LXMF-only) -
+    // only meaningful for MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH, itself
+    // only ever reachable on a HAS_LXMF board, but the variable is declared
+    // unconditionally here (this whole region is shared with HAS_WIFI) so
+    // every non-purpose-specific keyboard helper can reference it without
+    // its own guard - 0 is MSNGR_BOOKMARK_TYPE_LXMF's own value.
+    uint8_t msngr_kb_bookmark_type = 0;
 
     // Sentinel chars double as both the grid's stored key and the dispatch
     // tag msngr_kb_key_type() below switches on - same trick meshtastic's
@@ -1338,6 +1402,35 @@
       {3,0}, {3,1}, {3,2}, // 6, 7, =
     };
     #define MSNGR_KB_BASE32_KEY_COUNT 36
+
+    // MSNGR_TEXT_ENTRY_PURPOSE_WIFI_SSID/_WIFI_PSK's own alternate page -
+    // toggled onto the same grid via the same hold-Shift gesture EN/RU
+    // uses everywhere else (msngr_kb_active_layout()'s own WIFI branch
+    // repurposes msngr_kb_lang_ru as a Letters/Symbols flag for these two
+    // purposes specifically), not a dedicated cell - same reasoning
+    // MSNGR_KB_LAYOUT_RU gets away with reusing Shift instead of a
+    // separate key. A full, uniform MSNGR_KB_ROWS x MSNGR_KB_COLS
+    // rectangle like every layout except HEX/BASE32, so msngr_kb_active_
+    // rows()/_cursor_rc()/_active_key_count() need no special-casing for
+    // it (plain division/modulo already works).
+    //
+    // Digits aren't repeated here - MSNGR_KB_LAYOUT's own row 0 already
+    // has '1'-'9'/'0' directly reachable without switching pages at all,
+    // same as every other purpose. That leaves all 39 non-meta cells free
+    // for punctuation - the old character-wheel dialog this on-screen
+    // keyboard replaces for WiFi SSID/PSK entry supported this exact set
+    // (WHEEL_SYMS, 32 symbols), reading-order left-to-right/top-to-bottom,
+    // same convention as every other layout table here. Meta keys stay at
+    // the same fixed positions as MSNGR_KB_LAYOUT/_RU (Backspace [0][10],
+    // Send [1][10], Shift/toggle [2][9], Space [2][10], Back [3][10]) -
+    // row 3's 7 trailing cells are genuinely unused (MSNGR_KB_NONE, same
+    // convention as MSNGR_KB_LAYOUT_HEX/_BASE32's own blank cells).
+    static const char MSNGR_KB_LAYOUT_SYMBOLS[MSNGR_KB_ROWS][MSNGR_KB_COLS] = {
+      {'!', '"', '#', '$', '%', '&', '\'', '(', ')', '*', '\b'},
+      {'+', ',', '-', '.', '/', ':', ';', '<', '=', '>', '\n'},
+      {'?', '@', '[', '\\', ']', '^', '_', '`', '{', '\x02', ' '},
+      {'|', '}', '~', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\x1b'},
+    };
 
     #define MSNGR_KB_CHAR      0
     #define MSNGR_KB_BACKSPACE 1
@@ -2284,357 +2377,20 @@
     // DELETE/CLEAR, 1 = CANCEL).
     uint8_t msngr_delete_confirm_cursor = 1;
     uint8_t msngr_clear_confirm_cursor = 1;
+  #endif
 
-    // MENU_STATE_MSNGR_TEXT_ENTRY - linear (row-major) cursor into
-    // MSNGR_KB_LAYOUT, a persistent Shift toggle (caps-lock style, not
-    // meshtastic's one-shot long-press), and the message being composed.
-    // Reset (cursor to 0, shift off, buffer cleared) every time the screen
-    // is opened fresh from MSNGR_PEER_FIXED_ACTION_SEND_CUSTOM.
-    uint8_t msngr_kb_cursor = 0;
-    bool msngr_kb_shift_on = false;
-    // Latin/Cyrillic layout toggle - lives on the same Shift key as case
-    // (see MSNGR_KB_ALT_HOLD_MS), not a separate grid cell (the grid is
-    // already full - 4x11 with no spare slot). Reset alongside cursor/shift
-    // every time the screen is opened fresh, same as those.
-    bool msngr_kb_lang_ru = false;
-    char msngr_text_entry_buf[MSNGR_TEXT_ENTRY_MAX_LEN + 1] = {0};
 
-    // Centralizes which layout table is "live" right now - the restricted
-    // hex grid for MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH, the Base32 grid
-    // for _IDENTITY_RESTORE, EN/RU otherwise - so every call site that
-    // indexes [kb_row][kb_col] does it through here instead of duplicating
-    // the purpose check. Returns a row-array pointer (decays to the same
-    // char(*)[MSNGR_KB_COLS] type no matter which table's actual row
-    // count is, since only MSNGR_KB_COLS - shared by every table - affects
-    // that pointer type) so callers don't need to know or care that
-    // MSNGR_KB_LAYOUT_HEX has fewer rows.
-    const char (*msngr_kb_active_layout())[MSNGR_KB_COLS] {
-      if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH) return MSNGR_KB_LAYOUT_HEX;
-      if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_IDENTITY_RESTORE) return MSNGR_KB_LAYOUT_BASE32;
-      return msngr_kb_lang_ru ? MSNGR_KB_LAYOUT_RU : MSNGR_KB_LAYOUT;
-    }
-
-    // Row count of whichever layout msngr_kb_active_layout() would return
-    // right now - MSNGR_KB_HEX_ROWS for hash entry, MSNGR_KB_ROWS for
-    // everything else, IDENTITY_RESTORE included (MSNGR_KB_LAYOUT_BASE32
-    // uses the full standard row count, unlike hex's compact 3-row grid -
-    // see that table's own comment). Bounds the keyboard grid's own
-    // row-drawing loop so hash entry never draws (or leaves visible
-    // click-through space for) the extra row a straight MSNGR_KB_ROWS
-    // would otherwise leave underneath it - cursor navigation itself is
-    // bounded separately, by msngr_kb_active_key_count() below, since
-    // neither MSNGR_KB_LAYOUT_HEX's nor MSNGR_KB_LAYOUT_BASE32's real
-    // cells are evenly spread across every row.
-    uint8_t msngr_kb_active_rows() {
-      return msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH ? MSNGR_KB_HEX_ROWS : MSNGR_KB_ROWS;
-    }
-
-    // Every other layout is a uniform MSNGR_KB_ROWS x MSNGR_KB_COLS
-    // rectangle, so a linear cursor maps to (row, col) with plain
-    // division/modulo, which also happens to visit cells in reading order
-    // (left-to-right, top-to-bottom). MSNGR_KB_LAYOUT_HEX's own reading
-    // order would visit DEL (row 0's last cell) before 'A'-'F' (row 1),
-    // which isn't the tab order that's actually wanted - digits, then
-    // letters, then DEL/SAVE/BACK last - so hash entry gets an explicit
-    // per-cursor-value (row, col) table instead of computing one.
-    static const uint8_t MSNGR_KB_HEX_ORDER[20][2] = {
-      {0,0}, {0,1}, {0,2}, {0,3}, {0,4}, {0,5}, {0,6}, {0,7}, {0,8}, {0,9}, // 0-9
-      {1,0}, {1,1}, {1,2}, {1,3}, {1,4}, {1,5}, // A-F
-      {0,10}, // DEL
-      {1,10}, // SAVE
-      {2,0},  // Type (LXMF/Propagation)
-      {2,10}, // BACK
-    };
-    #define MSNGR_KB_HEX_KEY_COUNT 20
-
-    // Maps a linear cursor value to (row, col) for whichever layout is
-    // active - MSNGR_KB_HEX_ORDER for hash entry, MSNGR_KB_BASE32_ORDER
-    // for identity restore, plain division/modulo for every other
-    // (uniform-grid) purpose. Shared by every call site that used to do
-    // the division/modulo itself, so none of them need their own purpose
-    // check.
-    void msngr_kb_cursor_rc(uint8_t cursor, uint8_t &row, uint8_t &col) {
-      if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH) {
-        row = MSNGR_KB_HEX_ORDER[cursor][0];
-        col = MSNGR_KB_HEX_ORDER[cursor][1];
-        return;
-      }
-      if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_IDENTITY_RESTORE) {
-        row = MSNGR_KB_BASE32_ORDER[cursor][0];
-        col = MSNGR_KB_BASE32_ORDER[cursor][1];
-        return;
-      }
-      row = cursor / MSNGR_KB_COLS;
-      col = cursor % MSNGR_KB_COLS;
-    }
-
-    // Total selectable cells for whichever layout is active right now -
-    // bounds cursor navigation (menu_encoder_rotate()'s MENU_STATE_MSNGR_
-    // TEXT_ENTRY branch). MSNGR_KB_KEY_COUNT (rows*cols) for every normal
-    // purpose; MSNGR_KB_HEX_KEY_COUNT/MSNGR_KB_BASE32_KEY_COUNT (their own
-    // order tables' lengths) for hash entry/identity restore - not
-    // msngr_kb_active_rows()*MSNGR_KB_COLS, which would let the cursor
-    // wander onto cells those order tables don't have entries for.
-    uint8_t msngr_kb_active_key_count() {
-      if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH) return MSNGR_KB_HEX_KEY_COUNT;
-      if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_IDENTITY_RESTORE) return MSNGR_KB_BASE32_KEY_COUNT;
-      return MSNGR_KB_KEY_COUNT;
-    }
-
-    // Real 2D grid navigation for a BLE keyboard's Left/Right/Up/Down
-    // (blekbd_key_event(), below) - per user request, distinct from the
-    // single linear cursor step menu_encoder_rotate()'s own MENU_STATE_
-    // MSNGR_TEXT_ENTRY branch does (dir=+-1 on msngr_kb_cursor directly),
-    // which for MSNGR_KB_LAYOUT_HEX's deliberately non-reading-order tab
-    // sequence (MSNGR_KB_HEX_ORDER's own comment) doesn't reliably
-    // correspond to "move right" or "move down" at all - e.g. one linear
-    // step from '9' (row 0) lands on 'A' (row 1), neither a same-row nor
-    // a same-column move. A real encoder/the single button still use the
-    // linear step (unchanged - rotation only, no separate Left/Right
-    // input to give it), so this is BLE-keyboard-specific.
-    //
-    // msngr_kb_nav_col: moves to the nearest valid cell strictly left/
-    // right of the current one WITHIN THE SAME ROW ONLY, clamped at the
-    // row's own first/last real cell (never spills into an adjacent row,
-    // unlike msngr_kb_nav_row below). O(active key count) linear scan -
-    // at most 44 cells (normal 4x11 layout), negligible.
-    void msngr_kb_nav_col(int8_t dir) {
-      uint8_t row, col;
-      msngr_kb_cursor_rc(msngr_kb_cursor, row, col);
-      uint8_t count = msngr_kb_active_key_count();
-      bool found = false;
-      int16_t best_col = 0;
-      uint8_t best_cursor = msngr_kb_cursor;
-      for (uint8_t i = 0; i < count; i++) {
-        uint8_t r, c;
-        msngr_kb_cursor_rc(i, r, c);
-        if (r != row) continue;
-        if (dir < 0) {
-          if ((int16_t)c < (int16_t)col && (!found || (int16_t)c > best_col)) { best_col = c; best_cursor = i; found = true; }
-        } else {
-          if ((int16_t)c > (int16_t)col && (!found || (int16_t)c < best_col)) { best_col = c; best_cursor = i; found = true; }
-        }
-      }
-      if (found) msngr_kb_cursor = best_cursor;
-    }
-
-    // msngr_kb_nav_row: moves to the row above/below, landing on whichever
-    // cell in that row is closest to the current column (exact match
-    // preferred) - rows don't all have the same active columns (MSNGR_KB_
-    // LAYOUT_HEX especially: row 2 only has cells at columns 0 and 10),
-    // so this is a nearest-column search, not a fixed offset. Clamped at
-    // the grid's own first/last row - no wrap, same as this screen's
-    // existing Up/Down (menu_encoder_rotate(dir, false)'s own wrap=false).
-    void msngr_kb_nav_row(int8_t dir) {
-      uint8_t row, col;
-      msngr_kb_cursor_rc(msngr_kb_cursor, row, col);
-      int16_t target_row = (int16_t)row + dir;
-      if (target_row < 0 || target_row >= (int16_t)msngr_kb_active_rows()) return;
-      uint8_t count = msngr_kb_active_key_count();
-      bool found = false;
-      int16_t best_dist = 0;
-      uint8_t best_cursor = msngr_kb_cursor;
-      for (uint8_t i = 0; i < count; i++) {
-        uint8_t r, c;
-        msngr_kb_cursor_rc(i, r, c);
-        if (r != (uint8_t)target_row) continue;
-        int16_t dist = (int16_t)c - (int16_t)col;
-        if (dist < 0) dist = -dist;
-        if (!found || dist < best_dist) { best_dist = dist; best_cursor = i; found = true; }
-      }
-      if (found) msngr_kb_cursor = best_cursor;
-    }
-
-    // Shared by the on-screen keyboard's own confirm gesture (menu_
-    // confirm_select()'s MSNGR_KB_TYPE_TOGGLE branch) and a BLE keyboard's
-    // Space (while the highlight is on this cell)/Tab (from anywhere on
-    // this screen) shortcuts (blekbd_key_event(), below) - all three
-    // "press" the Type cell the same way.
-    void msngr_kb_toggle_bookmark_type() {
-      msngr_kb_bookmark_type = (msngr_kb_bookmark_type == MSNGR_BOOKMARK_TYPE_PROPAGATION)
-        ? MSNGR_BOOKMARK_TYPE_LXMF : MSNGR_BOOKMARK_TYPE_PROPAGATION;
-    }
-
-    // The EN/RU switch fires live, the instant a Shift hold crosses
-    // MSNGR_KB_ALT_HOLD_MS, rather than waiting for release - polled
-    // every loop() tick (menu_button_process() below for the main
-    // button, Encoder.h's encoder_process() for the encoder's own
-    // button) via msngr_kb_lang_hold_try(), same "fire once while still
-    // held" shape as Encoder.h's own enc_btn_hold_beeped. Separate flags
-    // per control (rather than one shared flag) because Menu.h and
-    // Encoder.h are two different debounce state machines that can't
-    // see each other's press-state - menu_confirm_select()'s Shift
-    // branch checks/consumes both at release, so whichever control the
-    // switch actually happened on doesn't matter there.
-    bool msngr_kb_lang_hold_fired_btn = false;
-    bool msngr_kb_lang_hold_fired_enc = false;
-
-    // Shared by both pollers above - if held_ms has crossed the
-    // threshold, the current hold hasn't already fired this switch, and
-    // the grid position it's being measured against is actually the
-    // Shift key right now (cursor doesn't move during a plain hold, so
-    // this stays true for the whole gesture once checked), performs the
-    // switch and latches fired_flag so menu_confirm_select() knows to
-    // skip its own release-time toggle. No-ops instead of switching for
-    // any other key - holding a letter key isn't a gesture this screen
-    // gives meaning to, so it's left alone.
-    void msngr_kb_lang_hold_try(unsigned long held_ms, bool &fired_flag) {
-      if (menu_state != MENU_STATE_MSNGR_TEXT_ENTRY || fired_flag || held_ms < MSNGR_KB_ALT_HOLD_MS) return;
-      uint8_t kb_row, kb_col;
-      msngr_kb_cursor_rc(msngr_kb_cursor, kb_row, kb_col);
-      char key_ch = msngr_kb_active_layout()[kb_row][kb_col];
-      if (msngr_kb_key_type(key_ch) != MSNGR_KB_SHIFT) return;
-      msngr_kb_lang_ru = !msngr_kb_lang_ru;
-      msngr_kb_shift_on = false;
-      buzzer_encoder_tick_melody();
-      fired_flag = true;
-    }
-
+  #if HAS_LXMF == true
     // Which msngr_presets[] slot PURPOSE_PRESET is editing -
     // MSNGR_MAX_PRESETS itself (one past the last real slot) is the
     // sentinel for "adding a new preset" rather than editing an existing
     // one, same "index == count means append" convention
     // messenger_preset_add() itself uses internally.
     uint8_t msngr_preset_edit_index = 0;
+  #endif
 
-    // Same live-while-held shape as msngr_kb_lang_hold_fired_btn/_enc
-    // above, for the punctuation-pair gesture (msngr_kb_alt_pair()) on
-    // '.'/','/'?' instead of the language switch on Shift - separate
-    // flags because a hold can only ever be doing one or the other
-    // (whichever key is actually highlighted), but menu_confirm_select()
-    // still needs to know which, if either, to skip at release.
-    bool msngr_kb_alt_hold_fired_btn = false;
-    bool msngr_kb_alt_hold_fired_enc = false;
 
-    // Same "fire once while held" shape as msngr_kb_lang_hold_try(), for
-    // the highlighted key's paired punctuation mark instead of a
-    // language switch - inserts it directly (respecting the same
-    // length cap the normal MSNGR_KB_CHAR path in menu_confirm_select()
-    // enforces; also run through msngr_kb_apply_shift() same as any
-    // other insert, currently a no-op for punctuation but keeps this
-    // correct for free if a letter-alt ever gets paired here again -
-    // see msngr_kb_alt_pair()'s own comment) rather than just flipping
-    // a mode, since there's nothing else for a hold on a plain
-    // character key to *do*. No-ops for any key with no pairing
-    // (msngr_kb_alt_pair() returns 0) - letters, digits, space, and
-    // every meta key are left entirely to their own existing hold
-    // behavior (Shift's language switch, BACK, etc).
-    void msngr_kb_alt_hold_try(unsigned long held_ms, bool &fired_flag) {
-      if (menu_state != MENU_STATE_MSNGR_TEXT_ENTRY || fired_flag || held_ms < MSNGR_KB_ALT_HOLD_MS) return;
-      uint8_t kb_row, kb_col;
-      msngr_kb_cursor_rc(msngr_kb_cursor, kb_row, kb_col);
-      char key_ch = msngr_kb_active_layout()[kb_row][kb_col];
-      char alt = msngr_kb_alt_pair(key_ch);
-      if (alt == 0) return;
-      alt = msngr_kb_apply_shift(alt, msngr_kb_shift_on);
-      size_t max_len = msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH
-        ? (size_t)(LXMF::PEER_HASH_SIZE * 2)
-        : msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_IDENTITY_RESTORE
-        ? (size_t)VAULT_IDENTITY_KEY_BASE32_LEN
-        : (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME ||
-           msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_PRESET ||
-           msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_RENAME)
-          ? MSNGR_NAME_MAX_LEN : MSNGR_TEXT_ENTRY_MAX_LEN;
-      size_t text_len = strlen(msngr_text_entry_buf);
-      if (text_len < max_len) {
-        msngr_text_entry_buf[text_len] = alt;
-        msngr_text_entry_buf[text_len + 1] = 0;
-        buzzer_encoder_tick_melody();
-      }
-      fired_flag = true;
-    }
-
-    // Hold-to-repeat threshold/rate for DEL - shorter than MSNGR_KB_ALT_
-    // HOLD_MS on purpose: unlike Shift/punctuation (which do something
-    // *different* on a hold, so need enough delay to not misfire during
-    // an ordinary confirm), a held DEL doing the exact same thing it'd
-    // do anyway, just repeatedly, is safe to start almost immediately -
-    // 500ms is long enough that a normal single backspace tap/click
-    // never reaches it. Repeat interval is a plain judgement call
-    // (~8/sec) - fast enough to actually clear text, slow enough to
-    // still feel countable/controllable one character at a time.
-    #define MSNGR_KB_DEL_REPEAT_START_MS    500
-    #define MSNGR_KB_DEL_REPEAT_INTERVAL_MS 120
-
-    // Same per-control fired-flag pattern as msngr_kb_lang_hold_fired_*/
-    // msngr_kb_alt_hold_fired_* above, plus a per-control "when did
-    // this hold's most recent repeat happen" timestamp (0 = hasn't
-    // repeated yet this hold) to pace repeats at MSNGR_KB_DEL_REPEAT_
-    // INTERVAL_MS apart instead of firing every single loop() tick.
-    bool msngr_kb_del_hold_fired_btn = false;
-    bool msngr_kb_del_hold_fired_enc = false;
-    unsigned long msngr_kb_del_repeat_last_btn = 0;
-    unsigned long msngr_kb_del_repeat_last_enc = 0;
-
-    // Same "fire (repeatedly) while held" shape as msngr_kb_lang_hold_
-    // try()/msngr_kb_alt_hold_try(), except this one keeps firing at
-    // MSNGR_KB_DEL_REPEAT_INTERVAL_MS apart for as long as the hold
-    // continues past the start threshold, instead of just once. The
-    // very first repeat fires the moment held_ms crosses the start
-    // threshold (last_repeat_ms is still 0 then, so the interval check
-    // is skipped) - deletes exactly like a normal DEL tap would, just
-    // triggered early instead of waiting for release.
-    void msngr_kb_del_hold_try(unsigned long held_ms, bool &fired_flag, unsigned long &last_repeat_ms) {
-      if (menu_state != MENU_STATE_MSNGR_TEXT_ENTRY || held_ms < MSNGR_KB_DEL_REPEAT_START_MS) return;
-      uint8_t kb_row, kb_col;
-      msngr_kb_cursor_rc(msngr_kb_cursor, kb_row, kb_col);
-      char key_ch = msngr_kb_active_layout()[kb_row][kb_col];
-      if (msngr_kb_key_type(key_ch) != MSNGR_KB_BACKSPACE) return;
-      unsigned long now = millis();
-      if (last_repeat_ms != 0 && now - last_repeat_ms < MSNGR_KB_DEL_REPEAT_INTERVAL_MS) return;
-      size_t text_len = strlen(msngr_text_entry_buf);
-      if (text_len > 0) {
-        msngr_text_entry_buf[text_len - 1] = 0;
-        buzzer_encoder_tick_melody();
-      }
-      last_repeat_ms = now;
-      fired_flag = true;
-    }
-
-    // MENU_STATE_MSNGR_DISCARD_CONFIRM - same "default to CANCEL" pattern
-    // as msngr_delete_confirm_cursor/msngr_clear_confirm_cursor above
-    // (0 = DISCARD, 1 = CANCEL).
-    uint8_t msngr_discard_confirm_cursor = 1;
-    // Which screen opened this confirm dialog (MENU_STATE_MSNGR_TEXT_ENTRY
-    // or, once MENU_STATE_MSNGR_CHAT exists, that instead) - CANCEL returns
-    // here. Set by menu_msngr_text_entry_leave() right before it opens this
-    // dialog; DISCARD doesn't need this at all (it already goes through
-    // msngr_text_entry_return_state() below, which is purpose-based and
-    // already correct for both callers).
-    uint8_t msngr_discard_confirm_return_state = MENU_STATE_MSNGR_TEXT_ENTRY;
-
-    // Where leaving MENU_STATE_MSNGR_TEXT_ENTRY (Send/BACK/discard alike)
-    // lands, based on why it was opened - shared by menu_msngr_text_
-    // entry_leave() below and MENU_STATE_MSNGR_DISCARD_CONFIRM's own
-    // DISCARD branch (menu_confirm_select()), which used to duplicate
-    // this same two-way ternary rather than call it.
-    uint8_t msngr_text_entry_return_state() {
-      if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME) return MENU_STATE_MSNGR_SETTINGS;
-      if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_PRESET) return MENU_STATE_MSNGR_PRESETS;
-      if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH) return MENU_STATE_MSNGR_BOOKMARKS;
-      if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_IDENTITY_RESTORE) return MENU_STATE_URNS_KEYS;
-      return MENU_STATE_MSNGR_PEER;
-    }
-
-    // Shared exit path for leaving MENU_STATE_MSNGR_TEXT_ENTRY without
-    // sending - both the on-grid BACK key (msngr_kb_key_type() dispatch,
-    // menu_confirm_select()) and the encoder's own long-press-to-leave
-    // (menu_encoder_button(), 3s threshold there instead of the usual
-    // 700ms) route through this, so an accidental hold and a deliberate
-    // BACK press protect a half-typed message the same way. Skips
-    // straight back to the peer screen if nothing's been typed; otherwise
-    // opens a DISCARD/CANCEL confirmation instead of silently losing it.
-    void menu_msngr_text_entry_leave() {
-      uint8_t return_state = msngr_text_entry_return_state();
-      if (strlen(msngr_text_entry_buf) == 0) {
-        menu_state = return_state;
-      } else {
-        msngr_discard_confirm_cursor = 1; // default CANCEL
-        msngr_discard_confirm_return_state = menu_state; // CANCEL comes back here - see this var's own declaration
-        menu_state = MENU_STATE_MSNGR_DISCARD_CONFIRM;
-      }
-    }
-
+  #if HAS_LXMF == true
     // MENU_STATE_MSNGR_PING_RESULT - fixed 2-row screen (status + BACK),
     // default cursor on BACK so a quick click dismisses either a result or
     // an in-flight ping. Row 0 is read-only info, same "selecting it does
@@ -2658,39 +2414,10 @@
              msngr_send_state == MSNGR_SEND_UNRESOLVED ||
              msngr_send_state == MSNGR_SEND_FAILED;
     }
+  #endif
 
-    // Appends an already-shift-resolved character to msngr_text_entry_buf,
-    // respecting the same per-purpose length cap the on-screen keyboard's
-    // own MSNGR_KB_CHAR/_SPACE dispatch enforces (menu_confirm_select()) -
-    // extracted so the BLE keyboard path (blekbd_key_event(), below) can
-    // reuse it instead of duplicating the cap logic. Silently drops the
-    // character once the cap is hit, same as the on-screen keyboard always
-    // has - no truncation warning, just stops accepting more input.
-    void msngr_kb_insert_char(char c) {
-      size_t max_len = msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH
-        ? (size_t)(LXMF::PEER_HASH_SIZE * 2)
-        : msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_IDENTITY_RESTORE
-        ? (size_t)VAULT_IDENTITY_KEY_BASE32_LEN
-        : (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME ||
-           msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_PRESET ||
-           msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_RENAME)
-          ? MSNGR_NAME_MAX_LEN : MSNGR_TEXT_ENTRY_MAX_LEN;
-      size_t text_len = strlen(msngr_text_entry_buf);
-      if (text_len < max_len) {
-        msngr_text_entry_buf[text_len] = c;
-        msngr_text_entry_buf[text_len + 1] = 0;
-      }
-    }
 
-    // Trims the last character off msngr_text_entry_buf - extracted from
-    // the on-screen keyboard's own MSNGR_KB_BACKSPACE dispatch (menu_
-    // confirm_select()) for the same reuse reason as msngr_kb_insert_char()
-    // above. No-ops on an already-empty buffer.
-    void msngr_kb_do_backspace() {
-      size_t text_len = strlen(msngr_text_entry_buf);
-      if (text_len > 0) msngr_text_entry_buf[text_len - 1] = 0;
-    }
-
+  #if HAS_LXMF == true
     #if HAS_BLE_HID_HOST == true
       // MENU_STATE_MSNGR_CHAT's own text-editing cursor - a byte offset
       // into msngr_text_entry_buf (0..strlen(buf)), separate from the on-
@@ -2839,151 +2566,10 @@
       }
 
     #endif
+  #endif
 
-    // Whatever's currently in msngr_text_entry_buf, dispatched by purpose
-    // (message/display-name/bookmark-hash/preset) - extracted verbatim
-    // from the on-screen keyboard's own MSNGR_KB_SEND dispatch (menu_
-    // confirm_select()) so the BLE keyboard's Enter key can trigger the
-    // exact same save/send flow instead of re-implementing four separate
-    // purpose-specific paths.
-    void msngr_kb_do_send() {
-      size_t text_len = strlen(msngr_text_entry_buf);
-      if (text_len > 0 && msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME) {
-        // No result screen needed - unlike an LXMF send, this can't fail
-        // in a way worth reporting (a local file write), so it's save-
-        // and-return rather than save-and-show-status. Expanded to real
-        // UTF-8 first (msngr_kb_expand_utf8()) - the announce this name
-        // goes out in is read by other Reticulum clients, not just this
-        // device's own Org_01 glyph table.
-        char name_utf8[MSNGR_NAME_MAX_LEN * 2 + 1];
-        msngr_kb_expand_utf8(msngr_text_entry_buf, name_utf8, sizeof(name_utf8));
-        msngr_display_name_conf_save(name_utf8);
-        msngr_text_entry_buf[0] = 0;
-        menu_state = MENU_STATE_MSNGR_SETTINGS;
-      } else if (text_len > 0 && msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH) {
-        // Manually-entered destination hash - no identity/keys yet (those
-        // only ever arrive via an announce), but bookmarking it is enough:
-        // opening the resulting peer screen and sending already runs
-        // through messenger_send_process()'s existing Identity::recall()/
-        // Transport::request_path() pending-send path (Messenger.h) the
-        // same way replying to an unknown sender does, so no separate
-        // "request keys" step is needed here - Send just resolves once an
-        // announce comes back.
-        uint8_t raw_hash[LXMF::PEER_HASH_SIZE];
-        if (messenger_hash_from_hex(msngr_text_entry_buf, raw_hash, LXMF::PEER_HASH_SIZE)) {
-          RNS::Bytes hash(raw_hash, LXMF::PEER_HASH_SIZE);
-          if (messenger_bookmark_find(hash) < 0) {
-            // Empty name, not messenger_peer_display_name(hash) - at this
-            // point nothing is known about the peer yet, so that would
-            // just resolve to the truncated-hex fallback and pin it as the
-            // bookmark's name forever (messenger_peer_display_name()'s own
-            // bookmark-name check short-circuits before ever reaching its
-            // live Identity::recall_app_data() backfill check below, once
-            // the bookmark has ANY non-empty name stored) - confirmed on
-            // hardware: a hash-only bookmark's name never self-healed
-            // until Remove+re-Add cleared the pinned hex and let the live
-            // check run. Leaving it empty here keeps every future lookup
-            // falling through to that live check until a real name
-            // actually resolves.
-            messenger_bookmark_add(hash, "", msngr_kb_bookmark_type);
-          }
-          msngr_text_entry_buf[0] = 0;
-          menu_state = MENU_STATE_MSNGR_BOOKMARKS;
-        } else {
-          menu_open_popup("INVALID HASH", MENU_STATE_MSNGR_TEXT_ENTRY);
-          menu_popup_auto_dismiss_at = millis() + ACTION_POPUP_MS;
-        }
-      } else if (text_len > 0 && msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_IDENTITY_RESTORE) {
-        // Manually-typed identity restore - VAULT_IDENTITY_KEY_BASE32_LEN
-        // Base32 chars decode to the raw 64-byte private key (see
-        // URNS_KEYS_ITEM_RESTORE's own comment). Validate first, THEN
-        // confirm: this way a user who cancels the hold-gesture lands
-        // back on the entry screen with their fully-typed buffer still
-        // intact rather than having to retype the whole key, and an
-        // invalid string never reaches the destructive-confirm step at
-        // all. Reuses vault_identity_confirm()/vault_identity_commit()
-        // (IdentityTransfer.h) exactly as the existing KISS CMD_IDENTITY_
-        // IMPORT flow (vault_identity_import_flow()) already does for
-        // this same "replace the identity" moment, so both entry paths
-        // share one safety bar.
-        uint8_t raw_key[VAULT_IDENTITY_KEYSIZE_BYTES];
-        if (!identity_key_from_base32(msngr_text_entry_buf, raw_key)) {
-          menu_open_popup("INVALID KEY", MENU_STATE_MSNGR_TEXT_ENTRY);
-          menu_popup_auto_dismiss_at = millis() + ACTION_POPUP_MS;
-        } else {
-          bool confirmed = vault_identity_confirm("Replace Identity?", "Current key is lost.", "Cannot be undone.");
-          if (confirmed) {
-            RNS::Bytes identity_plain(raw_key, VAULT_IDENTITY_KEYSIZE_BYTES);
-            bool committed = vault_identity_commit(identity_plain);
-            RNS::secure_zero(identity_plain);
-            msngr_text_entry_buf[0] = 0;
-            if (committed) {
-              // Same "live session state is all built around the OLD
-              // identity, a clean reboot is required" reasoning vault_
-              // identity_import_flow() (IdentityTransfer.h) already
-              // documents for the KISS path.
-              vault_unlock_draw("Restored", "Restarting...");
-              vault_wdt_safe_delay(1500);
-              hard_reset();
-            } else {
-              menu_open_popup("ERROR", MENU_STATE_MSNGR_TEXT_ENTRY);
-            }
-          }
-          // Cancelled: stay on MENU_STATE_MSNGR_TEXT_ENTRY with the typed
-          // buffer intact - same "default to not losing the user's typing"
-          // reasoning as every other purpose's own failure path above.
-        }
-        memset(raw_key, 0, sizeof(raw_key));
-      } else if (text_len > 0 && msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_RENAME) {
-        // No UTF-8 expansion, same reasoning PRESET below gets away with
-        // skipping it - this name never goes out over the air (unlike
-        // Display Name's announce), it's purely local, so it's stored
-        // exactly as typed, same as every other bookmark name.
-        messenger_bookmark_rename(msngr_active_peer_hash, msngr_text_entry_buf);
-        msngr_text_entry_buf[0] = 0;
-        menu_state = MENU_STATE_MSNGR_PEER;
-      } else if (text_len > 0 && msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_PRESET) {
-        // No UTF-8 expansion needed here unlike the display-name/message
-        // branches - this text never leaves the device, same reasoning
-        // bookmark names already get away with storing as typed
-        // (Messenger.h). msngr_preset_edit_index == msngr_preset_count
-        // (set when MENU_STATE_MSNGR_PRESETS' own "Add Preset" row opened
-        // this screen) means append a new one; anything less is an
-        // existing slot being edited in place - same "index == count
-        // means append" sentinel messenger_preset_add() itself uses.
-        if (msngr_preset_edit_index >= msngr_preset_count) {
-          messenger_preset_add(msngr_text_entry_buf);
-        } else {
-          messenger_preset_update(msngr_preset_edit_index, msngr_text_entry_buf);
-        }
-        msngr_text_entry_buf[0] = 0;
-        menu_state = MENU_STATE_MSNGR_PRESETS;
-      } else if (text_len > 0) {
-        // Only actually clear the composed text on a confirmed send - a
-        // failure leaves it in place so the user can retry instead of
-        // having to retype it. Same MENU_STATE_MSNGR_SEND_RESULT hand-off
-        // as the preset Send: Hi/Bye/SOS actions - see that branch's own
-        // comment. Expanded to real UTF-8 first, same reasoning as the
-        // display-name save above.
-        char msg_utf8[MSNGR_TEXT_ENTRY_MAX_LEN * 2 + 1];
-        msngr_kb_expand_utf8(msngr_text_entry_buf, msg_utf8, sizeof(msg_utf8));
-        msngr_last_send_result = messenger_send_lxmf(msngr_active_peer_hash, msg_utf8);
-        if (msngr_last_send_result == URNS_LXMF_SEND_OK || msngr_last_send_result == URNS_LXMF_SEND_RESOLVING) {
-          // RESOLVING already has its own copy of this text (msngr_send_
-          // pending_content, Messenger.h) independent of this buffer -
-          // clear it here same as OK, since the send has meaningfully
-          // started either way (see the preset-Send branch's own comment
-          // above for why cache refresh isn't called directly here).
-          msngr_text_entry_buf[0] = 0;
-          msngr_send_result_cursor = 1; // default BACK (2-row, fresh send never starts failed) - see its own declaration
-          menu_state = MENU_STATE_MSNGR_SEND_RESULT;
-        } else {
-          menu_open_popup(urns_lxmf_send_result_text(msngr_last_send_result), MENU_STATE_MSNGR_TEXT_ENTRY);
-          menu_popup_auto_dismiss_at = millis() + ACTION_POPUP_MS;
-        }
-      }
-    }
 
+  #if HAS_LXMF == true
     #if HAS_BLE_HID_HOST == true
       // Set by msngr_chat_do_send() right after a successful (OK/
       // RESOLVING) send, consumed by msngr_chat_send_watch_process()
@@ -3374,23 +2960,56 @@
     // actually needs to scroll, so the wrap width never changes message
     // to message.
     //
-    // MAX_LINES must still "comfortably cover the full MSNGR_CONTENT_
-    // DECODE_BUF_LEN-1 (255 char) decode cap even in the pathological
-    // all-one-giant-word case with zero break points" (original guarantee)
-    // - the old fixed chars-per-line count made that ceil(255/23)=12 a
-    // simple division; msngr_wrap_text() below now measures pixels instead
-    // of counting characters, so this is instead sized off Org_01's own
-    // narrowest printable glyph ('.'/','/etc at 2px xAdvance - see Fonts/
-    // Org_01.h) against the 121px available: ceil(255/(121/2))=5, but kept
-    // at the original 12 anyway since that pathological case is already
-    // vanishingly unlikely (a 255-char message with not one space) and 12
-    // was already proven sufficient on hardware.
-    #define MSNGR_MSG_VIEW_MAX_LINES 12
+    // Unlike MSNGR_MSG_DETAIL_MAX_LINES' own bounded preview (a handful of
+    // rows with a "Full Message" link out, by design), this is the actual
+    // full-message reader, so it must be able to wrap arbitrarily long
+    // messages in full rather than silently dropping anything past a fixed
+    // line count (a real bug this used to have: a fixed 12-line cap here
+    // cut off any message whose wrapped length exceeded it, on top of the
+    // separate decode-buffer truncation fixed in Messenger.h's
+    // messenger_refresh_msg_detail_cache()). msngr_wrap_text_all() below
+    // returns a vector sized to however many lines the message actually
+    // needs; the only remaining ceiling is uint8_t's own 255-line range,
+    // which every piece of this screen's scroll/scrollbar math already
+    // assumes (draw_msngr_full_message_view() below).
+    std::vector<std::string> msngr_wrap_text_all(const std::string &content, int16_t max_w) {
+      std::vector<std::string> out;
+      size_t pos = 0;
+      size_t len = content.size();
+      int16_t bx, by; uint16_t bw, bh;
+      while (pos < len && out.size() < 255) {
+        while (pos < len && content[pos] == ' ') pos++;
+        if (pos >= len) break;
+        size_t remaining = len - pos;
+        MENU_GFX.getTextBounds(content.substr(pos, remaining).c_str(), 0, 0, &bx, &by, &bw, &bh);
+        if ((int16_t)bw <= max_w) {
+          out.push_back(content.substr(pos, remaining));
+          break;
+        }
+        size_t lo = 1, hi = remaining, fit_len = 1;
+        while (lo <= hi) {
+          size_t mid = lo + (hi - lo) / 2;
+          MENU_GFX.getTextBounds(content.substr(pos, mid).c_str(), 0, 0, &bx, &by, &bw, &bh);
+          if ((int16_t)bw <= max_w) { fit_len = mid; lo = mid + 1; }
+          else if (mid == 0) break;
+          else hi = mid - 1;
+        }
+        size_t last_space = content.rfind(' ', pos + fit_len - 1);
+        if (last_space != std::string::npos && last_space > pos) {
+          out.push_back(content.substr(pos, last_space - pos));
+          pos = last_space + 1;
+        } else {
+          out.push_back(content.substr(pos, fit_len));
+          pos += fit_len;
+        }
+      }
+      return out;
+    }
 
-    // msngr_wrap_text() above, at MENU_CONTENT_W minus the scrollbar's own
-    // reserved 7px (this screen's own comment above).
-    uint8_t msngr_msg_view_wrap(const std::string &content, std::string out_lines[], uint8_t max_lines) {
-      return msngr_wrap_text(content, out_lines, max_lines, MENU_CONTENT_W - 7);
+    // msngr_wrap_text_all() above, at MENU_CONTENT_W minus the scrollbar's
+    // own reserved 7px (this screen's own comment above).
+    std::vector<std::string> msngr_msg_view_wrap(const std::string &content) {
+      return msngr_wrap_text_all(content, MENU_CONTENT_W - 7);
     }
   #endif
   #endif
@@ -3564,12 +3183,580 @@
       return staged_wifi_dns; // WIFI_ITEM_DNS
     }
 
-    // Working state while actively in MENU_STATE_WIFI_TEXT_EDIT, reset fresh
-    // every time SSID or PSK is opened from the WiFi list.
-    uint8_t text_edit_field = 0;   // WIFI_ITEM_SSID or WIFI_ITEM_PSK
-    char    text_edit_buf[33] = {0};
-    uint8_t wheel_index = 0;
-    uint8_t text_confirm_cursor = 0;   // 0 = SAVE, 1 = DISCARD
+  #endif
+
+  // Shared on-screen keyboard mechanics, positioned after staged_wifi_ssid/
+  // psk (above) since msngr_kb_do_send() writes directly into them for the
+  // WIFI_SSID/WIFI_PSK purposes - HAS_WIFI boards need this code too, and
+  // HAS_URNS is not implied by HAS_WIFI (unlike HAS_LXMF, which always does
+  // imply HAS_URNS - see this file's own comment on staged_msngr_* further
+  // up), so this can't stay nested under the #if HAS_URNS==true wrapper it
+  // originally lived in. Kept as one contiguous block, in original relative
+  // order, rather than re-split across several in-place HAS_URNS-nested sites.
+  // Shared on-screen keyboard grid-navigation helpers - see the wider
+  // comment on this same widened-guard pattern further up this file
+  // (MSNGR_KB_ROWS/_COLS etc). msngr_kb_cursor/_shift_on/_lang_ru/msngr_
+  // text_entry_buf themselves are declared earlier (alongside msngr_text_
+  // entry_purpose) - see that declaration's own comment for why.
+  #if HAS_LXMF == true || HAS_WIFI == true
+    // Centralizes which layout table is "live" right now - the restricted
+    // hex grid for MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH, the Base32 grid
+    // for _IDENTITY_RESTORE, EN/RU otherwise - so every call site that
+    // indexes [kb_row][kb_col] does it through here instead of duplicating
+    // the purpose check. Returns a row-array pointer (decays to the same
+    // char(*)[MSNGR_KB_COLS] type no matter which table's actual row
+    // count is, since only MSNGR_KB_COLS - shared by every table - affects
+    // that pointer type) so callers don't need to know or care that
+    // MSNGR_KB_LAYOUT_HEX has fewer rows.
+    const char (*msngr_kb_active_layout())[MSNGR_KB_COLS] {
+      if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH) return MSNGR_KB_LAYOUT_HEX;
+      if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_IDENTITY_RESTORE) return MSNGR_KB_LAYOUT_BASE32;
+      // WiFi SSID/PSK reuse msngr_kb_lang_ru as a Letters/Symbols toggle
+      // instead of EN/RU (Cyrillic is meaningless for WiFi credentials,
+      // and WPA passphrases commonly need punctuation the plain EN grid
+      // doesn't have room for) - same hold-Shift gesture, same flag,
+      // different meaning for these two purposes only.
+      if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_WIFI_SSID ||
+          msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_WIFI_PSK)
+        return msngr_kb_lang_ru ? MSNGR_KB_LAYOUT_SYMBOLS : MSNGR_KB_LAYOUT;
+      return msngr_kb_lang_ru ? MSNGR_KB_LAYOUT_RU : MSNGR_KB_LAYOUT;
+    }
+
+    // Row count of whichever layout msngr_kb_active_layout() would return
+    // right now - MSNGR_KB_HEX_ROWS for hash entry, MSNGR_KB_ROWS for
+    // everything else, IDENTITY_RESTORE included (MSNGR_KB_LAYOUT_BASE32
+    // uses the full standard row count, unlike hex's compact 3-row grid -
+    // see that table's own comment). Bounds the keyboard grid's own
+    // row-drawing loop so hash entry never draws (or leaves visible
+    // click-through space for) the extra row a straight MSNGR_KB_ROWS
+    // would otherwise leave underneath it - cursor navigation itself is
+    // bounded separately, by msngr_kb_active_key_count() below, since
+    // neither MSNGR_KB_LAYOUT_HEX's nor MSNGR_KB_LAYOUT_BASE32's real
+    // cells are evenly spread across every row.
+    uint8_t msngr_kb_active_rows() {
+      return msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH ? MSNGR_KB_HEX_ROWS : MSNGR_KB_ROWS;
+    }
+
+    // Every other layout is a uniform MSNGR_KB_ROWS x MSNGR_KB_COLS
+    // rectangle, so a linear cursor maps to (row, col) with plain
+    // division/modulo, which also happens to visit cells in reading order
+    // (left-to-right, top-to-bottom). MSNGR_KB_LAYOUT_HEX's own reading
+    // order would visit DEL (row 0's last cell) before 'A'-'F' (row 1),
+    // which isn't the tab order that's actually wanted - digits, then
+    // letters, then DEL/SAVE/BACK last - so hash entry gets an explicit
+    // per-cursor-value (row, col) table instead of computing one.
+    static const uint8_t MSNGR_KB_HEX_ORDER[20][2] = {
+      {0,0}, {0,1}, {0,2}, {0,3}, {0,4}, {0,5}, {0,6}, {0,7}, {0,8}, {0,9}, // 0-9
+      {1,0}, {1,1}, {1,2}, {1,3}, {1,4}, {1,5}, // A-F
+      {0,10}, // DEL
+      {1,10}, // SAVE
+      {2,0},  // Type (LXMF/Propagation)
+      {2,10}, // BACK
+    };
+    #define MSNGR_KB_HEX_KEY_COUNT 20
+
+    // Maps a linear cursor value to (row, col) for whichever layout is
+    // active - MSNGR_KB_HEX_ORDER for hash entry, MSNGR_KB_BASE32_ORDER
+    // for identity restore, plain division/modulo for every other
+    // (uniform-grid) purpose. Shared by every call site that used to do
+    // the division/modulo itself, so none of them need their own purpose
+    // check.
+    void msngr_kb_cursor_rc(uint8_t cursor, uint8_t &row, uint8_t &col) {
+      if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH) {
+        row = MSNGR_KB_HEX_ORDER[cursor][0];
+        col = MSNGR_KB_HEX_ORDER[cursor][1];
+        return;
+      }
+      if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_IDENTITY_RESTORE) {
+        row = MSNGR_KB_BASE32_ORDER[cursor][0];
+        col = MSNGR_KB_BASE32_ORDER[cursor][1];
+        return;
+      }
+      row = cursor / MSNGR_KB_COLS;
+      col = cursor % MSNGR_KB_COLS;
+    }
+
+    // Total selectable cells for whichever layout is active right now -
+    // bounds cursor navigation (menu_encoder_rotate()'s MENU_STATE_MSNGR_
+    // TEXT_ENTRY branch). MSNGR_KB_KEY_COUNT (rows*cols) for every normal
+    // purpose; MSNGR_KB_HEX_KEY_COUNT/MSNGR_KB_BASE32_KEY_COUNT (their own
+    // order tables' lengths) for hash entry/identity restore - not
+    // msngr_kb_active_rows()*MSNGR_KB_COLS, which would let the cursor
+    // wander onto cells those order tables don't have entries for.
+    uint8_t msngr_kb_active_key_count() {
+      if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH) return MSNGR_KB_HEX_KEY_COUNT;
+      if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_IDENTITY_RESTORE) return MSNGR_KB_BASE32_KEY_COUNT;
+      return MSNGR_KB_KEY_COUNT;
+    }
+
+    // Real 2D grid navigation for a BLE keyboard's Left/Right/Up/Down
+    // (blekbd_key_event(), below) - per user request, distinct from the
+    // single linear cursor step menu_encoder_rotate()'s own MENU_STATE_
+    // MSNGR_TEXT_ENTRY branch does (dir=+-1 on msngr_kb_cursor directly),
+    // which for MSNGR_KB_LAYOUT_HEX's deliberately non-reading-order tab
+    // sequence (MSNGR_KB_HEX_ORDER's own comment) doesn't reliably
+    // correspond to "move right" or "move down" at all - e.g. one linear
+    // step from '9' (row 0) lands on 'A' (row 1), neither a same-row nor
+    // a same-column move. A real encoder/the single button still use the
+    // linear step (unchanged - rotation only, no separate Left/Right
+    // input to give it), so this is BLE-keyboard-specific.
+    //
+    // msngr_kb_nav_col: moves to the nearest valid cell strictly left/
+    // right of the current one WITHIN THE SAME ROW ONLY, clamped at the
+    // row's own first/last real cell (never spills into an adjacent row,
+    // unlike msngr_kb_nav_row below). O(active key count) linear scan -
+    // at most 44 cells (normal 4x11 layout), negligible.
+    void msngr_kb_nav_col(int8_t dir) {
+      uint8_t row, col;
+      msngr_kb_cursor_rc(msngr_kb_cursor, row, col);
+      uint8_t count = msngr_kb_active_key_count();
+      bool found = false;
+      int16_t best_col = 0;
+      uint8_t best_cursor = msngr_kb_cursor;
+      for (uint8_t i = 0; i < count; i++) {
+        uint8_t r, c;
+        msngr_kb_cursor_rc(i, r, c);
+        if (r != row) continue;
+        if (dir < 0) {
+          if ((int16_t)c < (int16_t)col && (!found || (int16_t)c > best_col)) { best_col = c; best_cursor = i; found = true; }
+        } else {
+          if ((int16_t)c > (int16_t)col && (!found || (int16_t)c < best_col)) { best_col = c; best_cursor = i; found = true; }
+        }
+      }
+      if (found) msngr_kb_cursor = best_cursor;
+    }
+
+    // msngr_kb_nav_row: moves to the row above/below, landing on whichever
+    // cell in that row is closest to the current column (exact match
+    // preferred) - rows don't all have the same active columns (MSNGR_KB_
+    // LAYOUT_HEX especially: row 2 only has cells at columns 0 and 10),
+    // so this is a nearest-column search, not a fixed offset. Clamped at
+    // the grid's own first/last row - no wrap, same as this screen's
+    // existing Up/Down (menu_encoder_rotate(dir, false)'s own wrap=false).
+    void msngr_kb_nav_row(int8_t dir) {
+      uint8_t row, col;
+      msngr_kb_cursor_rc(msngr_kb_cursor, row, col);
+      int16_t target_row = (int16_t)row + dir;
+      if (target_row < 0 || target_row >= (int16_t)msngr_kb_active_rows()) return;
+      uint8_t count = msngr_kb_active_key_count();
+      bool found = false;
+      int16_t best_dist = 0;
+      uint8_t best_cursor = msngr_kb_cursor;
+      for (uint8_t i = 0; i < count; i++) {
+        uint8_t r, c;
+        msngr_kb_cursor_rc(i, r, c);
+        if (r != (uint8_t)target_row) continue;
+        int16_t dist = (int16_t)c - (int16_t)col;
+        if (dist < 0) dist = -dist;
+        if (!found || dist < best_dist) { best_dist = dist; best_cursor = i; found = true; }
+      }
+      if (found) msngr_kb_cursor = best_cursor;
+    }
+
+    // Shared by the on-screen keyboard's own confirm gesture (menu_
+    // confirm_select()'s MSNGR_KB_TYPE_TOGGLE branch) and a BLE keyboard's
+    // Space (while the highlight is on this cell)/Tab (from anywhere on
+    // this screen) shortcuts (blekbd_key_event(), below) - all three
+    // "press" the Type cell the same way. MSNGR_KB_TYPE_TOGGLE only ever
+    // appears on MSNGR_KB_LAYOUT_HEX, itself only reachable via
+    // MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH - a HAS_LXMF-only purpose -
+    // so this whole function is HAS_LXMF-only too, unlike the rest of the
+    // keyboard mechanics around it.
+    #if HAS_LXMF == true
+    void msngr_kb_toggle_bookmark_type() {
+      msngr_kb_bookmark_type = (msngr_kb_bookmark_type == MSNGR_BOOKMARK_TYPE_PROPAGATION)
+        ? MSNGR_BOOKMARK_TYPE_LXMF : MSNGR_BOOKMARK_TYPE_PROPAGATION;
+    }
+    #endif
+
+    // The EN/RU switch fires live, the instant a Shift hold crosses
+    // MSNGR_KB_ALT_HOLD_MS, rather than waiting for release - polled
+    // every loop() tick (menu_button_process() below for the main
+    // button, Encoder.h's encoder_process() for the encoder's own
+    // button) via msngr_kb_lang_hold_try(), same "fire once while still
+    // held" shape as Encoder.h's own enc_btn_hold_beeped. Separate flags
+    // per control (rather than one shared flag) because Menu.h and
+    // Encoder.h are two different debounce state machines that can't
+    // see each other's press-state - menu_confirm_select()'s Shift
+    // branch checks/consumes both at release, so whichever control the
+    // switch actually happened on doesn't matter there.
+    bool msngr_kb_lang_hold_fired_btn = false;
+    bool msngr_kb_lang_hold_fired_enc = false;
+
+    // Shared by both pollers above - if held_ms has crossed the
+    // threshold, the current hold hasn't already fired this switch, and
+    // the grid position it's being measured against is actually the
+    // Shift key right now (cursor doesn't move during a plain hold, so
+    // this stays true for the whole gesture once checked), performs the
+    // switch and latches fired_flag so menu_confirm_select() knows to
+    // skip its own release-time toggle. No-ops instead of switching for
+    // any other key - holding a letter key isn't a gesture this screen
+    // gives meaning to, so it's left alone.
+    void msngr_kb_lang_hold_try(unsigned long held_ms, bool &fired_flag) {
+      if (menu_state != MENU_STATE_MSNGR_TEXT_ENTRY || fired_flag || held_ms < MSNGR_KB_ALT_HOLD_MS) return;
+      uint8_t kb_row, kb_col;
+      msngr_kb_cursor_rc(msngr_kb_cursor, kb_row, kb_col);
+      char key_ch = msngr_kb_active_layout()[kb_row][kb_col];
+      if (msngr_kb_key_type(key_ch) != MSNGR_KB_SHIFT) return;
+      msngr_kb_lang_ru = !msngr_kb_lang_ru;
+      msngr_kb_shift_on = false;
+      buzzer_encoder_tick_melody();
+      fired_flag = true;
+    }
+  #endif
+  #if HAS_LXMF == true || HAS_WIFI == true
+    // Same live-while-held shape as msngr_kb_lang_hold_fired_btn/_enc
+    // above, for the punctuation-pair gesture (msngr_kb_alt_pair()) on
+    // '.'/','/'?' instead of the language switch on Shift - separate
+    // flags because a hold can only ever be doing one or the other
+    // (whichever key is actually highlighted), but menu_confirm_select()
+    // still needs to know which, if either, to skip at release.
+    bool msngr_kb_alt_hold_fired_btn = false;
+    bool msngr_kb_alt_hold_fired_enc = false;
+
+    // Same "fire once while held" shape as msngr_kb_lang_hold_try(), for
+    // the highlighted key's paired punctuation mark instead of a
+    // language switch - inserts it directly (respecting the same
+    // length cap the normal MSNGR_KB_CHAR path in menu_confirm_select()
+    // enforces; also run through msngr_kb_apply_shift() same as any
+    // other insert, currently a no-op for punctuation but keeps this
+    // correct for free if a letter-alt ever gets paired here again -
+    // see msngr_kb_alt_pair()'s own comment) rather than just flipping
+    // a mode, since there's nothing else for a hold on a plain
+    // character key to *do*. No-ops for any key with no pairing
+    // (msngr_kb_alt_pair() returns 0) - letters, digits, space, and
+    // every meta key are left entirely to their own existing hold
+    // behavior (Shift's language switch, BACK, etc).
+    void msngr_kb_alt_hold_try(unsigned long held_ms, bool &fired_flag) {
+      if (menu_state != MENU_STATE_MSNGR_TEXT_ENTRY || fired_flag || held_ms < MSNGR_KB_ALT_HOLD_MS) return;
+      uint8_t kb_row, kb_col;
+      msngr_kb_cursor_rc(msngr_kb_cursor, kb_row, kb_col);
+      char key_ch = msngr_kb_active_layout()[kb_row][kb_col];
+      char alt = msngr_kb_alt_pair(key_ch);
+      if (alt == 0) return;
+      alt = msngr_kb_apply_shift(alt, msngr_kb_shift_on);
+      // WiFi purposes never actually reach here - the Symbols grid gives
+      // every punctuation mark its own cell, so msngr_kb_alt_pair() has
+      // nothing to pair for any key WIFI_SSID/_WIFI_PSK ever highlight -
+      // but the cap still has to resolve to *something* on a HAS_WIFI-only
+      // build with no HAS_LXMF purposes to branch on.
+      size_t max_len = MSNGR_TEXT_ENTRY_MAX_LEN;
+      #if HAS_LXMF == true
+        max_len = msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH
+          ? (size_t)(LXMF::PEER_HASH_SIZE * 2)
+          : msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_IDENTITY_RESTORE
+          ? (size_t)VAULT_IDENTITY_KEY_BASE32_LEN
+          : (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME ||
+             msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_PRESET ||
+             msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_RENAME)
+            ? MSNGR_NAME_MAX_LEN : MSNGR_TEXT_ENTRY_MAX_LEN;
+      #endif
+      if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_WIFI_SSID ||
+          msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_WIFI_PSK) max_len = 32;
+      size_t text_len = strlen(msngr_text_entry_buf);
+      if (text_len < max_len) {
+        msngr_text_entry_buf[text_len] = alt;
+        msngr_text_entry_buf[text_len + 1] = 0;
+        msngr_kb_last_insert_ms = millis();
+        buzzer_encoder_tick_melody();
+      }
+      fired_flag = true;
+    }
+
+    // Hold-to-repeat threshold/rate for DEL - shorter than MSNGR_KB_ALT_
+    // HOLD_MS on purpose: unlike Shift/punctuation (which do something
+    // *different* on a hold, so need enough delay to not misfire during
+    // an ordinary confirm), a held DEL doing the exact same thing it'd
+    // do anyway, just repeatedly, is safe to start almost immediately -
+    // 500ms is long enough that a normal single backspace tap/click
+    // never reaches it. Repeat interval is a plain judgement call
+    // (~8/sec) - fast enough to actually clear text, slow enough to
+    // still feel countable/controllable one character at a time.
+    #define MSNGR_KB_DEL_REPEAT_START_MS    500
+    #define MSNGR_KB_DEL_REPEAT_INTERVAL_MS 120
+
+    // Same per-control fired-flag pattern as msngr_kb_lang_hold_fired_*/
+    // msngr_kb_alt_hold_fired_* above, plus a per-control "when did
+    // this hold's most recent repeat happen" timestamp (0 = hasn't
+    // repeated yet this hold) to pace repeats at MSNGR_KB_DEL_REPEAT_
+    // INTERVAL_MS apart instead of firing every single loop() tick.
+    bool msngr_kb_del_hold_fired_btn = false;
+    bool msngr_kb_del_hold_fired_enc = false;
+    unsigned long msngr_kb_del_repeat_last_btn = 0;
+    unsigned long msngr_kb_del_repeat_last_enc = 0;
+
+    // Same "fire (repeatedly) while held" shape as msngr_kb_lang_hold_
+    // try()/msngr_kb_alt_hold_try(), except this one keeps firing at
+    // MSNGR_KB_DEL_REPEAT_INTERVAL_MS apart for as long as the hold
+    // continues past the start threshold, instead of just once. The
+    // very first repeat fires the moment held_ms crosses the start
+    // threshold (last_repeat_ms is still 0 then, so the interval check
+    // is skipped) - deletes exactly like a normal DEL tap would, just
+    // triggered early instead of waiting for release.
+    void msngr_kb_del_hold_try(unsigned long held_ms, bool &fired_flag, unsigned long &last_repeat_ms) {
+      if (menu_state != MENU_STATE_MSNGR_TEXT_ENTRY || held_ms < MSNGR_KB_DEL_REPEAT_START_MS) return;
+      uint8_t kb_row, kb_col;
+      msngr_kb_cursor_rc(msngr_kb_cursor, kb_row, kb_col);
+      char key_ch = msngr_kb_active_layout()[kb_row][kb_col];
+      if (msngr_kb_key_type(key_ch) != MSNGR_KB_BACKSPACE) return;
+      unsigned long now = millis();
+      if (last_repeat_ms != 0 && now - last_repeat_ms < MSNGR_KB_DEL_REPEAT_INTERVAL_MS) return;
+      size_t text_len = strlen(msngr_text_entry_buf);
+      if (text_len > 0) {
+        msngr_text_entry_buf[text_len - 1] = 0;
+        buzzer_encoder_tick_melody();
+      }
+      last_repeat_ms = now;
+      fired_flag = true;
+    }
+
+    // MENU_STATE_MSNGR_DISCARD_CONFIRM - same "default to CANCEL" pattern
+    // as msngr_delete_confirm_cursor/msngr_clear_confirm_cursor above
+    // (0 = DISCARD, 1 = CANCEL).
+    uint8_t msngr_discard_confirm_cursor = 1;
+    // Which screen opened this confirm dialog (MENU_STATE_MSNGR_TEXT_ENTRY
+    // or, once MENU_STATE_MSNGR_CHAT exists, that instead) - CANCEL returns
+    // here. Set by menu_msngr_text_entry_leave() right before it opens this
+    // dialog; DISCARD doesn't need this at all (it already goes through
+    // msngr_text_entry_return_state() below, which is purpose-based and
+    // already correct for both callers).
+    uint8_t msngr_discard_confirm_return_state = MENU_STATE_MSNGR_TEXT_ENTRY;
+
+    // Where leaving MENU_STATE_MSNGR_TEXT_ENTRY (Send/BACK/discard alike)
+    // lands, based on why it was opened - shared by menu_msngr_text_
+    // entry_leave() below and MENU_STATE_MSNGR_DISCARD_CONFIRM's own
+    // DISCARD branch (menu_confirm_select()), which used to duplicate
+    // this same two-way ternary rather than call it.
+    uint8_t msngr_text_entry_return_state() {
+      if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME) return MENU_STATE_MSNGR_SETTINGS;
+      if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_PRESET) return MENU_STATE_MSNGR_PRESETS;
+      if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH) return MENU_STATE_MSNGR_BOOKMARKS;
+      if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_IDENTITY_RESTORE) return MENU_STATE_URNS_KEYS;
+      if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_WIFI_SSID ||
+          msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_WIFI_PSK) return MENU_STATE_WIFI_LIST;
+      return MENU_STATE_MSNGR_PEER;
+    }
+
+    // Shared exit path for leaving MENU_STATE_MSNGR_TEXT_ENTRY without
+    // sending - both the on-grid BACK key (msngr_kb_key_type() dispatch,
+    // menu_confirm_select()) and the encoder's own long-press-to-leave
+    // (menu_encoder_button(), 3s threshold there instead of the usual
+    // 700ms) route through this, so an accidental hold and a deliberate
+    // BACK press protect a half-typed message the same way. Skips
+    // straight back to the peer screen if nothing's been typed; otherwise
+    // opens a DISCARD/CANCEL confirmation instead of silently losing it.
+    void menu_msngr_text_entry_leave() {
+      uint8_t return_state = msngr_text_entry_return_state();
+      if (strlen(msngr_text_entry_buf) == 0) {
+        menu_state = return_state;
+      } else {
+        msngr_discard_confirm_cursor = 1; // default CANCEL
+        msngr_discard_confirm_return_state = menu_state; // CANCEL comes back here - see this var's own declaration
+        menu_state = MENU_STATE_MSNGR_DISCARD_CONFIRM;
+      }
+    }
+  #endif
+  #if HAS_LXMF == true || HAS_WIFI == true
+    // Appends an already-shift-resolved character to msngr_text_entry_buf,
+    // respecting the same per-purpose length cap the on-screen keyboard's
+    // own MSNGR_KB_CHAR/_SPACE dispatch enforces (menu_confirm_select()) -
+    // extracted so the BLE keyboard path (blekbd_key_event(), below) can
+    // reuse it instead of duplicating the cap logic. Silently drops the
+    // character once the cap is hit, same as the on-screen keyboard always
+    // has - no truncation warning, just stops accepting more input.
+    void msngr_kb_insert_char(char c) {
+      size_t max_len = MSNGR_TEXT_ENTRY_MAX_LEN;
+      #if HAS_LXMF == true
+        max_len = msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH
+          ? (size_t)(LXMF::PEER_HASH_SIZE * 2)
+          : msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_IDENTITY_RESTORE
+          ? (size_t)VAULT_IDENTITY_KEY_BASE32_LEN
+          : (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME ||
+             msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_PRESET ||
+             msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_RENAME)
+            ? MSNGR_NAME_MAX_LEN : MSNGR_TEXT_ENTRY_MAX_LEN;
+      #endif
+      if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_WIFI_SSID ||
+          msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_WIFI_PSK) max_len = 32;
+      size_t text_len = strlen(msngr_text_entry_buf);
+      if (text_len < max_len) {
+        msngr_text_entry_buf[text_len] = c;
+        msngr_text_entry_buf[text_len + 1] = 0;
+        msngr_kb_last_insert_ms = millis(); // MSNGR_TEXT_ENTRY_PURPOSE_WIFI_PSK's brief reveal window - harmless no-op read for every other purpose
+      }
+    }
+
+    // Trims the last character off msngr_text_entry_buf - extracted from
+    // the on-screen keyboard's own MSNGR_KB_BACKSPACE dispatch (menu_
+    // confirm_select()) for the same reuse reason as msngr_kb_insert_char()
+    // above. No-ops on an already-empty buffer.
+    void msngr_kb_do_backspace() {
+      size_t text_len = strlen(msngr_text_entry_buf);
+      if (text_len > 0) {
+        msngr_text_entry_buf[text_len - 1] = 0;
+        // Nothing left to reveal - the new last character (if any) wasn't
+        // just typed, so PSK masking shouldn't briefly show it either.
+        msngr_kb_last_insert_ms = 0;
+      }
+    }
+  #endif
+  #if HAS_LXMF == true || HAS_WIFI == true
+    // Whatever's currently in msngr_text_entry_buf, dispatched by purpose
+    // (message/display-name/bookmark-hash/preset/WiFi SSID+PSK) -
+    // extracted verbatim from the on-screen keyboard's own MSNGR_KB_SEND
+    // dispatch (menu_confirm_select()) so the BLE keyboard's Enter key can
+    // trigger the exact same save/send flow instead of re-implementing
+    // several separate purpose-specific paths. The WIFI_SSID/WIFI_PSK
+    // branch is unconditional (no HAS_LXMF dependency - raw credential
+    // bytes into staged_wifi_ssid/psk, no UTF-8 expansion since these
+    // never go out as LXMF display text); every other purpose calls
+    // Messenger.h/LXMF::/RNS:: functions that only exist under HAS_LXMF.
+    void msngr_kb_do_send() {
+      size_t text_len = strlen(msngr_text_entry_buf);
+      if (text_len > 0 && (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_WIFI_SSID ||
+                            msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_WIFI_PSK)) {
+        char *dst = (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_WIFI_SSID) ? staged_wifi_ssid : staged_wifi_psk;
+        strncpy(dst, msngr_text_entry_buf, 32); dst[32] = 0;
+        msngr_text_entry_buf[0] = 0;
+        menu_state = MENU_STATE_WIFI_LIST;
+      }
+      #if HAS_LXMF == true
+      else if (text_len > 0 && msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME) {
+        // No result screen needed - unlike an LXMF send, this can't fail
+        // in a way worth reporting (a local file write), so it's save-
+        // and-return rather than save-and-show-status. Expanded to real
+        // UTF-8 first (msngr_kb_expand_utf8()) - the announce this name
+        // goes out in is read by other Reticulum clients, not just this
+        // device's own Org_01 glyph table.
+        char name_utf8[MSNGR_NAME_MAX_LEN * 2 + 1];
+        msngr_kb_expand_utf8(msngr_text_entry_buf, name_utf8, sizeof(name_utf8));
+        msngr_display_name_conf_save(name_utf8);
+        msngr_text_entry_buf[0] = 0;
+        menu_state = MENU_STATE_MSNGR_SETTINGS;
+      } else if (text_len > 0 && msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH) {
+        // Manually-entered destination hash - no identity/keys yet (those
+        // only ever arrive via an announce), but bookmarking it is enough:
+        // opening the resulting peer screen and sending already runs
+        // through messenger_send_process()'s existing Identity::recall()/
+        // Transport::request_path() pending-send path (Messenger.h) the
+        // same way replying to an unknown sender does, so no separate
+        // "request keys" step is needed here - Send just resolves once an
+        // announce comes back.
+        uint8_t raw_hash[LXMF::PEER_HASH_SIZE];
+        if (messenger_hash_from_hex(msngr_text_entry_buf, raw_hash, LXMF::PEER_HASH_SIZE)) {
+          RNS::Bytes hash(raw_hash, LXMF::PEER_HASH_SIZE);
+          if (messenger_bookmark_find(hash) < 0) {
+            // Empty name, not messenger_peer_display_name(hash) - at this
+            // point nothing is known about the peer yet, so that would
+            // just resolve to the truncated-hex fallback and pin it as the
+            // bookmark's name forever (messenger_peer_display_name()'s own
+            // bookmark-name check short-circuits before ever reaching its
+            // live Identity::recall_app_data() backfill check below, once
+            // the bookmark has ANY non-empty name stored) - confirmed on
+            // hardware: a hash-only bookmark's name never self-healed
+            // until Remove+re-Add cleared the pinned hex and let the live
+            // check run. Leaving it empty here keeps every future lookup
+            // falling through to that live check until a real name
+            // actually resolves.
+            messenger_bookmark_add(hash, "", msngr_kb_bookmark_type);
+          }
+          msngr_text_entry_buf[0] = 0;
+          menu_state = MENU_STATE_MSNGR_BOOKMARKS;
+        } else {
+          menu_open_popup("INVALID HASH", MENU_STATE_MSNGR_TEXT_ENTRY);
+          menu_popup_auto_dismiss_at = millis() + ACTION_POPUP_MS;
+        }
+      } else if (text_len > 0 && msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_IDENTITY_RESTORE) {
+        // Manually-typed identity restore - VAULT_IDENTITY_KEY_BASE32_LEN
+        // Base32 chars decode to the raw 64-byte private key (see
+        // URNS_KEYS_ITEM_RESTORE's own comment). Validate first, THEN
+        // confirm: this way a user who cancels the hold-gesture lands
+        // back on the entry screen with their fully-typed buffer still
+        // intact rather than having to retype the whole key, and an
+        // invalid string never reaches the destructive-confirm step at
+        // all. Reuses vault_identity_confirm()/vault_identity_commit()
+        // (IdentityTransfer.h) exactly as the existing KISS CMD_IDENTITY_
+        // IMPORT flow (vault_identity_import_flow()) already does for
+        // this same "replace the identity" moment, so both entry paths
+        // share one safety bar.
+        uint8_t raw_key[VAULT_IDENTITY_KEYSIZE_BYTES];
+        if (!identity_key_from_base32(msngr_text_entry_buf, raw_key)) {
+          menu_open_popup("INVALID KEY", MENU_STATE_MSNGR_TEXT_ENTRY);
+          menu_popup_auto_dismiss_at = millis() + ACTION_POPUP_MS;
+        } else {
+          bool confirmed = vault_identity_confirm("Replace Identity?", "Current key is lost.", "Cannot be undone.");
+          if (confirmed) {
+            RNS::Bytes identity_plain(raw_key, VAULT_IDENTITY_KEYSIZE_BYTES);
+            bool committed = vault_identity_commit(identity_plain);
+            RNS::secure_zero(identity_plain);
+            msngr_text_entry_buf[0] = 0;
+            if (committed) {
+              // Same "live session state is all built around the OLD
+              // identity, a clean reboot is required" reasoning vault_
+              // identity_import_flow() (IdentityTransfer.h) already
+              // documents for the KISS path.
+              vault_unlock_draw("Restored", "Restarting...");
+              vault_wdt_safe_delay(1500);
+              hard_reset();
+            } else {
+              menu_open_popup("ERROR", MENU_STATE_MSNGR_TEXT_ENTRY);
+            }
+          }
+          // Cancelled: stay on MENU_STATE_MSNGR_TEXT_ENTRY with the typed
+          // buffer intact - same "default to not losing the user's typing"
+          // reasoning as every other purpose's own failure path above.
+        }
+        memset(raw_key, 0, sizeof(raw_key));
+      } else if (text_len > 0 && msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_RENAME) {
+        // No UTF-8 expansion, same reasoning PRESET below gets away with
+        // skipping it - this name never goes out over the air (unlike
+        // Display Name's announce), it's purely local, so it's stored
+        // exactly as typed, same as every other bookmark name.
+        messenger_bookmark_rename(msngr_active_peer_hash, msngr_text_entry_buf);
+        msngr_text_entry_buf[0] = 0;
+        menu_state = MENU_STATE_MSNGR_PEER;
+      } else if (text_len > 0 && msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_PRESET) {
+        // No UTF-8 expansion needed here unlike the display-name/message
+        // branches - this text never leaves the device, same reasoning
+        // bookmark names already get away with storing as typed
+        // (Messenger.h). msngr_preset_edit_index == msngr_preset_count
+        // (set when MENU_STATE_MSNGR_PRESETS' own "Add Preset" row opened
+        // this screen) means append a new one; anything less is an
+        // existing slot being edited in place - same "index == count
+        // means append" sentinel messenger_preset_add() itself uses.
+        if (msngr_preset_edit_index >= msngr_preset_count) {
+          messenger_preset_add(msngr_text_entry_buf);
+        } else {
+          messenger_preset_update(msngr_preset_edit_index, msngr_text_entry_buf);
+        }
+        msngr_text_entry_buf[0] = 0;
+        menu_state = MENU_STATE_MSNGR_PRESETS;
+      } else if (text_len > 0) {
+        // Only actually clear the composed text on a confirmed send - a
+        // failure leaves it in place so the user can retry instead of
+        // having to retype it. Same MENU_STATE_MSNGR_SEND_RESULT hand-off
+        // as the preset Send: Hi/Bye/SOS actions - see that branch's own
+        // comment. Expanded to real UTF-8 first, same reasoning as the
+        // display-name save above.
+        char msg_utf8[MSNGR_TEXT_ENTRY_MAX_LEN * 2 + 1];
+        msngr_kb_expand_utf8(msngr_text_entry_buf, msg_utf8, sizeof(msg_utf8));
+        msngr_last_send_result = messenger_send_lxmf(msngr_active_peer_hash, msg_utf8);
+        if (msngr_last_send_result == URNS_LXMF_SEND_OK || msngr_last_send_result == URNS_LXMF_SEND_RESOLVING) {
+          // RESOLVING already has its own copy of this text (msngr_send_
+          // pending_content, Messenger.h) independent of this buffer -
+          // clear it here same as OK, since the send has meaningfully
+          // started either way (see the preset-Send branch's own comment
+          // above for why cache refresh isn't called directly here).
+          msngr_text_entry_buf[0] = 0;
+          msngr_send_result_cursor = 1; // default BACK (2-row, fresh send never starts failed) - see its own declaration
+          menu_state = MENU_STATE_MSNGR_SEND_RESULT;
+        } else {
+          menu_open_popup(urns_lxmf_send_result_text(msngr_last_send_result), MENU_STATE_MSNGR_TEXT_ENTRY);
+          menu_popup_auto_dismiss_at = millis() + ACTION_POPUP_MS;
+        }
+      }
+      #endif
+    }
   #endif
 
   #if HAS_ETHERNET == true
@@ -3714,9 +3901,10 @@
     long fwupd_latest_build = 0;
     bool fwupd_latest_ok = false;
     // 0 = UPDATE, 1 = CANCEL - same 2-item list-with-cursor pattern as
-    // WiFi's text_confirm_cursor (SAVE/DISCARD), but defaults to CANCEL (1)
-    // rather than the primary action, since this one reboots and reflashes
-    // the device instead of just saving a text field.
+    // Messenger's msngr_discard_confirm_cursor (DISCARD/CANCEL), but
+    // defaults to CANCEL (1) rather than the primary action, since this
+    // one reboots and reflashes the device instead of just discarding
+    // some typed text.
     uint8_t fwupd_confirm_cursor = 1;
   #endif
 
@@ -4284,59 +4472,6 @@
       staged_wifi_channel = (uint8_t)v;
     }
 
-    // Rudimentary on-screen keyboard: a single cyclic wheel of 98 positions
-    // (rotary encoder has no separate cursor-move axis, so editing is
-    // append + backspace only - see [[project_encoder_settings_menu]] design
-    // notes). Common characters first. DEL and SAVE both sit right after
-    // space, before 'a' - reachable in 1-2 taps/detents from the default
-    // start position without any special gesture: selecting either is the
-    // exact same "hold to confirm whatever's currently on the wheel" action
-    // used for every ordinary character, on both encoder and button-only
-    // boards (see menu_confirm_select()'s MENU_STATE_WIFI_TEXT_EDIT case) -
-    // no separate long-press-to-save exists anymore, which used to only be
-    // reachable from the encoder and left button-only boards with no way to
-    // save at all. A second DEL is kept further round the wheel (after '9',
-    // before the symbols) for whoever's mid-cycling through the alphabet
-    // and doesn't want to dial all the way back to the start.
-    #define WHEEL_QUICKDEL_IDX  1
-    #define WHEEL_QUICKSAVE_IDX 2
-    #define WHEEL_DEL_IDX       66
-    #define WHEEL_LEN           98
-    const char WHEEL_CORE[] = " abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"; // 64 chars - [0] is space (idx 0 direct), [1..63] is 'a'..'9' (idx 3..65, offset by the 2 quick meta-positions)
-    const char WHEEL_SYMS[] = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"; // 31 chars, idx 67-97
-
-    bool wheel_is_del(uint8_t idx)  { return idx == WHEEL_QUICKDEL_IDX || idx == WHEEL_DEL_IDX; }
-    bool wheel_is_save(uint8_t idx) { return idx == WHEEL_QUICKSAVE_IDX; }
-
-    // Returns 0 for the DEL/SAVE meta positions - callers check those via
-    // wheel_is_del()/wheel_is_save() before treating this as a literal
-    // character.
-    char wheel_char_at(uint8_t idx) {
-      if (idx == 0) return WHEEL_CORE[0]; // space
-      if (wheel_is_del(idx) || wheel_is_save(idx)) return 0;
-      if (idx < WHEEL_DEL_IDX) return WHEEL_CORE[idx-2]; // 'a'..'9'
-      return WHEEL_SYMS[idx - (WHEEL_DEL_IDX+1)];
-    }
-
-    void wheel_move(int8_t dir) {
-      int16_t v = (int16_t)wheel_index + dir * (int16_t)accelerated_step();
-      v = v % WHEEL_LEN;
-      if (v < 0) v += WHEEL_LEN;
-      wheel_index = (uint8_t)v;
-    }
-
-    // Dedicated backspace on the main (non-encoder) button while typing -
-    // dialing the wheel all the way to DEL every time is tedious when a
-    // second physical button is sitting right there doing nothing.
-    void menu_main_button_del() {
-      if (menu_state == MENU_STATE_WIFI_TEXT_EDIT) {
-        buzzer_encoder_click_melody();
-        uint8_t len = strlen(text_edit_buf);
-        if (len > 0) text_edit_buf[len-1] = 0;
-      }
-    }
-  #else
-    void menu_main_button_del() { }
   #endif
 
   #if HAS_WIFI == true || HAS_ETHERNET == true
@@ -5147,12 +5282,6 @@
         // across states" trick ESP-NOW's shared edit state relies on.
         if (wifi_menu_cursor == WIFI_ITEM_CHANNEL) { step_wifi_channel(dir, wrap); }
         else                                       { step_wifi_mode(dir, wrap); }
-      } else if (menu_state == MENU_STATE_WIFI_TEXT_EDIT) {
-        buzzer_encoder_tick_melody();
-        wheel_move(dir);
-      } else if (menu_state == MENU_STATE_WIFI_TEXT_CONFIRM) {
-        buzzer_encoder_tick_melody();
-        text_confirm_cursor = menu_clamp_cursor(text_confirm_cursor, dir, 2, wrap);
       } else if (menu_state == MENU_STATE_WIFI_ADDR_EDIT) {
         buzzer_encoder_tick_melody();
         step_addr_octet(wifi_staged_addr_field(wifi_menu_cursor), wifi_addr_octet_idx, dir, wrap);
@@ -5351,17 +5480,6 @@
       } else if (menu_state == MENU_STATE_MSNGR_CLEAR_CONFIRM) {
         buzzer_encoder_tick_melody();
         msngr_clear_confirm_cursor = menu_clamp_cursor(msngr_clear_confirm_cursor, dir, 2, wrap);
-      } else if (menu_state == MENU_STATE_MSNGR_TEXT_ENTRY) {
-        // Steps one key at a time through the flattened active-layout
-        // grid, row-major, wrapping at both ends - see msngr_kb_cursor's
-        // own declaration for why this is a single linear cursor rather
-        // than real 2D nav. Bounded by msngr_kb_active_key_count(), not
-        // the flat MSNGR_KB_KEY_COUNT - MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_
-        // HASH's hex grid has far fewer real cells than the normal 4-row
-        // keyboard (msngr_kb_cursor_rc()'s own comment), and would
-        // otherwise wrap through nonexistent cells past the end of it.
-        buzzer_encoder_tick_melody();
-        msngr_kb_cursor = menu_clamp_cursor(msngr_kb_cursor, dir, msngr_kb_active_key_count(), wrap);
       } else if (menu_state == MENU_STATE_MSNGR_DISCARD_CONFIRM) {
         buzzer_encoder_tick_melody();
         msngr_discard_confirm_cursor = menu_clamp_cursor(msngr_discard_confirm_cursor, dir, 2, wrap);
@@ -5504,10 +5622,28 @@
         fwupd_menu_cursor = menu_clamp_cursor(fwupd_menu_cursor, dir, FWUPD_ITEM_COUNT, wrap);
       } else if (menu_state == MENU_STATE_FWUPD_CONFIRM) {
         // Plain 2-item list (UPDATE/CANCEL) - same tap-to-move/hold-to-
-        // select navigation as everywhere else, same pattern as WiFi's
-        // SAVE/DISCARD (MENU_STATE_WIFI_TEXT_CONFIRM/text_confirm_cursor).
+        // select navigation as everywhere else, same pattern as Messenger's
+        // DISCARD/CANCEL (MENU_STATE_MSNGR_DISCARD_CONFIRM/msngr_discard_confirm_cursor).
         buzzer_encoder_tick_melody();
         fwupd_confirm_cursor = menu_clamp_cursor(fwupd_confirm_cursor, dir, 2, wrap);
+      }
+    #endif
+    // Standalone (not part of the HAS_URNS-gated else-if chain above,
+    // which ends the function right at that #endif) - MSNGR_TEXT_ENTRY's
+    // on-screen keyboard needs to be reachable on HAS_WIFI boards that
+    // don't have HAS_URNS/HAS_LXMF too (WiFi SSID/PSK entry reuses it -
+    // see MSNGR_TEXT_ENTRY_PURPOSE_WIFI_SSID/_WIFI_PSK). Steps one key at
+    // a time through the flattened active-layout grid, row-major, wrapping
+    // at both ends - see msngr_kb_cursor's own declaration for why this is
+    // a single linear cursor rather than real 2D nav. Bounded by msngr_kb_
+    // active_key_count(), not the flat MSNGR_KB_KEY_COUNT - MSNGR_TEXT_
+    // ENTRY_PURPOSE_BOOKMARK_HASH's hex grid has far fewer real cells than
+    // the normal 4-row keyboard (msngr_kb_cursor_rc()'s own comment), and
+    // would otherwise wrap through nonexistent cells past the end of it.
+    #if HAS_LXMF == true || HAS_WIFI == true
+      if (menu_state == MENU_STATE_MSNGR_TEXT_ENTRY) {
+        buzzer_encoder_tick_melody();
+        msngr_kb_cursor = menu_clamp_cursor(msngr_kb_cursor, dir, msngr_kb_active_key_count(), wrap);
       }
     #endif
   }
@@ -5534,7 +5670,7 @@
   // the normal rotate handling - so holding the button while turning
   // anywhere else keeps behaving exactly as it already did.
   void menu_encoder_chord_rotate(int8_t dir) {
-    #if HAS_LXMF == true
+    #if HAS_LXMF == true || HAS_WIFI == true
       if (menu_state == MENU_STATE_MSNGR_TEXT_ENTRY) {
         msngr_kb_chord_used = true;
         uint8_t kb_row, kb_col;
@@ -5551,6 +5687,7 @@
           if (text_len < MSNGR_TEXT_ENTRY_MAX_LEN && to_insert != 0) {
             msngr_text_entry_buf[text_len] = to_insert;
             msngr_text_entry_buf[text_len + 1] = 0;
+            msngr_kb_last_insert_ms = millis();
             buzzer_encoder_tick_melody();
           }
         } else if (msngr_kb_key_type(key_ch) == MSNGR_KB_SHIFT) {
@@ -5639,7 +5776,7 @@
       return;
     }
 
-    #if HAS_LXMF == true
+    #if HAS_LXMF == true || HAS_WIFI == true
       if (menu_state == MENU_STATE_MSNGR_TEXT_ENTRY && msngr_kb_chord_used) {
         // The hold that's ending just chorded in one or more capital
         // letters (menu_encoder_chord_rotate()) - this release is the
@@ -5651,12 +5788,12 @@
     #endif
 
     unsigned long long_press_threshold = 700;
-    #if HAS_LXMF == true
+    #if HAS_LXMF == true || HAS_WIFI == true
       // Chording needs the button held down while rotating, which can
       // easily run past the normal 700ms threshold on a slow or deliberate
       // turn - a much longer threshold here means an ordinary chord
-      // attempt doesn't also risk throwing away a half-typed message via
-      // the long-press-leave path below.
+      // attempt doesn't also risk throwing away a half-typed message (or
+      // half-typed WiFi SSID/PSK) via the long-press-leave path below.
       if (menu_state == MENU_STATE_MSNGR_TEXT_ENTRY) long_press_threshold = 3000;
     #endif
 
@@ -5673,12 +5810,14 @@
     #endif
 
     if (duration > long_press_threshold) {
-      #if HAS_LXMF == true
+      #if HAS_LXMF == true || HAS_WIFI == true
         if (menu_state == MENU_STATE_MSNGR_TEXT_ENTRY) {
           buzzer_encoder_click_melody();
           menu_msngr_text_entry_leave();
           return;
         }
+      #endif
+      #if HAS_LXMF == true
         // Full Message view is open (checked BEFORE the MENU_STATE_MSNGR_
         // CHAT check below - menu_state stays MENU_STATE_MSNGR_CHAT the
         // whole time the view is open on top of it, so checking CHAT
@@ -5710,11 +5849,9 @@
         #endif
       #endif
       // Long-press: identical from anywhere inside the menu - commit & exit.
-      // Text entry no longer needs an exception here - SAVE is a wheel
-      // position now (see WHEEL_QUICKSAVE_IDX), reached with the exact same
-      // confirm gesture as any character, so there's no longer a "dialing
-      // all the way around" tedium to work around, and this can behave
-      // like every other state.
+      // Text entry (MENU_STATE_MSNGR_TEXT_ENTRY, handled above) already
+      // returns before reaching here, so this always behaves like every
+      // other state.
       if (menu_state != MENU_STATE_CLOSED) {
         buzzer_encoder_click_melody();
         menu_commit_and_exit();
@@ -5731,7 +5868,7 @@
     // to this encoder button's own flags (msngr_kb_..._fired_enc) - the
     // main button's (msngr_kb_..._fired_btn) are menu_button_press()'s
     // concern, released independently.
-    #if HAS_LXMF == true
+    #if HAS_LXMF == true || HAS_WIFI == true
       bool msngr_kb_alt_already_beeped = msngr_kb_lang_hold_fired_enc || msngr_kb_alt_hold_fired_enc || msngr_kb_del_hold_fired_enc;
     #else
       bool msngr_kb_alt_already_beeped = false;
@@ -5988,13 +6125,23 @@
           menu_open_popup("CLEARED", MENU_STATE_WIFI_LIST);
           menu_popup_auto_dismiss_at = millis() + ACTION_POPUP_MS;
         } else if (wifi_menu_cursor == WIFI_ITEM_SSID || wifi_menu_cursor == WIFI_ITEM_PSK) {
-          // Fresh text-edit session, preloaded from the current staged
-          // value, wheel starts at 'a'.
-          text_edit_field = wifi_menu_cursor;
-          const char *src = (text_edit_field == WIFI_ITEM_SSID) ? staged_wifi_ssid : staged_wifi_psk;
-          strncpy(text_edit_buf, src, 32); text_edit_buf[32] = 0;
-          wheel_index = 3; // 'a' (0=space, 1=DEL, 2=SAVE)
-          menu_state = MENU_STATE_WIFI_TEXT_EDIT;
+          // Opens the same on-screen keyboard Messenger uses for composing/
+          // editing text (MENU_STATE_MSNGR_TEXT_ENTRY) - see
+          // MSNGR_TEXT_ENTRY_PURPOSE_WIFI_SSID/_WIFI_PSK. Fresh session,
+          // preloaded from the current staged value, same reset (cursor/
+          // shift/lang) every other purpose's own invocation site does.
+          msngr_text_entry_purpose = (wifi_menu_cursor == WIFI_ITEM_SSID)
+            ? MSNGR_TEXT_ENTRY_PURPOSE_WIFI_SSID : MSNGR_TEXT_ENTRY_PURPOSE_WIFI_PSK;
+          const char *src = (wifi_menu_cursor == WIFI_ITEM_SSID) ? staged_wifi_ssid : staged_wifi_psk;
+          strncpy(msngr_text_entry_buf, src, 32); msngr_text_entry_buf[32] = 0;
+          msngr_kb_cursor = 0;
+          msngr_kb_shift_on = false;
+          msngr_kb_lang_ru = false;
+          // 0 (never "recently typed") - a preloaded saved PSK must show
+          // fully masked from the very first frame, not briefly reveal
+          // its last character the way an actually-just-typed one does.
+          msngr_kb_last_insert_ms = 0;
+          menu_state = MENU_STATE_MSNGR_TEXT_ENTRY;
         }
       } else if (menu_state == MENU_STATE_WIFI_EDIT) {
         menu_state = MENU_STATE_WIFI_LIST; // confirms staged value, no write yet
@@ -6021,30 +6168,6 @@
           // IP Address/Netmask which commit immediately.
           menu_state = MENU_STATE_WIFI_LIST;
         }
-      } else if (menu_state == MENU_STATE_WIFI_TEXT_EDIT) {
-        uint8_t len = strlen(text_edit_buf);
-        if (wheel_is_del(wheel_index)) {
-          if (len > 0) text_edit_buf[len-1] = 0;
-        } else if (wheel_is_save(wheel_index)) {
-          // Same dialog a long-press used to reach on encoder boards only -
-          // now reachable identically (dial to it, then the same confirm
-          // gesture as any character) on both encoder and button-only
-          // boards, so that special-cased long-press no longer exists (see
-          // menu_encoder_button()).
-          text_confirm_cursor = 0; // default to SAVE
-          menu_state = MENU_STATE_WIFI_TEXT_CONFIRM;
-        } else if (len < 32) {
-          text_edit_buf[len] = wheel_char_at(wheel_index);
-          text_edit_buf[len+1] = 0;
-          wheel_index = 3; // reset to 'a' for the next character
-        }
-      } else if (menu_state == MENU_STATE_WIFI_TEXT_CONFIRM) {
-        if (text_confirm_cursor == 0) { // SAVE
-          char *dst = (text_edit_field == WIFI_ITEM_SSID) ? staged_wifi_ssid : staged_wifi_psk;
-          strncpy(dst, text_edit_buf, 32); dst[32] = 0;
-        }
-        // DISCARD: leave staged_wifi_ssid/psk untouched.
-        menu_state = MENU_STATE_WIFI_LIST;
       }
     #endif
     #if HAS_BLUETOOTH == true || HAS_BLE == true
@@ -7081,78 +7204,6 @@
         } else { // CANCEL
           menu_state = MENU_STATE_MSNGR_PEER;
         }
-      } else if (menu_state == MENU_STATE_MSNGR_TEXT_ENTRY) {
-        // "Presses" whichever key msngr_kb_cursor is currently highlighting -
-        // insert/space/backspace mutate msngr_text_entry_buf in place (always
-        // appending/trimming at the end, no mid-string edit point, same
-        // simplification meshtastic's own VirtualKeyboard makes). Shift is a
-        // persistent toggle here rather than meshtastic's one-shot long-press,
-        // since confirm_select() is already spoken for as "press this key".
-        uint8_t kb_row, kb_col;
-        msngr_kb_cursor_rc(msngr_kb_cursor, kb_row, kb_col);
-        char key_ch = msngr_kb_active_layout()[kb_row][kb_col];
-        uint8_t key_type = msngr_kb_key_type(key_ch);
-
-        if (key_type == MSNGR_KB_CHAR || key_type == MSNGR_KB_SPACE) {
-          if (msngr_kb_alt_hold_fired_btn || msngr_kb_alt_hold_fired_enc) {
-            // Already inserted the paired punctuation mark live, mid-hold
-            // (msngr_kb_alt_hold_try(), see its own comment) - this
-            // release is just the tail end of that gesture, not a fresh
-            // press, so it shouldn't also insert the key's own plain
-            // character on top of it.
-            msngr_kb_alt_hold_fired_btn = false;
-            msngr_kb_alt_hold_fired_enc = false;
-          } else {
-            char c = (key_type == MSNGR_KB_SPACE) ? ' ' : msngr_kb_apply_shift(key_ch, msngr_kb_shift_on);
-            msngr_kb_insert_char(c);
-          }
-        } else if (key_type == MSNGR_KB_BACKSPACE) {
-          if (msngr_kb_del_hold_fired_btn || msngr_kb_del_hold_fired_enc) {
-            // Already deleted (at least once, maybe several times) live,
-            // mid-hold (msngr_kb_del_hold_try()) - this release is just
-            // the tail end of that gesture, not a fresh press, so it
-            // shouldn't also delete one more character on top of it.
-            msngr_kb_del_hold_fired_btn = false;
-            msngr_kb_del_hold_fired_enc = false;
-          } else {
-            msngr_kb_do_backspace();
-          }
-        } else if (key_type == MSNGR_KB_SHIFT) {
-          // A quick press still just toggles case (unchanged). A
-          // deliberate hold past MSNGR_KB_ALT_HOLD_MS switches layout
-          // instead - but that already happened live, mid-hold (see
-          // msngr_kb_lang_hold_try(), polled from menu_button_process()/
-          // Encoder.h's encoder_process()), not here. This release is
-          // just the tail end of that gesture, so it only needs to
-          // consume whichever flag fired and skip toggling case - the
-          // duration check below is a defensive fallback for a release
-          // that somehow crossed the threshold without a live poll
-          // catching it first, which shouldn't normally happen since
-          // polling runs every loop() tick, far more often than a
-          // release can occur.
-          if (msngr_kb_lang_hold_fired_btn || msngr_kb_lang_hold_fired_enc) {
-            msngr_kb_lang_hold_fired_btn = false;
-            msngr_kb_lang_hold_fired_enc = false;
-          } else if (duration >= MSNGR_KB_ALT_HOLD_MS) {
-            msngr_kb_lang_ru = !msngr_kb_lang_ru;
-            msngr_kb_shift_on = false;
-          } else {
-            msngr_kb_shift_on = !msngr_kb_shift_on;
-          }
-        } else if (key_type == MSNGR_KB_TYPE_TOGGLE) {
-          msngr_kb_toggle_bookmark_type();
-        } else if (key_type == MSNGR_KB_BACK) {
-          menu_msngr_text_entry_leave();
-        } else if (key_type == MSNGR_KB_SEND) {
-          msngr_kb_do_send();
-        }
-      } else if (menu_state == MENU_STATE_MSNGR_DISCARD_CONFIRM) {
-        if (msngr_discard_confirm_cursor == 0) { // DISCARD
-          msngr_text_entry_buf[0] = 0;
-          menu_state = msngr_text_entry_return_state();
-        } else { // CANCEL - resume typing, buffer/cursor/shift untouched
-          menu_state = msngr_discard_confirm_return_state;
-        }
       } else if (menu_state == MENU_STATE_MSNGR_PING_RESULT) {
         // Row 0 (status) is read-only - only BACK does anything, and it
         // doubles as Cancel while a ping's still in flight.
@@ -7408,6 +7459,88 @@
         }
       }
     #endif
+    // Standalone (not part of the HAS_URNS-gated else-if chain above) -
+    // MSNGR_TEXT_ENTRY/_DISCARD_CONFIRM need to be reachable on HAS_WIFI
+    // boards that don't have HAS_URNS/HAS_LXMF too (WiFi SSID/PSK entry
+    // reuses this same on-screen keyboard - see MSNGR_TEXT_ENTRY_PURPOSE_
+    // WIFI_SSID/_WIFI_PSK).
+    #if HAS_LXMF == true || HAS_WIFI == true
+      if (menu_state == MENU_STATE_MSNGR_TEXT_ENTRY) {
+        // "Presses" whichever key msngr_kb_cursor is currently highlighting -
+        // insert/space/backspace mutate msngr_text_entry_buf in place (always
+        // appending/trimming at the end, no mid-string edit point, same
+        // simplification meshtastic's own VirtualKeyboard makes). Shift is a
+        // persistent toggle here rather than meshtastic's one-shot long-press,
+        // since confirm_select() is already spoken for as "press this key".
+        uint8_t kb_row, kb_col;
+        msngr_kb_cursor_rc(msngr_kb_cursor, kb_row, kb_col);
+        char key_ch = msngr_kb_active_layout()[kb_row][kb_col];
+        uint8_t key_type = msngr_kb_key_type(key_ch);
+
+        if (key_type == MSNGR_KB_CHAR || key_type == MSNGR_KB_SPACE) {
+          if (msngr_kb_alt_hold_fired_btn || msngr_kb_alt_hold_fired_enc) {
+            // Already inserted the paired punctuation mark live, mid-hold
+            // (msngr_kb_alt_hold_try(), see its own comment) - this
+            // release is just the tail end of that gesture, not a fresh
+            // press, so it shouldn't also insert the key's own plain
+            // character on top of it.
+            msngr_kb_alt_hold_fired_btn = false;
+            msngr_kb_alt_hold_fired_enc = false;
+          } else {
+            char c = (key_type == MSNGR_KB_SPACE) ? ' ' : msngr_kb_apply_shift(key_ch, msngr_kb_shift_on);
+            msngr_kb_insert_char(c);
+          }
+        } else if (key_type == MSNGR_KB_BACKSPACE) {
+          if (msngr_kb_del_hold_fired_btn || msngr_kb_del_hold_fired_enc) {
+            // Already deleted (at least once, maybe several times) live,
+            // mid-hold (msngr_kb_del_hold_try()) - this release is just
+            // the tail end of that gesture, not a fresh press, so it
+            // shouldn't also delete one more character on top of it.
+            msngr_kb_del_hold_fired_btn = false;
+            msngr_kb_del_hold_fired_enc = false;
+          } else {
+            msngr_kb_do_backspace();
+          }
+        } else if (key_type == MSNGR_KB_SHIFT) {
+          // A quick press still just toggles case (unchanged). A
+          // deliberate hold past MSNGR_KB_ALT_HOLD_MS switches layout
+          // instead - but that already happened live, mid-hold (see
+          // msngr_kb_lang_hold_try(), polled from menu_button_process()/
+          // Encoder.h's encoder_process()), not here. This release is
+          // just the tail end of that gesture, so it only needs to
+          // consume whichever flag fired and skip toggling case - the
+          // duration check below is a defensive fallback for a release
+          // that somehow crossed the threshold without a live poll
+          // catching it first, which shouldn't normally happen since
+          // polling runs every loop() tick, far more often than a
+          // release can occur.
+          if (msngr_kb_lang_hold_fired_btn || msngr_kb_lang_hold_fired_enc) {
+            msngr_kb_lang_hold_fired_btn = false;
+            msngr_kb_lang_hold_fired_enc = false;
+          } else if (duration >= MSNGR_KB_ALT_HOLD_MS) {
+            msngr_kb_lang_ru = !msngr_kb_lang_ru;
+            msngr_kb_shift_on = false;
+          } else {
+            msngr_kb_shift_on = !msngr_kb_shift_on;
+          }
+        } else if (key_type == MSNGR_KB_TYPE_TOGGLE) {
+          #if HAS_LXMF == true
+            msngr_kb_toggle_bookmark_type();
+          #endif
+        } else if (key_type == MSNGR_KB_BACK) {
+          menu_msngr_text_entry_leave();
+        } else if (key_type == MSNGR_KB_SEND) {
+          msngr_kb_do_send();
+        }
+      } else if (menu_state == MENU_STATE_MSNGR_DISCARD_CONFIRM) {
+        if (msngr_discard_confirm_cursor == 0) { // DISCARD
+          msngr_text_entry_buf[0] = 0;
+          menu_state = msngr_text_entry_return_state();
+        } else { // CANCEL - resume typing, buffer/cursor/shift untouched
+          menu_state = msngr_discard_confirm_return_state;
+        }
+      }
+    #endif
     // menu_state == MENU_STATE_CLOSED + short click: no-op (reserved).
   }
 
@@ -7584,7 +7717,6 @@
     bool blekbd_menu_state_is_value_edit() {
       return menu_state == MENU_STATE_EDIT ||
              menu_state == MENU_STATE_WIFI_EDIT ||
-             menu_state == MENU_STATE_WIFI_TEXT_EDIT ||
              menu_state == MENU_STATE_HW_EDIT ||
              menu_state == MENU_STATE_GPIO_PIN_EDIT ||
              menu_state == MENU_STATE_ETH_EDIT ||
@@ -7979,12 +8111,10 @@
     }
   #endif
 
-  // The main button drives the menu everywhere except WIFI_TEXT_EDIT (which
-  // keeps it as a dedicated backspace key - see menu_main_button_del(),
-  // called separately by button_event() for that one state). On boards
-  // without an encoder (HAS_MENU without HAS_ENCODER - see Boards.h) this is
-  // the only control; on encoder boards it's an alternate one. Short press
-  // cycles forward
+  // The main button drives the menu everywhere. On boards without an
+  // encoder (HAS_MENU without HAS_ENCODER - see Boards.h) this is the only
+  // control; on encoder boards it's an alternate one. Short press cycles
+  // forward
   // through the current level, same as one encoder detent; a quick second
   // short press (double-tap) cycles backward instead - see
   // menu_btn_pending/menu_button_process(). Long press confirms/selects,
@@ -8027,7 +8157,7 @@
       // Skip the usual click if the hold already beeped for itself -
       // see menu_encoder_button()'s own matching comment (same reasoning,
       // just this control's own _btn flags instead of _enc).
-      #if HAS_LXMF == true
+      #if HAS_LXMF == true || HAS_WIFI == true
         bool msngr_kb_alt_already_beeped = msngr_kb_lang_hold_fired_btn || msngr_kb_alt_hold_fired_btn || msngr_kb_del_hold_fired_btn;
       #else
         bool msngr_kb_alt_already_beeped = false;
@@ -8045,7 +8175,7 @@
       menu_btn_pending = false;
       menu_encoder_rotate(1, true);
     }
-    #if HAS_LXMF == true
+    #if HAS_LXMF == true || HAS_WIFI == true
       // Live EN/RU switch, punctuation/letter-alternate, and DEL-repeat
       // on a held main button - see msngr_kb_lang_hold_try()/msngr_kb_alt_
       // hold_try()/msngr_kb_del_hold_try()'s own comments. Encoder
@@ -8464,8 +8594,8 @@
     void draw_msngr_full_message_view(bool draw_delete_confirm) {
       MENU_GFX.setFont(MENU_FONT);
       MENU_GFX.setTextSize(1);
-      std::string lines[MSNGR_MSG_VIEW_MAX_LINES];
-      uint8_t total_lines = msngr_msg_view_wrap(msngr_msg_detail_cache_content, lines, MSNGR_MSG_VIEW_MAX_LINES);
+      std::vector<std::string> lines = msngr_msg_view_wrap(msngr_msg_detail_cache_content);
+      uint8_t total_lines = (uint8_t)lines.size();
       const uint8_t visible_lines = 7; // 7*9=63px, fits the 64px canvas
       uint8_t max_scroll = (total_lines > visible_lines) ? (uint8_t)(total_lines - visible_lines) : 0;
       if (msngr_msg_view_scroll_line > max_scroll) msngr_msg_view_scroll_line = max_scroll;
@@ -8482,6 +8612,15 @@
       #endif
     }
 
+  #endif
+  #endif
+
+  // draw_msngr_compose_box()/draw_menu_msngr_keyboard_disp(), relocated
+  // out from under the #if HAS_URNS==true wrapper (matching the same
+  // relocation reasoning as the shared keyboard mechanics further up this
+  // file) - HAS_WIFI boards need this on-screen-keyboard draw code too,
+  // and HAS_URNS is not implied by HAS_WIFI.
+  #if HAS_LXMF == true || HAS_WIFI == true
     #define MSNGR_COMPOSE_CARET_BLINK_MS 500
     void draw_msngr_compose_box(int16_t box_y, int32_t cursor_pos = -1) {
       const int16_t box_x = MENU_CONTENT_X, box_w = MENU_CONTENT_W;
@@ -8498,7 +8637,20 @@
       bool caret_visible = ((millis() / MSNGR_COMPOSE_CARET_BLINK_MS) % 2) == 0;
 
       if (cursor_pos < 0) {
-        std::string shown(msngr_text_entry_buf);
+        std::string shown;
+        if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_WIFI_PSK) {
+          // Mask every character with '*' - except the one just typed,
+          // which stays in plain text for MSNGR_KB_PSK_REVEAL_MS (see that
+          // constant's own comment) so a single mistyped character is
+          // still catchable without leaving the whole password legible.
+          size_t len = strlen(msngr_text_entry_buf);
+          shown.assign(len, '*');
+          if (len > 0 && millis() - msngr_kb_last_insert_ms < MSNGR_KB_PSK_REVEAL_MS) {
+            shown[len - 1] = msngr_text_entry_buf[len - 1];
+          }
+        } else {
+          shown = msngr_text_entry_buf;
+        }
         size_t full_len = shown.size();
         int16_t x1, y1; uint16_t tw, th;
         MENU_GFX.getTextBounds(shown.c_str(), 0, 0, &x1, &y1, &tw, &th);
@@ -8614,7 +8766,17 @@
       // the full standard row count - see that table's own comment) - so
       // it gets its own flag rather than folding into hex_mode itself.
       const bool base32_mode = (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_IDENTITY_RESTORE);
+      const bool wifi_mode = (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_WIFI_SSID ||
+                               msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_WIFI_PSK);
+      // Deliberately NOT wifi_mode - unlike hex_mode/base32_mode, WiFi
+      // purposes keep both a real Space key and a language-style indicator
+      // box (Letters/Symbols instead of EN/RU - see msngr_kb_active_layout()),
+      // so they must NOT participate in this flag's other two jobs
+      // (suppressing the indicator box below, and picking the action
+      // column's width basis, "SAVE"-narrow vs "SPACE"-wide) - only in
+      // save_not_send, just below, which picks the Send/Save key's label.
       const bool save_label_mode = hex_mode || base32_mode;
+      const bool save_not_send = save_label_mode || wifi_mode;
       MENU_GFX.setFont(MENU_FONT);
       MENU_GFX.setTextSize(1);
       MENU_GFX.setTextColor(SSD1306_WHITE);
@@ -8629,7 +8791,9 @@
                      msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_PRESET ? "Preset" :
                      msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH ? "Add Hash" :
                      msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_RENAME ? "Rename" :
-                     msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_IDENTITY_RESTORE ? "Restore Key" : "Send Msg");
+                     msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_IDENTITY_RESTORE ? "Restore Key" :
+                     msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_WIFI_SSID ? "SSID" :
+                     msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_WIFI_PSK ? "Password" : "Send Msg");
 
       // Byte count, right-aligned on the same title line - "(N bytes)",
       // the actual UTF-8 payload size this buffer would send/save as
@@ -8657,11 +8821,14 @@
         // length, not the UTF-8 payload size every other purpose here
         // sends/saves as - an N/max progress count is the useful number
         // to show instead.
+        #if HAS_LXMF == true
         if (hex_mode) {
           snprintf(count_buf, sizeof(count_buf), " (%u/%u)", (unsigned)strlen(msngr_text_entry_buf), (unsigned)(LXMF::PEER_HASH_SIZE * 2));
         } else if (base32_mode) {
           snprintf(count_buf, sizeof(count_buf), " (%u/%u)", (unsigned)strlen(msngr_text_entry_buf), (unsigned)VAULT_IDENTITY_KEY_BASE32_LEN);
-        } else {
+        } else
+        #endif
+        {
           snprintf(count_buf, sizeof(count_buf), " (%u bytes)", (unsigned)msngr_kb_utf8_len(msngr_text_entry_buf));
         }
 
@@ -8677,7 +8844,7 @@
           MENU_GFX.setCursor(MENU_CONTENT_X + MENU_CONTENT_W - (int16_t)count_w, header_y);
           MENU_GFX.print(count_buf);
         } else {
-          const char *lang_label = msngr_kb_lang_ru ? "RU" : "EN";
+          const char *lang_label = wifi_mode ? (msngr_kb_lang_ru ? "123" : "ABC") : (msngr_kb_lang_ru ? "RU" : "EN");
 
           int16_t lx1, ly1; uint16_t lang_w, lang_h;
           MENU_GFX.getTextBounds(lang_label, 0, header_y, &lx1, &ly1, &lang_w, &lang_h);
@@ -8820,11 +8987,13 @@
           const char *label;
           switch (type) {
             case MSNGR_KB_BACKSPACE:   label = "DEL"; break;
-            case MSNGR_KB_SEND:        label = save_label_mode ? "SAVE" : "SEND"; break; // hex_mode/base32_mode save a bookmark/identity locally, nothing goes out over the air - "SEND" would be misleading
+            case MSNGR_KB_SEND:        label = save_not_send ? "SAVE" : "SEND"; break; // hex_mode/base32_mode/wifi_mode save a bookmark/identity/credential locally, nothing goes out over the air - "SEND" would be misleading
             case MSNGR_KB_SPACE:       label = "SPACE"; break;
             case MSNGR_KB_BACK:        label = "BACK"; break;
             case MSNGR_KB_SHIFT:       label = msngr_kb_shift_on ? "^^" : "^"; break;
+            #if HAS_LXMF == true
             case MSNGR_KB_TYPE_TOGGLE: label = msngr_kb_bookmark_type == MSNGR_BOOKMARK_TYPE_PROPAGATION ? "Propagation" : "LXMF"; break;
+            #endif
             default: {
               char c2 = msngr_kb_apply_shift(ch, msngr_kb_shift_on);
               label_buf[0] = c2; label_buf[1] = 0;
@@ -8846,6 +9015,7 @@
           MENU_GFX.getTextBounds(label, 0, 0, &lx1, &ly1, &lw, &lh);
           int16_t label_y = ky + row_h - 3; // nudged up 1px, per user request on real hardware - fits the key boxes better
 
+          #if HAS_LXMF == true
           if (type == MSNGR_KB_TYPE_TOGGLE) {
             // Per user request: prefixes the label with the same node/
             // propagation-node icons already used elsewhere (Graphics.h) -
@@ -8865,7 +9035,9 @@
             MENU_GFX.drawBitmap(combined_x, icon_y, type_icon, type_icon_w, MENU_ICON_H, fg, bg);
             MENU_GFX.setCursor(combined_x + type_icon_w + icon_gap, label_y);
             MENU_GFX.print(label);
-          } else {
+          } else
+          #endif
+          {
             int16_t label_x = kx + (kw - (int16_t)lw + 1) / 2;
             if (label_x < kx) label_x = kx;
             MENU_GFX.setCursor(label_x, label_y);
@@ -8884,7 +9056,6 @@
         MENU_GFX.print("tap:next hold:open");
       #endif
     }
-  #endif
   #endif
 
   #if MCU_VARIANT == MCU_ESP32 || MCU_VARIANT == MCU_NRF52
@@ -9063,11 +9234,10 @@
   #if HAS_WIFI == true || HAS_ETHERNET == true
     // Shared by WiFi's IP Address/Netmask and, on MeshPoE-S3, wired
     // Ethernet's own - shows the whole address at once (max
-    // "255.255.255.255", 15 chars, comfortably fits at size 1 - unlike the
-    // 32-char SSID/PSK wheel below, no windowing needed) with the octet
-    // currently being adjusted highlighted - same fillRect+invert-color
-    // trick draw_menu_text_edit_disp() uses for its wheel candidate, just
-    // per octet instead of per character. Already-confirmed octets sit to
+    // "255.255.255.255", 15 chars, comfortably fits at size 1, no
+    // windowing needed) with the octet currently being adjusted
+    // highlighted via a fillRect+invert-color trick, per octet instead of
+    // per character. Already-confirmed octets sit to
     // the left of the highlight, not-yet-visited ones (still holding
     // whatever they started this edit session with) to its right, so the
     // highlight visibly moves rightward - and everything left of it
@@ -9080,9 +9250,8 @@
       MENU_GFX.print(title);
       MENU_GFX.drawFastHLine(MENU_CONTENT_X, MENU_EDIT_HEADER_HLINE_Y, MENU_CONTENT_W, SSD1306_WHITE);
 
-      // Same font as the SSID/PSK screen's typed content (TEXT_ENTRY_FONT,
-      // Tamsyn6x12 - see draw_menu_text_edit_disp()) - title/divider/footer
-      // stay on SMALL_FONT/Org_01, same split that screen uses. Narrower
+      // Tamsyn6x12 (TEXT_ENTRY_FONT) for the address itself - title/
+      // divider/footer stay on SMALL_FONT/Org_01. Narrower
       // per-glyph than Org_01 at the size Org_01 would otherwise need to be
       // legible here, so the full "255.255.255.255" fits comfortably.
       MENU_GFX.setFont(TEXT_ENTRY_FONT);
@@ -9101,9 +9270,8 @@
         sprintf(seg, "%u", octets[i]);
         MENU_GFX.getTextBounds(seg, 0, 0, &sx1, &sy1, &sw, &sh);
         if (i == active_idx) {
-          // Same box geometry as draw_menu_text_edit_disp()'s wheel
-          // candidate - Tamsyn6x12 glyphs span roughly baseline-9 to
-          // baseline+4, a taller box than Org_01 would need.
+          // Tamsyn6x12 glyphs span roughly baseline-9 to baseline+4, a
+          // taller box than Org_01 would need.
           MENU_GFX.fillRect(x - 1, 21, sw + 2, 18, SSD1306_WHITE);
           MENU_GFX.setTextColor(SSD1306_BLACK);
         } else {
@@ -9216,86 +9384,6 @@
         else                 MENU_GFX.print("tap:adjust hold:ok");
       #else
         MENU_GFX.print("tap:adjust hold:ok");
-      #endif
-    }
-  #endif
-
-  #if HAS_WIFI == true
-    // Character-count windowed (not pixel-precise) so a 32-char SSID/PSK
-    // doesn't need to fit on screen at once - shows only the trailing
-    // portion of the string plus the pending wheel selection, which is
-    // always what's being actively edited (append-only, see plan notes).
-    void draw_menu_text_edit_disp(const char *title, const char *text_buf, uint8_t wheel_idx) {
-      MENU_GFX.setFont(MENU_FONT);
-      MENU_GFX.setTextSize(1);
-      MENU_GFX.setTextColor(SSD1306_WHITE);
-      MENU_GFX.setCursor(6, MENU_HEADER_TEXT_Y);
-      MENU_GFX.print(title);
-      MENU_GFX.drawFastHLine(MENU_CONTENT_X, MENU_EDIT_HEADER_HLINE_Y, MENU_CONTENT_W, SSD1306_WHITE);
-
-      char candidate[6];
-      if (wheel_is_del(wheel_idx))       sprintf(candidate, "DEL");
-      else if (wheel_is_save(wheel_idx)) sprintf(candidate, "SAVE");
-      else { candidate[0] = wheel_char_at(wheel_idx); candidate[1] = 0; }
-
-      // FreeMono9pt7b only for the actual typed content, at its natural
-      // size (it's already a proper 9pt font, unlike Org_01 which needs
-      // setTextSize(2) to be legible) - title/divider/footer stay on
-      // SMALL_FONT/Org_01, same as every other menu screen.
-      MENU_GFX.setFont(TEXT_ENTRY_FONT);
-      MENU_GFX.setTextSize(1);
-
-      // FreeMono9pt7b is monospace, but the window-growing logic still
-      // measures real pixel widths rather than assuming a fixed advance,
-      // so it stays correct if the font is ever swapped again.
-      const uint16_t max_width = MENU_CONTENT_W;
-      int16_t cx1, cy1; uint16_t cw, ch;
-      MENU_GFX.getTextBounds(candidate, 0, 0, &cx1, &cy1, &cw, &ch);
-      uint16_t remaining_width = (max_width > cw + 3) ? (max_width - cw - 3) : 0;
-
-      uint8_t text_len = strlen(text_buf);
-      uint8_t prefix_len = 0;
-      for (uint8_t try_len = 1; try_len <= text_len; try_len++) {
-        int16_t px1, py1; uint16_t pw, ph;
-        MENU_GFX.getTextBounds(text_buf + (text_len - try_len), 0, 0, &px1, &py1, &pw, &ph);
-        if (pw > remaining_width) break;
-        prefix_len = try_len;
-      }
-      const char *prefix_start = text_buf + (text_len - prefix_len);
-
-      int16_t x1, y1; uint16_t pw, ph;
-      MENU_GFX.getTextBounds(prefix_start, 0, 0, &x1, &y1, &pw, &ph);
-      uint16_t cand_x = MENU_CONTENT_X + pw;
-
-      MENU_GFX.setTextColor(SSD1306_WHITE);
-      MENU_GFX.setCursor(MENU_CONTENT_X, 32);
-      MENU_GFX.print(prefix_start);
-
-      // FreeMono9pt7b glyphs span roughly baseline-9 (ascenders) to
-      // baseline+4 (descenders like g/p/y) at this size - a taller box
-      // than Org_01 needed.
-      MENU_GFX.fillRect(cand_x, 21, cw + 3, 18, SSD1306_WHITE);
-      MENU_GFX.setTextColor(SSD1306_BLACK);
-      MENU_GFX.setCursor(cand_x + 1, 32);
-      MENU_GFX.print(candidate);
-
-      MENU_GFX.setFont(MENU_FONT);
-      MENU_GFX.setTextSize(1);
-      MENU_GFX.setTextColor(SSD1306_WHITE);
-      MENU_GFX.drawFastHLine(MENU_CONTENT_X, MENU_EDIT_FOOTER_HLINE_Y, MENU_CONTENT_W, SSD1306_WHITE);
-      MENU_GFX.setCursor(6, MENU_EDIT_FOOTER_TEXT_Y);
-      // Same encoder_enabled branch as every other footer hint in this
-      // file (e.g. the main list's "turn:move press:open" vs "tap:next
-      // hold:open") - this one just never had it, leaving button-only
-      // boards shown a caption for input hardware they don't have. "hold:
-      // ok" (not "hold:save") since a hold just confirms whatever the
-      // wheel is currently on - a character, DEL, or SAVE (WHEEL_QUICKSAVE_
-      // IDX) - not something SAVE-specific.
-      #if HAS_ENCODER == true
-        if (encoder_enabled) MENU_GFX.print("turn:char hold:ok");
-        else                 MENU_GFX.print("tap:char hold:ok");
-      #else
-        MENU_GFX.print("tap:char hold:ok");
       #endif
     }
   #endif
@@ -9568,16 +9656,6 @@
         else if (wifi_menu_cursor == WIFI_ITEM_NETMASK) title = "NETMASK";
         else if (wifi_menu_cursor == WIFI_ITEM_GATEWAY) title = "GATEWAY";
         draw_menu_addr_edit_disp(title, wifi_staged_addr_field(wifi_menu_cursor), wifi_addr_octet_idx);
-      } else if (menu_state == MENU_STATE_WIFI_TEXT_EDIT) {
-        const char *title = (text_edit_field == WIFI_ITEM_SSID) ? "SSID" : "PSK";
-        draw_menu_text_edit_disp(title, text_edit_buf, wheel_index);
-      } else if (menu_state == MENU_STATE_WIFI_TEXT_CONFIRM) {
-        const char *labels[2] = { "SAVE", "DISCARD" };
-        char valbufs[2][24];
-        valbufs[0][0] = 0;
-        valbufs[1][0] = 0;
-        const char *title = (text_edit_field == WIFI_ITEM_SSID) ? "SAVE SSID?" : "SAVE PSK?";
-        draw_menu_list_disp(title, labels, valbufs, 2, text_confirm_cursor);
       }
     #endif
     #if HAS_BLUETOOTH == true || HAS_BLE == true
@@ -11063,8 +11141,6 @@
         valbufs[0][0] = 0;
         valbufs[1][0] = 0;
         draw_menu_list_disp("CLEAR ALL?", labels, valbufs, 2, msngr_clear_confirm_cursor);
-      } else if (menu_state == MENU_STATE_MSNGR_TEXT_ENTRY) {
-        draw_menu_msngr_keyboard_disp();
       }
       #if HAS_BLE_HID_HOST == true
         else if (menu_state == MENU_STATE_MSNGR_CHAT) {
@@ -11222,16 +11298,7 @@
           if (msngr_chat_delete_confirm_pending) draw_msngr_chat_delete_confirm_box();
         }
       #endif
-      else if (menu_state == MENU_STATE_MSNGR_DISCARD_CONFIRM) {
-        const char *labels[2] = { "DISCARD", "CANCEL" };
-        char valbufs[2][24];
-        valbufs[0][0] = 0;
-        valbufs[1][0] = 0;
-        const char *discard_title = (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH) ? "DISCARD HASH?" :
-                                     (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_RENAME) ? "DISCARD NAME?" :
-                                     (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_IDENTITY_RESTORE) ? "DISCARD KEY?" : "DISCARD MSG?";
-        draw_menu_list_disp(discard_title, labels, valbufs, 2, msngr_discard_confirm_cursor);
-      } else if (menu_state == MENU_STATE_MSNGR_PING_RESULT) {
+      else if (menu_state == MENU_STATE_MSNGR_PING_RESULT) {
         // Reads msngr_ping_state/msngr_ping_rtt fresh on every redraw -
         // messenger_ping_process() (RNode_Firmware.ino's loop()) is what
         // actually advances them, same "read live state, don't poll from
@@ -11548,6 +11615,30 @@
         draw_menu_list_disp(msngr_presets[msngr_preset_detail_index], labels, valbufs, 3, msngr_preset_detail_cursor);
       }
       #endif
+    #endif
+    // Standalone (not part of the HAS_URNS-gated else-if chain above) -
+    // MSNGR_TEXT_ENTRY/_DISCARD_CONFIRM need to be reachable on HAS_WIFI
+    // boards that don't have HAS_URNS/HAS_LXMF too (WiFi SSID/PSK entry
+    // reuses this same on-screen keyboard - see MSNGR_TEXT_ENTRY_PURPOSE_
+    // WIFI_SSID/_WIFI_PSK).
+    #if HAS_LXMF == true || HAS_WIFI == true
+      if (menu_state == MENU_STATE_MSNGR_TEXT_ENTRY) {
+        draw_menu_msngr_keyboard_disp();
+      } else if (menu_state == MENU_STATE_MSNGR_DISCARD_CONFIRM) {
+        const char *labels[2] = { "DISCARD", "CANCEL" };
+        char valbufs[2][24];
+        valbufs[0][0] = 0;
+        valbufs[1][0] = 0;
+        const char *discard_title = "DISCARD MSG?";
+        #if HAS_LXMF == true
+          if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH) discard_title = "DISCARD HASH?";
+          else if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_RENAME) discard_title = "DISCARD NAME?";
+          else if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_IDENTITY_RESTORE) discard_title = "DISCARD KEY?";
+        #endif
+        if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_WIFI_SSID) discard_title = "DISCARD SSID?";
+        else if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_WIFI_PSK) discard_title = "DISCARD PSK?";
+        draw_menu_list_disp(discard_title, labels, valbufs, 2, msngr_discard_confirm_cursor);
+      }
     #endif
       else if (menu_state == MENU_STATE_URNS_RADIO_LIST) {
         const char *labels[URNS_RADIO_ITEM_COUNT];
@@ -11929,7 +12020,7 @@
         draw_menu_list_disp("F/W UPDATE", labels, valbufs, FWUPD_ITEM_COUNT, fwupd_menu_cursor);
       } else if (menu_state == MENU_STATE_FWUPD_CONFIRM) {
         // Plain 2-item list, same draw_menu_list_disp() as everywhere else -
-        // same pattern as WiFi's SAVE/DISCARD (MENU_STATE_WIFI_TEXT_CONFIRM).
+        // same pattern as Messenger's DISCARD/CANCEL (MENU_STATE_MSNGR_DISCARD_CONFIRM).
         const char *labels[2] = { "UPDATE", "CANCEL" };
         char valbufs[2][24];
         valbufs[0][0] = 0;

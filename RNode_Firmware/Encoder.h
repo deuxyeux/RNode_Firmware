@@ -182,7 +182,7 @@
           enc_btn_down_last = millis();
           enc_btn_hold_beeped = false;
           msngr_kb_chord_used = false; // fresh press - no chord performed with it yet
-          #if HAS_LXMF == true
+          #if HAS_LXMF == true || HAS_WIFI == true
             msngr_kb_lang_hold_fired_enc = false;  // fresh press - EN/RU switch hasn't fired yet either
             msngr_kb_alt_hold_fired_enc = false; // ...nor has the punctuation/letter-alternate
             msngr_kb_del_hold_fired_enc = false;   // ...nor has DEL-repeat
@@ -203,7 +203,7 @@
     // which has no long-press-specific meaning of its own - any release
     // there just dismisses the popup, short or long alike.
     unsigned long hold_beep_threshold = 700;
-    #if HAS_LXMF == true
+    #if HAS_LXMF == true || HAS_WIFI == true
       if (menu_state == MENU_STATE_MSNGR_TEXT_ENTRY) hold_beep_threshold = 3000;
     #endif
     // Suppressed during the vault unlock/enroll screen - this tone's
@@ -227,7 +227,7 @@
     // logic (this control's own separate fired-flags are needed because
     // enc_btn_state is a different debounce state machine than the
     // main button's, Input.h).
-    #if HAS_LXMF == true
+    #if HAS_LXMF == true || HAS_WIFI == true
       if (encoder_enabled && enc_btn_state == ENC_PRESSED) {
         unsigned long held_ms = millis() - enc_btn_down_last;
         msngr_kb_lang_hold_try(held_ms, msngr_kb_lang_hold_fired_enc);
