@@ -1751,6 +1751,35 @@ static inline void kiss_serial_put(uint8_t byte) {
 	Serial.write(byte);
 }
 
+// Same "bounded wait, then drop rather than block" guard as kiss_serial_put()
+// above, for Serial0 (HAS_DEBUG_UART's own physical UART - Boards.h) instead
+// of the native-USB-CDC KISS port. Confirmed live: housekeeping_poll()'s own
+// Serial0.print(debug_buf) (RNode_Firmware.ino) - the DEBUG_LOG queue's only
+// drain point, called every loop() iteration since housekeeping_poll() folded
+// onto loopTask (2026-08-15, that function's own comment) - hung loopTask
+// long enough to trip the task watchdog with nothing attached to read the
+// debug UART (a MeshAdventurer-S3 propagated-send test, stamp-grind phase
+// happened to run long enough for the gap to matter). Whole-line, not
+// per-byte, unlike kiss_serial_put() - a partial debug line is useless
+// either way, so this drops the entire line at once rather than writing
+// however much fit before stalling.
+#if HAS_DEBUG_UART == true
+static bool debug_uart_tx_stalled = false;
+static inline void debug_serial_write(const char* buf) {
+	size_t len = strlen(buf);
+	if (len == 0) return;
+	if ((size_t)Serial0.availableForWrite() < len) {
+		if (debug_uart_tx_stalled) { return; }
+		uint32_t start = millis();
+		while ((size_t)Serial0.availableForWrite() < len) {
+			if ((millis() - start) >= 5) { debug_uart_tx_stalled = true; return; }
+		}
+	}
+	debug_uart_tx_stalled = false;
+	Serial0.print(buf);
+}
+#endif
+
 void serial_write(uint8_t byte) {
 	#if HAS_BLUETOOTH || HAS_BLE == true
 		if (bt_state != BT_STATE_CONNECTED) {

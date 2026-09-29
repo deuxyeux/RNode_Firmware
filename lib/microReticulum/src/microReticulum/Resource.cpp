@@ -1101,6 +1101,17 @@ void Resource::request(const Bytes& request_data) {
 	if (_object->_status == Type::Resource::FAILED) return;
 	if (request_data.size() < 1) return;
 
+	// FIXED (local patch, not upstream): replying to a RESOURCE_REQ this
+	// fast left near-zero time for the radio to turn around from RX back
+	// to TX. Confirmed on hardware: propagated LXMF sends to a real
+	// lxmd node needed 8-14+ retries over 40s-2min+ (sometimes failing
+	// outright) with an instant reply, and receive_part() on the PN never
+	// saw the part at all on the missed attempts - i.e. the reply wasn't
+	// reaching the peer as a valid RF frame, not a software-layer drop.
+	// A brief settling window before replying fixed it: multiple test
+	// sends since have all landed on the first attempt, zero retries.
+	Utilities::OS::sleep(0.05);
+
 	const double now = Utilities::OS::time();
 	if (_object->_rtt == 0.0) {
 		_object->_rtt = now - _object->_adv_sent;

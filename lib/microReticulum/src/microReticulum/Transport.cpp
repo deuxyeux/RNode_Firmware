@@ -1242,10 +1242,25 @@ TRACEF("path_request_conditions=%u", path_request_conditions);
 	else TRACE("Transport::outbound: packet transport=n/a");
 	TRACEF("Transport::outbound: packet hash=%s", packet.packet_hash().toHex().c_str());
 
+	// FIXED (local patch, not upstream): Python's _jobs_running guard
+	// serializes outbound() against a concurrently-running jobs() on a
+	// separate thread. This firmware is single-threaded cooperative -
+	// loopTask is the only caller of both - so the only way outbound()
+	// can observe _jobs_running==true is a reentrant call from within
+	// jobs() itself (e.g. tick_resources() -> Resource::__watchdog_job()
+	// -> Packet::send() while jobs() is still executing). In that case
+	// _jobs_running can only ever be cleared by this same call returning
+	// first, so an unbounded wait is a guaranteed self-deadlock that
+	// stalls loopTask until the task watchdog force-reboots the board.
+	// Bound the wait and proceed instead, mirroring kiss_serial_put()'s
+	// bounded-wait-then-proceed pattern.
 	if (_jobs_running) DEBUG("Transport::outbound: jobs still running!");
-	while (_jobs_running) {
-		//TRACE("Transport::outbound: sleeping...");
-		OS::sleep(0.0005);
+	{
+		uint32_t wait_start = millis();
+		while (_jobs_running) {
+			if ((millis() - wait_start) >= 20) break;
+			OS::sleep(0.0005);
+		}
 	}
 	_jobs_locked = true;
 
@@ -1849,10 +1864,17 @@ TRACEF("path_request_conditions=%u", path_request_conditions);
 	}
 */
 
+	// FIXED (local patch, not upstream): same reentrant self-deadlock
+	// hazard as Transport::outbound() above - bound the wait instead of
+	// spinning forever if a job callback reentrantly calls inbound().
 	if (_jobs_running) DEBUG("Transport::inbound: jobs still running!");
-	while (_jobs_running) {
-		TRACE("Transport::inbound: sleeping...");
-		OS::sleep(0.0005);
+	{
+		uint32_t wait_start = millis();
+		while (_jobs_running) {
+			if ((millis() - wait_start) >= 20) break;
+			TRACE("Transport::inbound: sleeping...");
+			OS::sleep(0.0005);
+		}
 	}
 
 	if (!_identity) {

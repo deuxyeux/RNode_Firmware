@@ -55,6 +55,7 @@
     CP_URNS_RETICULUM_LOOP,
     CP_URNS_LXMF_LOOP,
     CP_MSNGR_PING,
+    CP_MSNGR_PING_RESULT,
     CP_MSNGR_SEND,
     CP_MSNGR_SEND_RESULT,
     CP_MSNGR_SYNC_POPUP,
@@ -115,6 +116,7 @@
       case CP_URNS_RETICULUM_LOOP:   return "urns_reticulum.loop()";
       case CP_URNS_LXMF_LOOP:        return "urns_lxmf_loop()";
       case CP_MSNGR_PING:            return "messenger_ping_process()";
+      case CP_MSNGR_PING_RESULT:     return "msngr_ping_result_process()";
       case CP_MSNGR_SEND:            return "messenger_send_process()";
       case CP_MSNGR_SEND_RESULT:     return "msngr_send_result_process()";
       case CP_MSNGR_SYNC_POPUP:      return "msngr_sync_popup_process()";
@@ -252,7 +254,13 @@
     #if HAS_DEBUG_UART == true
       char debug_buf[DEBUG_LOG_MSG_LEN];
       if (xQueueReceive(g_debug_log_queue, debug_buf, 0) == pdTRUE) {
-        Serial0.print(debug_buf);
+        // FIXED (local patch, not upstream): used to be a raw Serial0.
+        // print() - confirmed live to hang loopTask long enough to trip
+        // the task watchdog with nothing attached to read the debug UART.
+        // See debug_serial_write()'s own comment (Utilities.h) for the
+        // full story - same bounded-wait-then-drop guard kiss_serial_put()
+        // already uses for the main KISS port's own identical hazard.
+        debug_serial_write(debug_buf);
       }
     #endif
     char cmd_buf[CMD_LOG_MSG_LEN];
@@ -3201,6 +3209,8 @@ void loop() {
       #if HAS_LXMF == true
         CP(CP_MSNGR_PING);
         messenger_ping_process();
+        CP(CP_MSNGR_PING_RESULT);
+        msngr_ping_result_process();
         CP(CP_MSNGR_SEND);
         messenger_send_process();
         CP(CP_MSNGR_SEND_RESULT);
