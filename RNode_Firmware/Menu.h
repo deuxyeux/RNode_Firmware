@@ -2403,20 +2403,59 @@
 
     // MENU_STATE_MSNGR_SEND_RESULT - 2-row screen (status + BACK) normally,
     // growing to 4 (status + Retry + Retry via Prop + BACK) only once the
-    // send has reached a terminal failure state (TIMEOUT/UNRESOLVED/
-    // FAILED) - neither Retry row exists before then, not just hidden-but-
-    // inert, so they can't be selected on an in-flight or successful send.
-    // Default cursor on BACK (last row, whichever index that currently is).
+    // send has reached a terminal failure state (TIMEOUT/UNRESOLVED/FAILED)
+    // AND the router's own single-in-flight outbound queue (LXMRouter.cpp's
+    // process_outbound() comment) has actually finished with the original
+    // message - msngr_send_result_queue_busy()'s own comment below. Neither
+    // Retry row exists before then, not just hidden-but-inert, so they
+    // can't be selected while a Retry would just queue uselessly behind a
+    // still-retrying earlier send. Default cursor on BACK (last row,
+    // whichever index that currently is).
     uint8_t msngr_send_result_cursor = 1;
+    // Row count as of the last redraw (msngr_send_result_row_count() below) -
+    // lets the draw code notice a busy->free transition happening while this
+    // screen is still open (the router's background retry cycle exhausting
+    // between one frame and the next, with no key press involved) and reset
+    // the cursor before row 1's meaning silently flips from BACK to Retry
+    // underneath it - see that reset's own comment, Menu.h draw code.
+    uint8_t msngr_send_result_last_row_count = 2;
 
     // True once the currently-tracked send has hit a terminal failure -
     // the one point Menu.h's draw/input code for MENU_STATE_MSNGR_SEND_
-    // RESULT needs to agree on row count (2 vs 3) and BACK's index (1 vs
-    // 2) with.
+    // RESULT needs to agree on row count (2 vs 4) and BACK's index (1 vs
+    // 3) with.
     bool msngr_send_result_failed() {
       return msngr_send_state == MSNGR_SEND_TIMEOUT ||
              msngr_send_state == MSNGR_SEND_UNRESOLVED ||
              msngr_send_state == MSNGR_SEND_FAILED;
+    }
+
+    // Whether LXMRouter's single-in-flight outbound queue is occupied at
+    // all right now - by anything, not just whatever this screen happens
+    // to be tracking. Retry/Retry via Prop would just queue uselessly
+    // behind it either way (LXMRouter.cpp's process_outbound() only ever
+    // services the front of the queue), so this is deliberately NOT scoped
+    // to "is it specifically my tracked message" - an earlier version of
+    // this checked pending_outbound_attempts_for(msngr_send_message_hash)
+    // instead, which only recognized the queue as busy while this screen's
+    // own tracked send was the one actively at the front. That missed the
+    // case where a second send gets started (or the same send is retried)
+    // while an *earlier* one is still retrying in the background: the new
+    // send just sits queued behind it, its own hash never matches the
+    // front, and the check read "free" even though nothing had actually
+    // been attempted yet. draw_menu_list_disp()'s own footer_override
+    // fallback uses this same global signal, so the live "Retry N/M in Xs"
+    // status is visible everywhere the queue is occupied, not just here.
+    bool msngr_send_result_queue_busy() {
+      return urns_lxmf_router && urns_lxmf_router->pending_outbound_count() > 0;
+    }
+
+    // Single source of truth for this screen's row count - same
+    // msngr_XXX_row_count() convention already used for Inbox/Bookmarks/
+    // Peer/Presets (see their own call sites in the draw/input code below).
+    uint8_t msngr_send_result_row_count() {
+      if (!msngr_send_result_failed()) return 2;
+      return msngr_send_result_queue_busy() ? 2 : 4;
     }
   #endif
 
@@ -2679,20 +2718,29 @@
         msngr_send_needs_cache_refresh = false;
         messenger_refresh_peer_cache(msngr_active_peer_hash);
       }
-      // The Retry row only exists once msngr_send_result_failed() is true
-      // (Menu.h's draw code below draws 2 rows otherwise) - reset the
-      // cursor onto BACK's new index the moment that row appears or
-      // disappears, so a cursor left on BACK's old index doesn't land on
-      // the wrong row (Retry, or off the end of a shrunk 2-row list) after
-      // the transition. Tracked via last-seen failed-ness so this only
-      // fires once per transition, not every poll - a manual cursor move
-      // onto Retry while already failed must survive later polls here.
+      // The Retry/Retry-via-Prop rows only exist once msngr_send_result_
+      // failed() is true AND the router's own outbound queue has actually
+      // finished with the original message (msngr_send_result_row_count()'s
+      // own comment - 2 rows otherwise, growing to 4 once both are true) -
+      // reset the cursor onto BACK's new index the moment that changes, so
+      // a cursor left on BACK's old index doesn't land on the wrong row
+      // (Retry/Retry via Prop, or off the end of a shrunk list) after the
+      // transition. This also covers the background-retry-exhausts-while-
+      // this-screen-is-still-open case (row count going 2->4 while
+      // msngr_send_result_failed() stays true throughout, so a plain
+      // failed-ness comparison alone couldn't see it - this used to just
+      // compare msngr_send_result_failed() before/after, which also meant
+      // this row count's own growth from 3 to 4 rows, when Retry via Prop
+      // was added, left this resetting onto the wrong index (2, BACK's old
+      // 3-row position) instead of today's 3). Tracked via last-seen row
+      // count so this only fires once per transition, not every poll - a
+      // manual cursor move onto Retry while already failed must survive
+      // later polls here.
       {
-        static bool was_failed = false;
-        bool now_failed = msngr_send_result_failed();
-        if (now_failed != was_failed) {
-          msngr_send_result_cursor = now_failed ? 2 : 1;
-          was_failed = now_failed;
+        uint8_t row_count = msngr_send_result_row_count();
+        if (row_count != msngr_send_result_last_row_count) {
+          msngr_send_result_cursor = row_count - 1;
+          msngr_send_result_last_row_count = row_count;
         }
       }
       // Per user request: error/uncertain outcomes (TIMEOUT/UNRESOLVED/
@@ -5492,7 +5540,7 @@
         msngr_ping_result_cursor = menu_clamp_cursor(msngr_ping_result_cursor, dir, 2, wrap);
       } else if (menu_state == MENU_STATE_MSNGR_SEND_RESULT) {
         buzzer_encoder_tick_melody();
-        msngr_send_result_cursor = menu_clamp_cursor(msngr_send_result_cursor, dir, msngr_send_result_failed() ? 4 : 2, wrap);
+        msngr_send_result_cursor = menu_clamp_cursor(msngr_send_result_cursor, dir, msngr_send_result_row_count(), wrap);
       } else if (menu_state == MENU_STATE_MSNGR_SETTINGS) {
         buzzer_encoder_tick_melody();
         msngr_settings_cursor = menu_clamp_cursor(msngr_settings_cursor, dir, MSNGR_SETTINGS_ITEM_COUNT, wrap);
@@ -7223,19 +7271,23 @@
         // Row 0 (status) is read-only. Row 1 is BACK normally (2-row
         // layout) but becomes Retry, with Retry via Prop right below it
         // and BACK pushed to row 3 (4-row layout, draw code above), once
-        // the send has reached a terminal failure state -
-        // msngr_send_result_failed() is the single source of truth both
-        // places agree on.
+        // the send has reached a terminal failure state AND the router's
+        // own outbound queue is actually free (msngr_send_result_row_
+        // count() is the single source of truth both places agree on) -
+        // while the original send is still retrying in the background
+        // (msngr_send_result_queue_busy()), row_count()==2 same as an
+        // in-flight/successful send, so cursor 1 is still BACK, not Retry.
         bool send_result_failed = msngr_send_result_failed();
-        uint8_t back_row = send_result_failed ? 3 : 1;
-        if (send_result_failed && msngr_send_result_cursor == 1) {
+        bool send_result_actionable = send_result_failed && !msngr_send_result_queue_busy();
+        uint8_t back_row = msngr_send_result_row_count() - 1;
+        if (send_result_actionable && msngr_send_result_cursor == 1) {
           // Retry - re-fires the exact same destination/content, using
           // whatever delivery method the peer's own setting calls for
           // (msngr_send_pending_dest_hash/_content, Messenger.h, populated
           // unconditionally by every messenger_send_lxmf() call) rather
           // than making the user back out and retype the message.
           messenger_send_lxmf(msngr_send_pending_dest_hash, msngr_send_pending_content);
-        } else if (send_result_failed && msngr_send_result_cursor == 2) {
+        } else if (send_result_actionable && msngr_send_result_cursor == 2) {
           // Retry via Prop - same re-fire, but forces PROPAGATED for this
           // one send regardless of the peer's Send Direct/Send Propagated
           // setting (messenger_send_lxmf()'s forced_method, Messenger.h) -
@@ -7615,7 +7667,7 @@
         else if (menu_state == MENU_STATE_MSNGR_CLEAR_CONFIRM)    msngr_clear_confirm_cursor = 1;
         else if (menu_state == MENU_STATE_MSNGR_DISCARD_CONFIRM)  msngr_discard_confirm_cursor = 1;
         else if (menu_state == MENU_STATE_MSNGR_PING_RESULT)      msngr_ping_result_cursor = 1;
-        else if (menu_state == MENU_STATE_MSNGR_SEND_RESULT)      msngr_send_result_cursor = msngr_send_result_failed() ? 3 : 1;
+        else if (menu_state == MENU_STATE_MSNGR_SEND_RESULT)      msngr_send_result_cursor = msngr_send_result_row_count() - 1;
         else if (menu_state == MENU_STATE_MSNGR_SETTINGS)         msngr_settings_cursor = MSNGR_SETTINGS_ITEM_COUNT - 1;
         else if (menu_state == MENU_STATE_MSNGR_PRESETS)          msngr_presets_cursor = msngr_presets_row_count() - 1;
         else if (menu_state == MENU_STATE_MSNGR_PRESET_DETAIL)    msngr_preset_detail_cursor = 2;
@@ -8254,7 +8306,7 @@
   // both the row it sits above and the row before it are in the current
   // scroll window - if the boundary itself has scrolled out of view
   // there's nothing to visually divide.
-  void draw_menu_list_disp(const char *title, const char **labels, char valbufs[][24], uint8_t count, uint8_t cursor, const uint8_t **icons = nullptr, const uint8_t *icon_widths = nullptr, const int8_t *icon_dx = nullptr, bool icon_col_shared = true, const int8_t *text_dx = nullptr, const uint8_t **right_icons = nullptr, const uint8_t *right_icon_widths = nullptr, const int8_t *right_dx = nullptr, int16_t separator_before = -1) {
+  void draw_menu_list_disp(const char *title, const char **labels, char valbufs[][24], uint8_t count, uint8_t cursor, const uint8_t **icons = nullptr, const uint8_t *icon_widths = nullptr, const int8_t *icon_dx = nullptr, bool icon_col_shared = true, const int8_t *text_dx = nullptr, const uint8_t **right_icons = nullptr, const uint8_t *right_icon_widths = nullptr, const int8_t *right_dx = nullptr, int16_t separator_before = -1, const char *footer_override = nullptr) {
     MENU_GFX.setFont(MENU_FONT);
     MENU_GFX.setTextSize(1);
     MENU_GFX.setTextColor(SSD1306_WHITE);
@@ -8373,15 +8425,176 @@
     MENU_GFX.setTextColor(SSD1306_WHITE);
     MENU_GFX.drawFastHLine(MENU_CONTENT_X, MENU_LIST_FOOTER_HLINE_Y, MENU_CONTENT_W, SSD1306_WHITE);
     MENU_GFX.setCursor(6, MENU_LIST_FOOTER_TEXT_Y);
-    // Whether an encoder is actually populated is a runtime choice
-    // (encoder_enabled) on boards where it's optional, not the compile-time
-    // HAS_ENCODER capability flag - see MENU_ITEM_ENCODER.
-    #if HAS_ENCODER == true
-      if (encoder_enabled) MENU_GFX.print("turn:move press:open");
-      else                 MENU_GFX.print("tap:next hold:open");
-    #else
-      MENU_GFX.print("tap:next hold:open");
+    // footer_override lets a specific caller replace the usual turn/tap
+    // navigation hint outright with its own text - takes priority over
+    // everything below.
+    bool footer_drawn = false;
+    if (footer_override) {
+      MENU_GFX.print(footer_override);
+      footer_drawn = true;
+    }
+    #if HAS_LXMF == true
+      // Persistent, screen-agnostic reminder that LXMRouter's single-in-
+      // flight outbound queue (process_outbound()'s own comment,
+      // LXMRouter.cpp) is still occupied - a Messenger send silently
+      // retrying in the background (LXMRouter.cpp's static_proof_timeout_
+      // callback()) long after whatever screen started it either resolved
+      // or was backed out of, with zero other on-screen indication
+      // otherwise. Deliberately keyed off "is the queue busy at all", not
+      // "is it MY message" - the previous per-screen version of this only
+      // recognized its own tracked send, so starting a second send (or
+      // just backing out and doing anything else) while the first was
+      // still retrying made that background activity invisible again.
+      // Applies to every screen through this shared renderer; the
+      // handful of screens with their own separate footer-drawing code
+      // (keyboard entry, in-place value editors, the memory screen) are
+      // deliberately left alone - overwriting their own input hint mid-
+      // edit would be actively confusing, not helpful.
+      if (!footer_drawn && urns_lxmf_router && urns_lxmf_router->pending_outbound_count() > 0) {
+        // Wider than the 24-byte convention used elsewhere on this screen -
+        // "Awaiting Proof 48s (2/5)" alone is 24 visible chars, would
+        // already be truncated by a 24-byte buffer (23 chars + null).
+        char buf[32];
+        int attempts = urns_lxmf_router->pending_outbound_front_attempts();
+        double next_in = urns_lxmf_router->pending_outbound_front_next_action_in();
+        bool has_retried = attempts > 1;
+        // Round up, not down - next_in ticks continuously, and truncating
+        // (the previous (unsigned)next_in) made the displayed countdown
+        // run 9s->0s instead of 10s->1s, i.e. it visibly hit 0 for however
+        // long remains between the deadline actually passing and this
+        // screen's next redraw. Since any remaining time above 0 is still
+        // genuinely "not yet", round up so the lowest number ever shown is
+        // 1s - the countdown reaching 0 would wrongly read as "due now"
+        // when it's actually already past due by definition of next_in
+        // (pending_outbound_front_next_action_in()'s own >0.0 ? ... : 0.0).
+        unsigned next_in_secs = (unsigned)next_in;
+        if (next_in > next_in_secs) next_in_secs++;
+        // Per user request: don't say "Retry" on a first attempt that
+        // hasn't even failed yet (was reading "Retry 1/5" the instant a
+        // message was first transmitted, before any real retry happened),
+        // and label the two genuinely different waits distinctly instead
+        // of one bare countdown that silently resets with no explanation -
+        // SENT means still awaiting delivery proof (Reticulum's own
+        // auto-computed first-hop timeout, Transport::first_hop_timeout());
+        // anything else queued here (OUTBOUND/SENDING) polls again in
+        // _outbound_retry_delay seconds (msngr_retry_delay_s, RNode
+        // Settings > Messenger > Retry Delay), but for two conceptually
+        // different reasons that shouldn't share a label:
+        // - "Delay" (attempts > 0): a real attempt already genuinely
+        //   failed and this is the backoff before retrying - true for
+        //   OPPORTUNISTIC/DIRECT's own backoff, and for a PROPAGATED
+        //   PropagatedOutcome::FAILED (LXMRouter.h's own comment).
+        // - "Resolving" (attempts == 0): PROPAGATED still waiting on a
+        //   precondition (propagation node/path/identity/link) - bound via
+        //   resolution_attempts() instead, not delivery_attempts(), so
+        //   nothing has actually failed yet even though the same ~10s poll
+        //   cadence applies. Labeling this "Delay" too read as "something
+        //   failed and is retrying" when nothing had - confirmed on
+        //   hardware, this phase can legitimately poll a few times while
+        //   the link comes up. Per user request, name the actual pending
+        //   precondition instead of a single generic "Resolving" -
+        //   mirrors send_propagated()'s own check order exactly
+        //   (LXMRouter.cpp) so this never guesses: no propagation node
+        //   configured at all, no known path to it yet, its identity not
+        //   announced yet, or a link to it already created but not yet
+        //   ACTIVE (is_outbound_propagation_link_establishing(), the same
+        //   check the primary status line above already uses for its own
+        //   "Establishing Link" text).
+        if (urns_lxmf_router->pending_outbound_front_state() == LXMF::Type::Message::SENT) {
+          if (next_in >= 0.0) {
+            if (has_retried) snprintf(buf, sizeof(buf), "Awaiting Proof %us (%d/%u)", next_in_secs, attempts, (unsigned)msngr_max_retries);
+            else              snprintf(buf, sizeof(buf), "Awaiting Proof %us", next_in_secs);
+          } else {
+            snprintf(buf, sizeof(buf), "Awaiting Proof");
+          }
+        } else if (next_in >= 0.0) {
+          if (attempts > 0) {
+            snprintf(buf, sizeof(buf), "Delay %us (%d/%u)", next_in_secs, attempts, (unsigned)msngr_max_retries);
+          } else if (urns_lxmf_router->pending_outbound_front_stamp_running()) {
+            // Checked ahead of the resolving-reason lookup below - stamp
+            // generation only ever starts once the link to the
+            // propagation node is already ACTIVE, so none of that lookup's
+            // precondition checks would apply anyway, and it'd otherwise
+            // fall through to the generic "Resolving" catch-all - see
+            // pending_outbound_front_stamp_running()'s own comment,
+            // LXMRouter.h, confirmed on hardware. No countdown here on
+            // purpose - next_in is just this poll's ~10s check-in
+            // interval, not an ETA for the grind itself (LXStamper's own
+            // worst case is ~2 minutes, send_propagated()'s comment,
+            // LXMRouter.cpp), so showing it would misleadingly imply the
+            // stamp is about to land.
+            snprintf(buf, sizeof(buf), "Generating Stamp...");
+          } else if (urns_lxmf_router->pending_outbound_front_stamp_done()) {
+            // The grind itself finished (is_propagation_stamp_running()
+            // already false) but LXStamper's own state machine
+            // (LXStamper.cpp) only returns to IDLE once send_propagated()
+            // actually consumes the result on its own next ~10s poll - see
+            // pending_outbound_front_stamp_done()'s own comment,
+            // LXMRouter.h. Real, observable gap confirmed on hardware, not
+            // a guess.
+            snprintf(buf, sizeof(buf), "Stamp Ready...");
+          } else {
+            RNS::Bytes prop_node = urns_lxmf_router->get_outbound_propagation_node();
+            if (prop_node.size() == 0) {
+              snprintf(buf, sizeof(buf), "No Prop Node %us", next_in_secs);
+            } else if (!RNS::Transport::has_path(prop_node)) {
+              snprintf(buf, sizeof(buf), "No Path %us", next_in_secs);
+            } else if (!RNS::Identity::recall(prop_node)) {
+              snprintf(buf, sizeof(buf), "No Announce %us", next_in_secs);
+            } else if (urns_lxmf_router->is_outbound_propagation_link_establishing()) {
+              snprintf(buf, sizeof(buf), "Establishing Link %us", next_in_secs);
+            } else if (urns_lxmf_router->is_outbound_propagation_link_stale()) {
+              // A reused link from an earlier send that's gone idle - see
+              // is_outbound_propagation_link_stale()'s own comment,
+              // LXMRouter.h - confirmed on hardware, this is exactly what
+              // fell through to the generic "Resolving" fallback below.
+              snprintf(buf, sizeof(buf), "Link Stale %us", next_in_secs);
+            } else if (urns_lxmf_router->outbound_propagation_stamp_cost() > 0) {
+              // Link is already ACTIVE (every check above passed) and this
+              // node requires a stamp, but neither stamp_running() nor
+              // stamp_done() is true yet - the link only just became
+              // ACTIVE and send_propagated() hasn't had its own next
+              // ~10s poll to notice and kick the grind off yet. Same
+              // "waiting on the router's own poll cadence to catch up"
+              // gap as Stamp Ready above, just on the other side of the
+              // grind - confirmed on hardware.
+              snprintf(buf, sizeof(buf), "Preparing Stamp...");
+            } else {
+              // Every reachable RESOLVING/WAITING sub-state is named
+              // explicitly above now (no path/announce/prop node, link
+              // establishing/stale, stamp preparing/generating/ready) -
+              // link status enum only has PENDING/HANDSHAKE/ACTIVE/STALE/
+              // CLOSED (Type.h), CLOSED is handled by recreating the link
+              // outright, and no stamp is required here, so the only thing
+              // left this can be is "link just went ACTIVE, about to pack
+              // and start the resource transfer on the router's next
+              // ~10s poll" - not a guess/defensive catch-all anymore.
+              snprintf(buf, sizeof(buf), "Preparing Send %us", next_in_secs);
+            }
+          }
+        } else if (has_retried) {
+          // No deadline known - e.g. a PROPAGATED retry, which never
+          // registers a PendingProofSlot (send_propagated()'s own
+          // resource-transfer path, LXMRouter.cpp).
+          snprintf(buf, sizeof(buf), "Retrying (%d/%u)", attempts, (unsigned)msngr_max_retries);
+        } else {
+          snprintf(buf, sizeof(buf), "Sending...");
+        }
+        MENU_GFX.print(buf);
+        footer_drawn = true;
+      }
     #endif
+    if (!footer_drawn) {
+      // Whether an encoder is actually populated is a runtime choice
+      // (encoder_enabled) on boards where it's optional, not the compile-time
+      // HAS_ENCODER capability flag - see MENU_ITEM_ENCODER.
+      #if HAS_ENCODER == true
+        if (encoder_enabled) MENU_GFX.print("turn:move press:open");
+        else                 MENU_GFX.print("tap:next hold:open");
+      #else
+        MENU_GFX.print("tap:next hold:open");
+      #endif
+    }
   }
 
   #if HAS_URNS == true
@@ -11492,14 +11705,31 @@
           default:                    snprintf(status_buf, sizeof(status_buf), "..."); break;
         }
         bool send_failed = msngr_send_result_failed();
+        // Still occupying the front of the router's own outbound queue,
+        // silently retrying in the background even though this screen has
+        // already given up waiting - see this bool's own declaration. While
+        // true, Retry/Retry via Prop would just queue uselessly behind the
+        // still-active original send (LXMRouter.cpp's single-in-flight
+        // process_outbound()), so they're withheld the same way they are
+        // for an in-flight/successful send - row_count()'s own comment.
+        bool queue_busy = send_failed && msngr_send_result_queue_busy();
         if (send_failed) {
-          icons[0] = bm_menu_icon_msngr_ping_fail;
-          icon_widths[0] = MENU_ICON_W_MSNGR_PING_FAIL;
+          // Waiting icon (not the fail icon) while queue_busy - visually
+          // distinguishes "still working in the background" from "done,
+          // your move" even though status_buf itself keeps saying No
+          // Confirmation/Delivery Failed either way.
+          if (queue_busy) {
+            icons[0] = bm_menu_icon_msngr_waiting;
+            icon_widths[0] = MENU_ICON_W_MSNGR_WAITING;
+          } else {
+            icons[0] = bm_menu_icon_msngr_ping_fail;
+            icon_widths[0] = MENU_ICON_W_MSNGR_PING_FAIL;
+          }
         }
         labels[0] = status_buf;
         valbufs[0][0] = 0;
-        uint8_t row_count;
-        if (send_failed) {
+        uint8_t row_count = msngr_send_result_row_count();
+        if (row_count == 4) {
           labels[1] = "Retry";
           valbufs[1][0] = 0;
           icons[1] = bm_menu_icon_msngr_retry;
@@ -11515,17 +11745,22 @@
           icon_widths[2] = MENU_ICON_W_MSNGR_PROP_NODE;
           labels[3] = "BACK";
           valbufs[3][0] = 0;
-          row_count = 4;
         } else {
           labels[1] = "BACK";
           valbufs[1][0] = 0;
-          row_count = 2;
         }
         // Same fixed-column overlap fix as MSNGR_PING_RESULT above - the
         // wider ping-fail icon needs the label pushed right a bit further
-        // than the narrower ping-ok icon does.
+        // than the narrower ping-ok icon does. The waiting icon (queue_busy)
+        // is narrower than MENU_ICON_W_MSNGR_PING_OK, so this formula
+        // already yields 0 for it - no separate case needed.
         const int8_t text_dx[4] = { (int8_t)(icon_widths[0] > MENU_ICON_W_MSNGR_PING_OK ? icon_widths[0] - MENU_ICON_W_MSNGR_PING_OK : 0), 0, 0, 0 };
 
+        // No footer_override needed here - draw_menu_list_disp() already
+        // shows the router's own live retry progress in the footer
+        // whenever the outbound queue is occupied at all (its own comment),
+        // which covers this screen automatically along with every other
+        // list screen.
         char title[24];
         snprintf(title, sizeof(title), "SEND: %s", messenger_peer_display_name(msngr_active_peer_hash).c_str());
         draw_menu_list_disp(title, labels, valbufs, row_count, msngr_send_result_cursor, icons, icon_widths, nullptr, false, text_dx);

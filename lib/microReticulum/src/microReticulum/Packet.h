@@ -103,6 +103,9 @@ namespace RNS {
 		bool validate_proof(const Bytes& proof, const Packet& proof_packet);
 		inline double get_rtt() { assert(_object); return _object->_concluded_at - _object->_sent_at; }
 		inline bool is_timed_out() { assert(_object); return ((_object->_sent_at + _object->_timeout) < Utilities::OS::time()); }
+		// Same deadline is_timed_out() checks against, exposed so a caller can
+		// show a live countdown to it (e.g. a UI) rather than just a boolean.
+		inline double timeout_at() { assert(_object); return _object->_sent_at + _object->_timeout; }
 		void check_timeout();
 
 		// :param timeout: The timeout in seconds.

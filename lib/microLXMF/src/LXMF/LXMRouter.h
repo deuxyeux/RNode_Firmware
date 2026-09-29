@@ -105,6 +105,39 @@ namespace LXMF {
 			PR_FAILED            = 0x07
 		};
 
+		/**
+		 * @brief Outcome of a single send_propagated() call - lets
+		 * process_outbound() (LXMRouter.cpp) charge the right counter for
+		 * why it didn't (yet) result in an actual resource transfer,
+		 * instead of the single delivery_attempts() bucket every non-SENT
+		 * outcome used to share.
+		 *
+		 * FIXED (local patch, not upstream): delivery_attempts() used to
+		 * increment on every one of send_propagated()'s early returns - no
+		 * path/identity for the propagation node yet, link still
+		 * establishing, link not yet ACTIVE - not just genuine send
+		 * failures. _max_delivery_attempts is a short budget (5 cycles *
+		 * _outbound_retry_delay by default) sized for real failed-send
+		 * retries; resolving a path and establishing a link to the
+		 * propagation node alone could burn most or all of it before a
+		 * stamp grind (already correctly excluded, see WAITING below) or
+		 * the actual resource transfer ever got a chance to start -
+		 * confirmed on hardware: the send would cancel itself right as the
+		 * node started generating a stamp, and a second attempt (path
+		 * already known, link already established from the first) would
+		 * then succeed almost immediately. RESOLVING now uses
+		 * resolution_attempts() instead - the same separate, already-
+		 * proven-out budget send_opportunistic()'s own path/identity waits
+		 * use (LXMessage.h's own comment on resolution_attempts()
+		 * explicitly anticipates "path/identity/link resolution cycles").
+		 */
+		enum class PropagatedOutcome : uint8_t {
+			SENT,       ///< Resource transfer initiated
+			RESOLVING,  ///< Waiting on a precondition (propagation node/path/identity/link) - bound via resolution_attempts()
+			WAITING,    ///< Provably still in progress (stamp grind running, or just kicked off) - uncounted, same as before
+			FAILED      ///< Genuine failure (e.g. packing the propagated message failed) - bound via delivery_attempts()
+		};
+
 	public:
 		/**
 		 * @brief Construct LXMF Router
@@ -336,6 +369,30 @@ namespace LXMF {
 		}
 
 		/**
+		 * @brief Whether the outbound propagation link exists but has gone
+		 * STALE (idle too long - a final keepalive was sent, and it'll be
+		 * torn down for good unless traffic arrives before RNS::Type::
+		 * Link::STALE_TIME's own further grace period elapses)
+		 *
+		 * Distinct from is_outbound_propagation_link_establishing() above -
+		 * status enum only has PENDING/HANDSHAKE/ACTIVE/STALE/CLOSED
+		 * (Type.h), and send_propagated() (LXMRouter.cpp) recreates the
+		 * Link outright once it reaches CLOSED, so PENDING/HANDSHAKE/STALE
+		 * are the only three "exists, not ACTIVE" states a UI can actually
+		 * observe here - without this, STALE fell through to a generic
+		 * "still resolving something" catch-all with no way to tell a
+		 * fresh handshake in progress from a reused link quietly dying -
+		 * confirmed on hardware: reusing an aged link from an earlier
+		 * PROPAGATED send is exactly the case this misses.
+		 *
+		 * @return true if a propagation link exists and is STALE
+		 */
+		bool is_outbound_propagation_link_stale() const {
+			if (!_outbound_propagation_link) return false;
+			return _outbound_propagation_link.status() == RNS::Type::Link::STALE;
+		}
+
+		/**
 		 * @brief Enable/disable fallback to PROPAGATED delivery
 		 *
 		 * When enabled, messages that fail DIRECT/OPPORTUNISTIC delivery will
@@ -513,6 +570,110 @@ namespace LXMF {
 		}
 
 		/**
+		 * @brief Live delivery state for whatever is at the front of the
+		 * outbound queue, regardless of which message that is
+		 *
+		 * Hash-agnostic sibling to pending_outbound_state_for() above, same
+		 * "don't need to know whose message it is" reasoning as
+		 * pending_outbound_front_attempts()/pending_outbound_front_next_
+		 * action_in() below - lets a UI distinguish "still trying to get it
+		 * onto the radio, or backed off waiting to retry" (OUTBOUND/SENDING)
+		 * from "handed off, waiting on delivery proof" (SENT) without first
+		 * needing to know or track a specific message hash.
+		 *
+		 * @return front->state(), or Type::Message::GENERATING if the queue
+		 *   is empty
+		 */
+		Type::Message::State pending_outbound_front_state() {
+			LXMessage* front = pending_outbound_front();
+			return front ? front->state() : Type::Message::GENERATING;
+		}
+
+		/**
+		 * @brief Live delivery-attempt count for whatever is at the front of
+		 * the outbound queue, regardless of which message that is
+		 *
+		 * Unlike pending_outbound_attempts_for() above, this doesn't care
+		 * whose message is being worked on - only one message is ever
+		 * in flight at a time (this class's own single-in-flight design,
+		 * see process_outbound()'s own comment, LXMRouter.cpp), so "what's
+		 * the queue doing right now" is a single fact any caller can ask
+		 * without first having to know or track a specific message hash -
+		 * e.g. a persistent UI indicator that should show real progress no
+		 * matter which earlier send happens to still be retrying.
+		 *
+		 * @return front->delivery_attempts(), or -1 if the queue is empty
+		 */
+		int pending_outbound_front_attempts() {
+			LXMessage* front = pending_outbound_front();
+			return front ? front->delivery_attempts() : -1;
+		}
+
+		/**
+		 * @brief Seconds until the front-of-queue message's next event,
+		 * regardless of which message that is
+		 *
+		 * Same "don't need to know whose message it is" reasoning as
+		 * pending_outbound_front_attempts() above. The "next event" is
+		 * whichever deadline the router itself is actually waiting on: the
+		 * delivery-proof timeout (state()==SENT, captured into the
+		 * message's PendingProofSlot at send_opportunistic()/DIRECT-via-
+		 * link registration time - see PendingProofSlot::timeout_at's own
+		 * comment) or the next scheduled outbound-retry attempt
+		 * (_next_outbound_process_time, the same deadline process_
+		 * outbound() itself gates on).
+		 *
+		 * @return Seconds remaining (>= 0), or -1 if the queue is empty, or
+		 *   no deadline is currently known for the front message (e.g.
+		 *   PROPAGATED, which never registers a PendingProofSlot - see
+		 *   send_propagated()'s own resource-transfer path).
+		 */
+		double pending_outbound_front_next_action_in() {
+			LXMessage* front = pending_outbound_front();
+			if (!front) return -1.0;
+			double deadline;
+			if (front->state() == Type::Message::SENT) {
+				bool found = false;
+				deadline = 0.0;
+				RNS::Bytes front_hash = front->hash();
+				for (size_t i = 0; i < PENDING_PROOFS_SIZE; i++) {
+					if (_pending_proofs_pool[i].in_use && _pending_proofs_pool[i].message_hash_bytes() == front_hash) {
+						deadline = _pending_proofs_pool[i].timeout_at;
+						found = true;
+						break;
+					}
+				}
+				if (!found) return -1.0;
+			} else {
+				deadline = _next_outbound_process_time;
+			}
+			double remain = deadline - RNS::Utilities::OS::time();
+			return remain > 0 ? remain : 0.0;
+		}
+
+		/**
+		 * @brief Seconds until the front-of-queue message's next event, only
+		 * if that message is the specific one the caller has in mind
+		 *
+		 * Sibling to pending_outbound_attempts_for()/pending_outbound_
+		 * state_for() above, same "only the front of the queue can match"
+		 * contract - for a caller that's specifically tracking one message
+		 * (e.g. "is MY send still the one being retried") rather than just
+		 * "what's the queue doing" (pending_outbound_front_next_action_in()
+		 * above, which this delegates to once the hash has matched).
+		 *
+		 * @param message_hash Hash of the message to check
+		 * @return Seconds remaining (>= 0), or -1 if message_hash isn't the
+		 *   front of the outbound queue, or no deadline is currently known
+		 *   for it.
+		 */
+		double pending_outbound_next_action_in(const RNS::Bytes& message_hash) {
+			LXMessage* front = pending_outbound_front();
+			if (!front || front->hash() != message_hash) return -1.0;
+			return pending_outbound_front_next_action_in();
+		}
+
+		/**
 		 * @brief Whether a still-in-flight outbound message is currently
 		 * grinding its PROPAGATED proof-of-work stamp
 		 *
@@ -537,6 +698,60 @@ namespace LXMF {
 				return front->is_propagation_stamp_running();
 			}
 			return false;
+		}
+
+		/**
+		 * @brief Whether whatever's at the front of the outbound queue is
+		 * currently grinding its PROPAGATED proof-of-work stamp, regardless
+		 * of which message that is
+		 *
+		 * Hash-agnostic sibling to pending_outbound_stamp_running_for()
+		 * above, same "don't need to know whose message it is" reasoning as
+		 * pending_outbound_front_attempts()/pending_outbound_front_state()
+		 * etc - added because a screen-agnostic UI indicator (e.g. the
+		 * footer status line every list screen shares) otherwise can't
+		 * tell PropagatedOutcome::WAITING (stamp grinding, or just kicked
+		 * off - see that enum's own comment) apart from PropagatedOutcome::
+		 * RESOLVING (still waiting on a precondition) - both leave
+		 * delivery_attempts() at 0 and both schedule a real
+		 * _next_outbound_process_time, so neither the attempt count nor
+		 * the countdown alone distinguishes them, and since stamp
+		 * generation only ever starts once the link to the propagation
+		 * node is already ACTIVE, none of RESOLVING's own precondition
+		 * checks (no path/identity/link) apply either - confirmed on
+		 * hardware, this fell through to a generic "Resolving" label while
+		 * a stamp was actively being ground.
+		 *
+		 * @return true if the front message's stamp computation is
+		 *   currently running
+		 */
+		bool pending_outbound_front_stamp_running() {
+			LXMessage* front = pending_outbound_front();
+			return front && front->is_propagation_stamp_running();
+		}
+
+		/**
+		 * @brief Whether whatever's at the front of the outbound queue has
+		 * a finished PROPAGATED stamp grind waiting to be consumed,
+		 * regardless of which message that is
+		 *
+		 * Sibling to pending_outbound_front_stamp_running() above - LXStamper's
+		 * own state machine (LXStamper.cpp) only returns to IDLE once
+		 * take_async_result() actually runs, which send_propagated() only
+		 * does on its own next ~10s poll (LXMRouter.cpp, process_outbound()'s
+		 * _outbound_retry_delay cadence) - so there's a real, observable gap
+		 * between the grind finishing (is_propagation_stamp_running() already
+		 * false) and that poll actually consuming the result and proceeding
+		 * to pack/send. Without this, that gap fell through to the same
+		 * generic "Resolving" catch-all pending_outbound_front_stamp_running()
+		 * was added to avoid - confirmed on hardware.
+		 *
+		 * @return true if the front message's stamp computation has
+		 *   finished and is waiting to be consumed
+		 */
+		bool pending_outbound_front_stamp_done() {
+			LXMessage* front = pending_outbound_front();
+			return front && front->is_propagation_stamp_done();
 		}
 
 		/**
@@ -672,9 +887,9 @@ namespace LXMF {
 		 * @brief Send message via PROPAGATED delivery
 		 *
 		 * @param message Message to send
-		 * @return True if send initiated successfully
+		 * @return See PropagatedOutcome's own comment above
 		 */
-		bool send_propagated(LXMessage& message);
+		PropagatedOutcome send_propagated(LXMessage& message);
 
 	public:
 		/**
@@ -815,6 +1030,10 @@ namespace LXMF {
 			bool in_use = false;
 			uint8_t packet_hash[HASH_SIZE];
 			uint8_t message_hash[HASH_SIZE];
+			// PacketReceipt::timeout_at() at registration time - lets a UI show
+			// a live countdown to this slot's proof deadline (see
+			// LXMRouter::pending_outbound_next_action_in() below).
+			double timeout_at = 0.0;
 			RNS::Bytes packet_hash_bytes() const { return RNS::Bytes(packet_hash, HASH_SIZE); }
 			RNS::Bytes message_hash_bytes() const { return RNS::Bytes(message_hash, HASH_SIZE); }
 			void set_packet_hash(const RNS::Bytes& b) {
@@ -835,6 +1054,7 @@ namespace LXMF {
 				in_use = false;
 				memset(packet_hash, 0, HASH_SIZE);
 				memset(message_hash, 0, HASH_SIZE);
+				timeout_at = 0.0;
 			}
 		};
 		static PendingProofSlot _pending_proofs_pool[PENDING_PROOFS_SIZE];

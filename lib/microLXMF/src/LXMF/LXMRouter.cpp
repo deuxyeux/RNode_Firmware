@@ -1021,39 +1021,86 @@ void LXMRouter::process_outbound() {
 		if (_propagation_only || message.method() == Type::Message::PROPAGATED) {
 			DEBUG("  Using PROPAGATED delivery");
 			message.set_method(Type::Message::PROPAGATED);
-			// FIXED (local patch, not upstream): don't burn a real delivery
-			// attempt for the async stamp grind's own "still working, not
-			// done yet" poll (send_propagated()'s is_propagation_stamp_
-			// running() check, below) - LXStamper's own worst case is ~2
-			// minutes (that function's own comment), which would otherwise
-			// exhaust _max_delivery_attempts - a much shorter budget, sized
-			// for genuine failed delivery attempts at this retry cadence -
-			// well before a real proof-of-work grind can finish, on any
-			// propagation node that actually requires a stamp (confirmed:
-			// this firmware never attached one at all until messenger_
-			// refresh_prop_node_stamp_cost() started wiring it up,
-			// Messenger.h). Every other early-return inside send_
-			// propagated() (no path, no identity, link not active/
-			// establishing) still burns an attempt as before - unlike the
-			// stamp grind, none of those are provably still making
-			// progress.
-			if (!message.is_propagation_stamp_running()) {
-				message.increment_delivery_attempts();
-			}
-			if (send_propagated(message)) {
-				// Resource transfer to PN was initiated. Don't fire
-				// _sent_callback yet — python LXMF semantics: SENT
-				// means the PN actually received the upload (i.e. our
-				// Resource transfer concluded with PRF). The
-				// static_propagation_resource_concluded callback fires
-				// _sent_callback when that happens (LXMRouter.cpp).
-				// Until then leave message.state at OUTBOUND.
-				INFO("Message resource transfer to PN initiated, waiting for proof");
-				LXMessage dummy;
-				pending_outbound_pop(dummy);
-			} else {
-				DEBUG("  Propagation delivery not ready, will retry...");
-				_next_outbound_process_time = now + _outbound_retry_delay;
+			// FIXED (local patch, not upstream): send_propagated() used to
+			// return a flat bool, and every non-SENT outcome - no path/
+			// identity for the propagation node, link still establishing,
+			// link not yet ACTIVE, not just the (already correctly
+			// excluded) stamp-grind poll - burned a real delivery_
+			// attempts() increment, the same short budget
+			// (_max_delivery_attempts, sized for genuine failed-send
+			// retries) sized for real failed-send retries. Resolving a
+			// path and establishing a link to the propagation node alone
+			// could burn most or all of it before the stamp grind or the
+			// actual resource transfer ever got a chance to start -
+			// confirmed on hardware: the send would cancel itself right
+			// as the node started generating a stamp, and a second
+			// attempt (path already known, link already established from
+			// the first) would then succeed almost immediately.
+			// PropagatedOutcome (LXMRouter.h) now lets this tell those
+			// cases apart and charge the right counter - see its own
+			// comment there.
+			switch (send_propagated(message)) {
+				case PropagatedOutcome::SENT:
+					// Resource transfer to PN was initiated. Don't fire
+					// _sent_callback yet — python LXMF semantics: SENT
+					// means the PN actually received the upload (i.e. our
+					// Resource transfer concluded with PRF). The
+					// static_propagation_resource_concluded callback fires
+					// _sent_callback when that happens (LXMRouter.cpp).
+					// Until then leave message.state at OUTBOUND.
+					INFO("Message resource transfer to PN initiated, waiting for proof");
+					{
+						LXMessage dummy;
+						pending_outbound_pop(dummy);
+					}
+					break;
+
+				case PropagatedOutcome::WAITING:
+					// Provably still in progress (stamp grind running, or
+					// just kicked off) - uncounted against either budget,
+					// same as before this fix.
+					DEBUG("  Propagation delivery still in progress, will retry...");
+					_next_outbound_process_time = now + _outbound_retry_delay;
+					break;
+
+				case PropagatedOutcome::RESOLVING:
+					// Waiting on a precondition (propagation node/path/
+					// identity/link) - bound via resolution_attempts(),
+					// same shape as send_opportunistic()'s own identity-
+					// resolution wait above, not delivery_attempts().
+					if (message.resolution_attempts() >= _max_delivery_attempts) {
+						WARNING("Giving up resolving propagation node/path/link for " + message.destination_hash().toHex());
+						message.state(Type::Message::FAILED);
+						if (_failed_callback) {
+							_failed_callback(message);
+						}
+						failed_outbound_push(message);
+						LXMessage dummy;
+						pending_outbound_pop(dummy);
+						return;
+					}
+					message.increment_resolution_attempts();
+					_next_outbound_process_time = now + _outbound_retry_delay;
+					break;
+
+				case PropagatedOutcome::FAILED:
+					// Genuine failure (e.g. packing the propagated message
+					// failed) - bound via delivery_attempts(), the real
+					// send-attempt budget.
+					message.increment_delivery_attempts();
+					if (message.delivery_attempts() >= _max_delivery_attempts) {
+						WARNING("Max delivery attempts reached for PROPAGATED message to " + message.destination_hash().toHex());
+						message.state(Type::Message::FAILED);
+						if (_failed_callback) {
+							_failed_callback(message);
+						}
+						failed_outbound_push(message);
+						LXMessage dummy;
+						pending_outbound_pop(dummy);
+						return;
+					}
+					_next_outbound_process_time = now + _outbound_retry_delay;
+					break;
 			}
 			return;
 		}
@@ -1683,6 +1730,7 @@ bool LXMRouter::send_via_link(LXMessage& message, Link& link) {
 				slot->in_use = true;
 				slot->set_packet_hash(receipt.hash());
 				slot->set_message_hash(message.hash());
+				slot->timeout_at = receipt.timeout_at();
 				snprintf(buf, sizeof(buf), "  Registered proof callback for direct-link packet %.16s...", receipt.hash().toHex().c_str());
 				DEBUG(buf);
 			} else {
@@ -1817,6 +1865,7 @@ bool LXMRouter::send_opportunistic(LXMessage& message, const Identity& dest_iden
 			slot->in_use = true;
 			slot->set_packet_hash(receipt.hash());
 			slot->set_message_hash(message.hash());
+			slot->timeout_at = receipt.timeout_at();
 			snprintf(buf, sizeof(buf), "  Registered proof callback for packet %.16s...", receipt.hash().toHex().c_str());
 			DEBUG(buf);
 		} else {
@@ -2199,7 +2248,7 @@ void LXMRouter::static_propagation_resource_concluded(const Resource& resource) 
 	slot->clear();
 }
 
-bool LXMRouter::send_propagated(LXMessage& message) {
+LXMRouter::PropagatedOutcome LXMRouter::send_propagated(LXMessage& message) {
 	INFO("Sending LXMF message via PROPAGATED delivery");
 	char buf[128];
 
@@ -2208,7 +2257,7 @@ bool LXMRouter::send_propagated(LXMessage& message) {
 
 	if (prop_node.size() == 0) {
 		WARNING("No propagation node available for PROPAGATED delivery");
-		return false;
+		return PropagatedOutcome::RESOLVING;
 	}
 
 	snprintf(buf, sizeof(buf), "  Using propagation node: %.16s...", prop_node.toHex().c_str());
@@ -2222,14 +2271,14 @@ bool LXMRouter::send_propagated(LXMessage& message) {
 		if (!Transport::has_path(prop_node)) {
 			INFO("  No path to propagation node, requesting...");
 			Transport::request_path(prop_node);
-			return false;  // Will retry next cycle
+			return PropagatedOutcome::RESOLVING;  // Will retry next cycle
 		}
 
 		// Recall identity for propagation node
 		Identity node_identity = Identity::recall(prop_node);
 		if (!node_identity) {
 			INFO("  Propagation node identity not known, waiting for announce...");
-			return false;
+			return PropagatedOutcome::RESOLVING;
 		}
 
 		// Create destination for propagation node
@@ -2244,19 +2293,19 @@ bool LXMRouter::send_propagated(LXMessage& message) {
 		// Create link with established callback
 		_outbound_propagation_link = Link(prop_dest);
 		INFO("  Establishing link to propagation node...");
-		return false;  // Will retry when link established
+		return PropagatedOutcome::RESOLVING;  // Will retry when link established
 	}
 
 	// Check if link is active
 	if (_outbound_propagation_link.status() != RNS::Type::Link::ACTIVE) {
 		DEBUG("  Propagation link not yet active, waiting...");
-		return false;  // Will retry
+		return PropagatedOutcome::RESOLVING;  // Will retry
 	}
 
 	// Generate propagation stamp if required by node. Async — the
 	// stamper grinds on a worker task so the main loop stays
 	// responsive (cost=16 averages 30s and can hit 2 minutes on bad
-	// luck). First call kicks off the worker and returns false; the
+	// luck). First call kicks off the worker and returns WAITING; the
 	// next process_outbound iteration polls and either retries or
 	// proceeds when the stamp lands.
 	if (_outbound_propagation_stamp_cost > 0
@@ -2269,7 +2318,7 @@ bool LXMRouter::send_propagated(LXMessage& message) {
 			}
 		} else if (message.is_propagation_stamp_running()) {
 			DEBUG("  Propagation stamp still being computed, will retry");
-			return false;
+			return PropagatedOutcome::WAITING;
 		} else {
 			snprintf(buf, sizeof(buf),
 			         "  Kicking async propagation stamp (cost=%u)...",
@@ -2279,7 +2328,7 @@ bool LXMRouter::send_propagated(LXMessage& message) {
 			        _outbound_propagation_stamp_cost)) {
 				WARNING("  start_propagation_stamp_async failed (already in flight?), retrying");
 			}
-			return false;  // retry once stamp is ready
+			return PropagatedOutcome::WAITING;  // retry once stamp is ready
 		}
 	}
 
@@ -2287,7 +2336,7 @@ bool LXMRouter::send_propagated(LXMessage& message) {
 	Bytes prop_packed = message.pack_propagated();
 	if (!prop_packed || prop_packed.size() == 0) {
 		ERROR("  Failed to pack message for propagation");
-		return false;
+		return PropagatedOutcome::FAILED;
 	}
 
 	snprintf(buf, sizeof(buf), "  Propagated message size: %zu bytes", prop_packed.size());
@@ -2318,7 +2367,7 @@ bool LXMRouter::send_propagated(LXMessage& message) {
 
 	message.state(Type::Message::SENDING);
 	INFO("  PROPAGATED resource transfer initiated");
-	return true;
+	return PropagatedOutcome::SENT;
 }
 
 // Static router pointer for sync callbacks (raw function pointers required by RequestReceipt)
