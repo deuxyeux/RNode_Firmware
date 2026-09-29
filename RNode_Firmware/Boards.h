@@ -1100,6 +1100,15 @@
       #define WAKEUP_LEVEL 0
       #define OCP_TUNED 0x38
 
+      // RNode Settings menu (Menu.h), button-only navigation (tap = next,
+      // double-tap = back, hold = select/open - see menu_button_press()).
+      // No encoder, buzzer, or voltage divider on this board, so
+      // HAS_ENCODER/HAS_BUZZER/HAS_VSENSE/HAS_BATTERY_DIVIDER all stay at
+      // their default false (Boards.h fallback block below) - same
+      // SSD1306 mono OLED + pin_btn_usr1 setup as Heltec32_V4, which
+      // already uses this same button-only menu mechanism.
+      #define HAS_MENU true
+
       const int pin_btn_usr1 = 0;
 
       #if defined(EXTERNAL_LEDS)
