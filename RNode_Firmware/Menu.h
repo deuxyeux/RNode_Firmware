@@ -1137,22 +1137,36 @@
 
     // MENU_STATE_MSNGR_PEER's entire action set when msngr_active_peer_hash
     // is a Propagation-type bookmark instead of an LXMF one
-    // (messenger_bookmark_is_prop_node(), Messenger.h) - Compose/Ping/
-    // Clear Conversation/preset Send buttons all assume an LXMF delivery
+    // (messenger_bookmark_is_prop_node(), Messenger.h) - Compose/Clear
+    // Conversation/preset Send buttons all assume an LXMF delivery
     // destination, which a propagation node isn't (it answers on "lxmf"/
     // "propagation", not "lxmf"/"delivery" - no conversation ever exists
     // to show either, so message rows/presets are skipped entirely too,
-    // not just these three). Replaces MSNGR_PEER_FIXED_ACTION_* wholesale
+    // not just these two). Replaces MSNGR_PEER_FIXED_ACTION_* wholesale
     // rather than coexisting with it - see msngr_peer_row_count() and the
     // draw/confirm handling's own is_prop_node branch for where the two
-    // action sets fork.
+    // action sets fork. Ping is the one fixed action with its own
+    // Propagation-side counterpart (MSNGR_PEER_PROP_ACTION_PING below)
+    // rather than being dropped outright - see messenger_ping_start()'s
+    // is_prop argument (Messenger.h) for how it targets "propagation"
+    // instead of "delivery".
     #define MSNGR_PEER_PROP_ACTION_SYNC       0 // manually syncs against THIS bookmark's node specifically, making it active first if it wasn't already - msngr_prop_sync_start()
-    #define MSNGR_PEER_PROP_ACTION_SHOW_HASH  1 // opens MENU_STATE_URNS_PATH_HASH_VIEW (reused as-is) against this bookmark's hash, same full two-line hex view URNS Path Table's own Hash row uses
-    #define MSNGR_PEER_PROP_ACTION_SET_ACTIVE 2 // label switches Set/Unset Active - messenger_prop_node_set_active()/_clear_active()
-    #define MSNGR_PEER_PROP_ACTION_RENAME     3 // opens MENU_STATE_MSNGR_TEXT_ENTRY (MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_RENAME) - messenger_bookmark_rename(), the only way a propagation node ever gets a friendly display name (see that function's own comment, Messenger.h)
-    #define MSNGR_PEER_PROP_ACTION_REMOVE     4 // messenger_bookmark_remove() - same action MSNGR_PEER_FIXED_ACTION_BOOKMARK's "Remove Bookmark" wording does for an LXMF peer, just unconditional here (a Propagation-type bookmark is always bookmarked - that's the only way one exists)
-    #define MSNGR_PEER_PROP_ACTION_BACK       5
-    #define MSNGR_PEER_PROP_ACTION_COUNT      6
+    // Opens MENU_STATE_MSNGR_PING_RESULT (reused as-is), same bare
+    // Link-handshake-as-pong mechanism MSNGR_PEER_FIXED_ACTION_PING uses
+    // against an LXMF peer's lxmf.delivery destination - messenger_ping_
+    // start(hash, true) (Messenger.h) just builds the Link against this
+    // bookmark's lxmf.propagation destination instead, since a real
+    // propagation node has to accept link requests there too (it's how
+    // sync/propagated-delivery already work - see that function's own
+    // comment for why this is expected to work against any reference-
+    // implementation propagation node).
+    #define MSNGR_PEER_PROP_ACTION_PING       1
+    #define MSNGR_PEER_PROP_ACTION_SHOW_HASH  2 // opens MENU_STATE_URNS_PATH_HASH_VIEW (reused as-is) against this bookmark's hash, same full two-line hex view URNS Path Table's own Hash row uses
+    #define MSNGR_PEER_PROP_ACTION_SET_ACTIVE 3 // label switches Set/Unset Active - messenger_prop_node_set_active()/_clear_active()
+    #define MSNGR_PEER_PROP_ACTION_RENAME     4 // opens MENU_STATE_MSNGR_TEXT_ENTRY (MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_RENAME) - messenger_bookmark_rename(), the only way a propagation node ever gets a friendly display name (see that function's own comment, Messenger.h)
+    #define MSNGR_PEER_PROP_ACTION_REMOVE     5 // messenger_bookmark_remove() - same action MSNGR_PEER_FIXED_ACTION_BOOKMARK's "Remove Bookmark" wording does for an LXMF peer, just unconditional here (a Propagation-type bookmark is always bookmarked - that's the only way one exists)
+    #define MSNGR_PEER_PROP_ACTION_BACK       6
+    #define MSNGR_PEER_PROP_ACTION_COUNT      7
 
     // Worst-case row count for MENU_STATE_MSNGR_PEER's local draw arrays -
     // message rows + every preset slot filled + all fixed actions, even
@@ -7058,6 +7072,10 @@
       } else if (menu_state == MENU_STATE_MSNGR_PEER && messenger_bookmark_is_prop_node(msngr_active_peer_hash)) {
         if (msngr_peer_cursor == MSNGR_PEER_PROP_ACTION_SYNC) {
           msngr_prop_sync_start(msngr_active_peer_hash, MENU_STATE_MSNGR_PEER);
+        } else if (msngr_peer_cursor == MSNGR_PEER_PROP_ACTION_PING) {
+          messenger_ping_start(msngr_active_peer_hash, true);
+          msngr_ping_result_cursor = 1; // default BACK - see its own declaration
+          menu_state = MENU_STATE_MSNGR_PING_RESULT;
         } else if (msngr_peer_cursor == MSNGR_PEER_PROP_ACTION_SHOW_HASH) {
           urns_path_detail_hash = msngr_active_peer_hash;
           menu_hash_view_return_state = MENU_STATE_MSNGR_PEER;
@@ -11074,24 +11092,51 @@
         // propagation node bookmark never has a conversation).
         const char *labels[MSNGR_PEER_PROP_ACTION_COUNT];
         char valbufs[MSNGR_PEER_PROP_ACTION_COUNT][24];
+        // Every row now has an icon - Ping/Show Hash/Remove Bookmark reuse
+        // MENU_STATE_MSNGR_PEER's own LXMF-peer action icons for the same
+        // concept, Rename reuses Compose message's (per user request - both
+        // are "type some text for this peer"), Back gets the same arrow
+        // every other explicit icon table's BACK row does (icon_col_shared
+        // == true here bypasses draw_menu_list_disp()'s own BACK auto-icon
+        // detection - see that function's own comment - so it has to be set
+        // explicitly like every other row). Sync/Set-Active get their own
+        // dedicated glyphs below.
+        const uint8_t *icons[MSNGR_PEER_PROP_ACTION_COUNT] = { nullptr };
+        uint8_t icon_widths[MSNGR_PEER_PROP_ACTION_COUNT] = { 0 };
 
         labels[MSNGR_PEER_PROP_ACTION_SYNC] = "Sync";
         valbufs[MSNGR_PEER_PROP_ACTION_SYNC][0] = 0;
+        icons[MSNGR_PEER_PROP_ACTION_SYNC] = bm_menu_icon_msngr_prop_sync;
+        icon_widths[MSNGR_PEER_PROP_ACTION_SYNC] = MENU_ICON_W_MSNGR_PROP_SYNC;
+        labels[MSNGR_PEER_PROP_ACTION_PING] = "Ping";
+        valbufs[MSNGR_PEER_PROP_ACTION_PING][0] = 0;
+        icons[MSNGR_PEER_PROP_ACTION_PING] = bm_menu_icon_msngr_ping;
+        icon_widths[MSNGR_PEER_PROP_ACTION_PING] = MENU_ICON_W_MSNGR_PING;
         labels[MSNGR_PEER_PROP_ACTION_SHOW_HASH] = "Show Hash";
         valbufs[MSNGR_PEER_PROP_ACTION_SHOW_HASH][0] = 0;
+        icons[MSNGR_PEER_PROP_ACTION_SHOW_HASH] = bm_menu_icon_msngr_add_by_hash;
+        icon_widths[MSNGR_PEER_PROP_ACTION_SHOW_HASH] = MENU_ICON_W_MSNGR_ADD_BY_HASH;
         bool is_active = messenger_prop_node_is_active(msngr_active_peer_hash);
         labels[MSNGR_PEER_PROP_ACTION_SET_ACTIVE] = is_active ? "Unset Active" : "Set Active";
         valbufs[MSNGR_PEER_PROP_ACTION_SET_ACTIVE][0] = 0;
+        icons[MSNGR_PEER_PROP_ACTION_SET_ACTIVE] = is_active ? bm_menu_icon_msngr_prop_active : bm_menu_icon_msngr_prop_inactive;
+        icon_widths[MSNGR_PEER_PROP_ACTION_SET_ACTIVE] = is_active ? MENU_ICON_W_MSNGR_PROP_ACTIVE : MENU_ICON_W_MSNGR_PROP_INACTIVE;
         labels[MSNGR_PEER_PROP_ACTION_RENAME] = "Rename";
         valbufs[MSNGR_PEER_PROP_ACTION_RENAME][0] = 0;
+        icons[MSNGR_PEER_PROP_ACTION_RENAME] = bm_menu_icon_msngr_compose;
+        icon_widths[MSNGR_PEER_PROP_ACTION_RENAME] = MENU_ICON_W_MSNGR_COMPOSE;
         labels[MSNGR_PEER_PROP_ACTION_REMOVE] = "Remove Bookmark";
         valbufs[MSNGR_PEER_PROP_ACTION_REMOVE][0] = 0;
+        icons[MSNGR_PEER_PROP_ACTION_REMOVE] = bm_menu_icon_msngr_remove_bookmark;
+        icon_widths[MSNGR_PEER_PROP_ACTION_REMOVE] = MENU_ICON_W_MSNGR_REMOVE_BOOKMARK;
         labels[MSNGR_PEER_PROP_ACTION_BACK] = "BACK";
         valbufs[MSNGR_PEER_PROP_ACTION_BACK][0] = 0;
+        icons[MSNGR_PEER_PROP_ACTION_BACK] = bm_menu_icon_back;
+        icon_widths[MSNGR_PEER_PROP_ACTION_BACK] = MENU_ICON_W_BACK;
 
         char title[24];
         snprintf(title, sizeof(title), "%s", messenger_peer_display_name(msngr_active_peer_hash).c_str());
-        draw_menu_list_disp(title, labels, valbufs, MSNGR_PEER_PROP_ACTION_COUNT, msngr_peer_cursor);
+        draw_menu_list_disp(title, labels, valbufs, MSNGR_PEER_PROP_ACTION_COUNT, msngr_peer_cursor, icons, icon_widths);
       } else if (menu_state == MENU_STATE_MSNGR_PEER) {
         // Picks up a message that arrived for this peer while the screen
         // is sitting open - see that function's own comment for why this

@@ -1774,6 +1774,15 @@
   // to answer. An idle link left open after that is harmless on their
   // side - it just sits registered for a delivery that never comes and
   // eventually goes stale on its own.
+  //
+  // Also usable against a Propagation-type bookmark (msngr_ping_target_
+  // is_prop below) - a reference-implementation propagation node has to
+  // accept link requests on its lxmf.propagation destination too, to serve
+  // syncs and propagated deliveries at all (see send_propagated()/request_
+  // messages_from_propagation_node(), lib/microLXMF's LXMRouter.cpp, which
+  // both open exactly this kind of Link against that same destination) -
+  // so the same bare handshake-as-pong trick applies, just against
+  // "propagation" instead of "delivery".
   #define MSNGR_PING_IDLE         0
   #define MSNGR_PING_RESOLVING    1 // waiting on Transport::request_path()
   #define MSNGR_PING_ESTABLISHING 2 // Link constructed, LINKREQUEST sent, awaiting proof
@@ -1799,6 +1808,10 @@
 
   RNS::Link msngr_ping_link({RNS::Type::NONE});
   RNS::Bytes msngr_ping_target_hash;
+  // Set by messenger_ping_start()'s is_prop argument - selects which
+  // destination aspect messenger_ping_issue_link() builds against
+  // ("propagation" vs the default "delivery").
+  bool msngr_ping_target_is_prop = false;
   uint8_t msngr_ping_state = MSNGR_PING_IDLE;
   double msngr_ping_rtt = 0.0; // seconds, valid once msngr_ping_state == MSNGR_PING_SUCCESS
   unsigned long msngr_ping_phase_started_ms = 0;
@@ -1849,14 +1862,16 @@
       msngr_ping_state = MSNGR_PING_NO_IDENTITY;
       return;
     }
-    RNS::Destination dest(peer_identity, RNS::Type::Destination::OUT, RNS::Type::Destination::SINGLE, "lxmf", "delivery");
+    RNS::Destination dest(peer_identity, RNS::Type::Destination::OUT, RNS::Type::Destination::SINGLE, "lxmf", msngr_ping_target_is_prop ? "propagation" : "delivery");
     msngr_ping_link = RNS::Link(dest, msngr_ping_link_established, msngr_ping_link_closed);
     msngr_ping_state = MSNGR_PING_ESTABLISHING;
     msngr_ping_phase_started_ms = millis();
   }
 
   // Kicks off a ping to dest_hash - called from Menu.h when the Ping
-  // action is confirmed on MENU_STATE_MSNGR_PEER. Non-blocking: this only
+  // action is confirmed on MENU_STATE_MSNGR_PEER (is_prop left at its
+  // default false), or when MSNGR_PEER_PROP_ACTION_PING is confirmed
+  // against a Propagation-type bookmark (is_prop true). Non-blocking: this only
   // starts path/identity resolution (or the link itself, if both are
   // already known) - messenger_ping_process() carries it the rest of the
   // way, and MENU_STATE_MSNGR_PING_RESULT's own draw code just reads
@@ -1873,8 +1888,9 @@
   // waits on Identity::recall() rather than has_path() specifically for
   // the same reason (whichever one request_path() actually resolves,
   // both arrive together).
-  void messenger_ping_start(const RNS::Bytes &dest_hash) {
+  void messenger_ping_start(const RNS::Bytes &dest_hash, bool is_prop = false) {
     msngr_ping_target_hash = dest_hash;
+    msngr_ping_target_is_prop = is_prop;
     msngr_ping_rtt = 0.0;
     msngr_ping_teardown_pending = false;
     msngr_ping_link = RNS::Link({RNS::Type::NONE});
