@@ -3254,47 +3254,105 @@
       return (uint8_t)(msngr_peer_msg_row_count() + msngr_preset_count + MSNGR_PEER_FIXED_ACTION_COUNT);
     }
 
-    // Chars-per-row for MENU_STATE_MSNGR_MSG_DETAIL's word-wrap. Per user
-    // request, this screen's content-preview rows now use the "same
-    // message fitting logic" as the Full Message view (MSNGR_MSG_VIEW_
-    // CHARS_PER_LINE's own comment - the real average Org_01 glyph width
-    // is narrower than a naive full-width/20 estimate assumed) - matches
-    // that constant's value exactly rather than deriving a separate one,
-    // now that this screen's own content rows also lose their previous
-    // 8px left-padding (draw_settings_menu_disp()'s MSG_DETAIL draw
-    // block, text_dx below) and so have essentially the same ~128px
-    // usable width available.
-    #define MSNGR_MSG_DETAIL_CHARS_PER_LINE 23
+    // Real word-wrap - breaks at the last space that still fits, falling
+    // back to a hard character break only when a single word itself
+    // exceeds a whole line. Measures actual pixel width via
+    // getTextBounds() instead of assuming a fixed chars-per-line count
+    // (what both MSG_DETAIL and MSG_VIEW used to do here, independently,
+    // both tuned to 23): Org_01's real glyph widths vary enough that a
+    // flat count wraps some lines a character or two early even though the
+    // whole line still fits on screen - e.g. "Pong! [00:32:14, Hops: 1]"
+    // (25 chars, ~110px wide) broke into two lines on this 128px-wide
+    // screen purely because 25 > 23, despite ~18px of unused width still
+    // left on the line. No amount of re-tuning the constant fixes that in
+    // general (a wider message can always exist that still fits); actually
+    // measuring the candidate line's pixel width removes the guesswork
+    // entirely. Shared by MENU_STATE_MSNGR_MSG_DETAIL's content-preview
+    // rows and the full-screen MSG_VIEW below (msngr_msg_view_wrap()) -
+    // caller must have already set MENU_GFX's font/size (every
+    // draw_*_disp() in this file does this at entry; msngr_msg_detail_
+    // refresh_wrap_cache() below sets it explicitly itself, since it can
+    // run outside a draw call).
+    uint8_t msngr_wrap_text(const std::string &content, std::string out_lines[], uint8_t max_lines, int16_t max_w) {
+      uint8_t n = 0;
+      size_t pos = 0;
+      size_t len = content.size();
+      int16_t bx, by; uint16_t bw, bh;
+      while (pos < len && n < max_lines) {
+        while (pos < len && content[pos] == ' ') pos++;
+        if (pos >= len) break;
+        size_t remaining = len - pos;
+        MENU_GFX.getTextBounds(content.substr(pos, remaining).c_str(), 0, 0, &bx, &by, &bw, &bh);
+        if ((int16_t)bw <= max_w) {
+          out_lines[n++] = content.substr(pos, remaining);
+          break;
+        }
+        // Binary search the longest prefix of the remaining text that
+        // still fits max_w, then back off to the last space inside it
+        // (real word-wrap); a single word wider than max_w on its own
+        // falls back to a hard break at that same longest-fitting length.
+        size_t lo = 1, hi = remaining, fit_len = 1;
+        while (lo <= hi) {
+          size_t mid = lo + (hi - lo) / 2;
+          MENU_GFX.getTextBounds(content.substr(pos, mid).c_str(), 0, 0, &bx, &by, &bw, &bh);
+          if ((int16_t)bw <= max_w) { fit_len = mid; lo = mid + 1; }
+          else if (mid == 0) break;
+          else hi = mid - 1;
+        }
+        size_t last_space = content.rfind(' ', pos + fit_len - 1);
+        if (last_space != std::string::npos && last_space > pos) {
+          out_lines[n++] = content.substr(pos, last_space - pos);
+          pos = last_space + 1;
+        } else {
+          out_lines[n++] = content.substr(pos, fit_len);
+          pos += fit_len;
+        }
+      }
+      return n;
+    }
 
-    // Reads msngr_msg_detail_cache_content (Messenger.h) - same "cache
-    // once per screen-entry, don't re-read flash per call" reasoning as
-    // msngr_peer_msg_row_count() above.
+    // MENU_STATE_MSNGR_MSG_DETAIL's content-preview rows - msngr_wrap_
+    // text() above, computed once per screen-entry into msngr_msg_detail_
+    // wrapped_lines/_count (msngr_msg_detail_refresh_wrap_cache(), called
+    // right after messenger_refresh_msg_detail_cache() at every entry
+    // point below) rather than re-measured on every draw or estimated from
+    // a char-count guess - same "cache once per screen-entry, don't
+    // recompute from flash-backed content on every call" discipline
+    // msngr_peer_cache/msg_detail_cache themselves already follow
+    // elsewhere in this file. Caching also keeps the row count
+    // (msngr_msg_detail_row_count() below) and the actually-drawn text
+    // (draw_settings_menu_disp()'s own MSG_DETAIL block) in exact
+    // agreement, since both just read this same array.
+    std::string msngr_msg_detail_wrapped_lines[MSNGR_MSG_DETAIL_MAX_LINES];
+    uint8_t msngr_msg_detail_wrapped_count = 0;
+    void msngr_msg_detail_refresh_wrap_cache() {
+      MENU_GFX.setFont(MENU_FONT);
+      MENU_GFX.setTextSize(1);
+      msngr_msg_detail_wrapped_count = msngr_wrap_text(msngr_msg_detail_cache_content, msngr_msg_detail_wrapped_lines, MSNGR_MSG_DETAIL_MAX_LINES, MENU_CONTENT_W);
+    }
+
     uint8_t msngr_msg_detail_row_count() {
       if (!msngr_msg_detail_cache_valid) return 2;
-      size_t len = msngr_msg_detail_cache_content.size();
-      size_t lines = (len + MSNGR_MSG_DETAIL_CHARS_PER_LINE - 1) / MSNGR_MSG_DETAIL_CHARS_PER_LINE;
-      if (lines == 0) lines = 1;
-      if (lines > MSNGR_MSG_DETAIL_MAX_LINES) lines = MSNGR_MSG_DETAIL_MAX_LINES;
-      return (uint8_t)(lines + 4); // content lines + REPLY + DELETE + FULL MESSAGE + BACK
+      return (uint8_t)(msngr_msg_detail_wrapped_count + 4); // content lines + REPLY + DELETE + FULL MESSAGE + BACK
     }
 
     // Full-screen, ornament-free single-message view, real word-wrap
-    // (unlike MENU_STATE_MSNGR_MSG_DETAIL's own naive fixed-width substr()
-    // chop above, which can and does split words mid-letter and never
-    // scrolls past its own MSNGR_MSG_DETAIL_MAX_LINES cap). Shared by two
-    // entry points, per user request ("it should actually use the same
-    // function"): MENU_STATE_MSNGR_MSG_DETAIL's own "Full Message" row
-    // (menu_confirm_select(), below) and MENU_STATE_MSNGR_CHAT's Enter-
-    // while-browsing (blekbd_key_event(), further below, HAS_BLE_HID_HOST
-    // boards only) - msngr_msg_view_return_state records which of the two
-    // to land back on when the view closes. Deliberately NOT gated behind
-    // HAS_BLE_HID_HOST (unlike the CHAT entry point) - MSG_DETAIL is core
-    // Messenger functionality, reachable via a real encoder/single button
-    // on every HAS_LXMF board, keyboard or not. Reuses msngr_msg_detail_
-    // cache_content (Messenger.h, messenger_refresh_msg_detail_cache())
-    // for the actual fetch either way - the same full-content cache
-    // MSG_DETAIL itself already populates, not msngr_chat_cache[]'s own
-    // capped-length snippet.
+    // (shares msngr_wrap_text() with MENU_STATE_MSNGR_MSG_DETAIL's own
+    // content-preview rows above - unlike that screen's cached array,
+    // this one re-wraps on every draw since it's the only reader).
+    // Shared by two entry points, per user request ("it should actually
+    // use the same function"): MENU_STATE_MSNGR_MSG_DETAIL's own "Full
+    // Message" row (menu_confirm_select(), below) and MENU_STATE_MSNGR_
+    // CHAT's Enter-while-browsing (blekbd_key_event(), further below,
+    // HAS_BLE_HID_HOST boards only) - msngr_msg_view_return_state records
+    // which of the two to land back on when the view closes. Deliberately
+    // NOT gated behind HAS_BLE_HID_HOST (unlike the CHAT entry point) -
+    // MSG_DETAIL is core Messenger functionality, reachable via a real
+    // encoder/single button on every HAS_LXMF board, keyboard or not.
+    // Reuses msngr_msg_detail_cache_content (Messenger.h, messenger_
+    // refresh_msg_detail_cache()) for the actual fetch either way - the
+    // same full-content cache MSG_DETAIL itself already populates, not
+    // msngr_chat_cache[]'s own capped-length snippet.
     bool msngr_msg_view_active = false;
     // Which wrapped line is at the top of the screen - Up/Down (keyboard),
     // encoder rotation, and single-button short-tap/double-tap (matching
@@ -3316,53 +3374,23 @@
     // actually needs to scroll, so the wrap width never changes message
     // to message.
     //
-    // Kept at 23 (unreduced from the pre-scrollbar value) rather than
-    // scaled proportionally down to ~21 - a first attempt at 21 was
-    // confirmed too conservative on real hardware ("plenty of room left").
-    // Checking Org_01's own glyph table (Fonts/Org_01.h GFXglyph xAdvance)
-    // explains why: the implied per-char width behind "23 fits 128px" is
-    // ~5.57px, but the font's *real* average glyph width is only ~4.8px
-    // for lowercase+space (realistic prose) and ~5.0px across the whole
-    // printable set - i.e. the original 23 already carried ~12-15% slack
-    // beyond typical text, comfortably absorbing the scrollbar's ~5.5%
-    // width cut (7px of 128) without actually needing to drop the count.
-    // Same per-char-width estimate MSNGR_PEER_SCROLL_WINDOW/MSG_DETAIL_
-    // CHARS_PER_LINE (both 20-23) already use for this font/width
-    // combination elsewhere in this file.
-    //
     // MAX_LINES must still "comfortably cover the full MSNGR_CONTENT_
     // DECODE_BUF_LEN-1 (255 char) decode cap even in the pathological
     // all-one-giant-word case with zero break points" (original guarantee)
-    // - ceil(255/23) = 12, unchanged.
-    #define MSNGR_MSG_VIEW_CHARS_PER_LINE 23
+    // - the old fixed chars-per-line count made that ceil(255/23)=12 a
+    // simple division; msngr_wrap_text() below now measures pixels instead
+    // of counting characters, so this is instead sized off Org_01's own
+    // narrowest printable glyph ('.'/','/etc at 2px xAdvance - see Fonts/
+    // Org_01.h) against the 121px available: ceil(255/(121/2))=5, but kept
+    // at the original 12 anyway since that pathological case is already
+    // vanishingly unlikely (a 255-char message with not one space) and 12
+    // was already proven sufficient on hardware.
     #define MSNGR_MSG_VIEW_MAX_LINES 12
 
-    // Real word-wrap (breaks at the last space that still fits, falling
-    // back to a hard character break only when a single word itself
-    // exceeds a whole line).
+    // msngr_wrap_text() above, at MENU_CONTENT_W minus the scrollbar's own
+    // reserved 7px (this screen's own comment above).
     uint8_t msngr_msg_view_wrap(const std::string &content, std::string out_lines[], uint8_t max_lines) {
-      uint8_t n = 0;
-      size_t pos = 0;
-      size_t len = content.size();
-      while (pos < len && n < max_lines) {
-        while (pos < len && content[pos] == ' ') pos++;
-        if (pos >= len) break;
-        size_t remaining = len - pos;
-        if (remaining <= MSNGR_MSG_VIEW_CHARS_PER_LINE) {
-          out_lines[n++] = content.substr(pos, remaining);
-          break;
-        }
-        size_t window_end = pos + MSNGR_MSG_VIEW_CHARS_PER_LINE; // exclusive
-        size_t last_space = content.rfind(' ', window_end - 1);
-        if (last_space != std::string::npos && last_space > pos) {
-          out_lines[n++] = content.substr(pos, last_space - pos);
-          pos = last_space + 1;
-        } else {
-          out_lines[n++] = content.substr(pos, MSNGR_MSG_VIEW_CHARS_PER_LINE);
-          pos += MSNGR_MSG_VIEW_CHARS_PER_LINE;
-        }
-      }
-      return n;
+      return msngr_wrap_text(content, out_lines, max_lines, MENU_CONTENT_W - 7);
     }
   #endif
   #endif
@@ -6892,6 +6920,7 @@
           // directly - see that cache's own comment for why.
           RNS::Bytes msg_hash(msngr_peer_cache[msngr_peer_cursor].hash, LXMF::MESSAGE_HASH_SIZE);
           messenger_refresh_msg_detail_cache(msg_hash);
+          msngr_msg_detail_refresh_wrap_cache();
           msngr_active_message_hash = msg_hash;
           msngr_msg_detail_cursor = 0;
           menu_state = MENU_STATE_MSNGR_MSG_DETAIL;
@@ -8304,8 +8333,8 @@
     // like part of the same menu; only the middle content (input preview +
     // key grid) is bespoke. Column/row math is a first pass tuned by eye
     // for the generic 128x64/Org_01 combination (same font every HAS_URNS
-    // board uses today, see MSNGR_MSG_DETAIL_CHARS_PER_LINE's own comment)
-    // - expect this to need live on-hardware nudging like every other
+    // board uses today, see msngr_wrap_text()'s own comment) - expect this
+    // to need live on-hardware nudging like every other
     // pixel-level layout in this file.
     // Extracted from draw_menu_msngr_keyboard_disp()'s own non-hex-mode
     // preview box below - shared with MENU_STATE_MSNGR_CHAT's own draw
@@ -8690,8 +8719,8 @@
       MENU_GFX.drawRect(box_x, box_y, box_w, box_h, SSD1306_WHITE);
       if (hex_mode) {
         // Two lines of 16 chars each (32 total) fit this box_w at Org_01's
-        // width (MSNGR_MSG_DETAIL_CHARS_PER_LINE=20 already fits 20 chars
-        // in the same MENU_CONTENT_W elsewhere) - exactly BOOKMARK_HASH's
+        // width (msngr_wrap_text() elsewhere in this file comfortably fits
+        // 20+ chars in the same MENU_CONTENT_W) - exactly BOOKMARK_HASH's
         // own max_len (32), so its full buffer always fits with no
         // scrolling needed - windowed to the last 32 chars typed purely
         // as a defensive measure (never actually triggers at this
@@ -10946,7 +10975,6 @@
         // +4, not +1 - content lines plus the trailing Reply, Delete,
         // Full Message and BACK rows.
         const char *labels[MSNGR_MSG_DETAIL_MAX_LINES + 4];
-        char label_bufs[MSNGR_MSG_DETAIL_MAX_LINES][MSNGR_MSG_DETAIL_CHARS_PER_LINE + 1];
         char valbufs[MSNGR_MSG_DETAIL_MAX_LINES + 4][24];
         const uint8_t *icons[MSNGR_MSG_DETAIL_MAX_LINES + 4] = { nullptr };
         uint8_t icon_widths[MSNGR_MSG_DETAIL_MAX_LINES + 4] = { 0 };
@@ -10957,20 +10985,15 @@
         // own auto-icon path) are unaffected, left at 0/default.
         int8_t text_dx[MSNGR_MSG_DETAIL_MAX_LINES + 4] = { 0 };
 
-        // Reads msngr_msg_detail_cache_* (Messenger.h, populated once
-        // when the message row was selected) - same "don't read flash
-        // from the render path" reasoning as MENU_STATE_MSNGR_PEER above.
-        const std::string &content = msngr_msg_detail_cache_content;
-
+        // msngr_msg_detail_wrapped_lines (populated by msngr_msg_detail_
+        // refresh_wrap_cache() when the message row was selected, above) -
+        // points labels[] straight at the cached std::strings rather than
+        // re-chopping msngr_msg_detail_cache_content here, same "don't
+        // recompute from flash-backed content on every draw" reasoning as
+        // MENU_STATE_MSNGR_PEER above.
         uint8_t lines = row_count - 4; // content lines - Reply, Delete, Full Message, BACK are appended after
         for (uint8_t i = 0; i < lines; i++) {
-          size_t start = (size_t)i * MSNGR_MSG_DETAIL_CHARS_PER_LINE;
-          if (start < content.size()) {
-            snprintf(label_bufs[i], sizeof(label_bufs[i]), "%s", content.substr(start, MSNGR_MSG_DETAIL_CHARS_PER_LINE).c_str());
-          } else {
-            label_bufs[i][0] = 0;
-          }
-          labels[i] = label_bufs[i];
+          labels[i] = msngr_msg_detail_wrapped_lines[i].c_str();
           valbufs[i][0] = 0;
           // 8 -> 1, not all the way to 0 (MENU_CONTENT_X) - per user
           // feedback, flush against the physical edge looked too tight;
