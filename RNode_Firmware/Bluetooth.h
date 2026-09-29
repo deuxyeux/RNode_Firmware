@@ -1303,8 +1303,14 @@ char bt_da[BT_DEV_ADDR_LEN];
     // directly via the public Adafruit_LittleFS API rather than pulling in
     // Bluefruit52Lib's own non-public utility/bonding.h.
     int count = 0;
-    File bond_dir("/adafruit/bond_prph", FILE_O_READ, InternalFS);
-    File bond_file(InternalFS);
+    // Qualified, unlike every other InternalFS File usage in this codebase
+    // (e.g. Utilities.h) - this is the only bare `File` usage that appears
+    // after Bluetooth.h's own bluefruit.h include, which transitively pulls
+    // in SdFat's own global `typedef FsFile File;` (via Adafruit_TinyUSB's
+    // MSC header) - unqualified `File` here is ambiguous between that and
+    // Adafruit_LittleFS_Namespace::File (Utilities.h's `using namespace`).
+    Adafruit_LittleFS_Namespace::File bond_dir("/adafruit/bond_prph", FILE_O_READ, InternalFS);
+    Adafruit_LittleFS_Namespace::File bond_file(InternalFS);
     while ((bond_file = bond_dir.openNextFile(FILE_O_READ))) {
       if (!bond_file.isDirectory()) count++;
       bond_file.close();
