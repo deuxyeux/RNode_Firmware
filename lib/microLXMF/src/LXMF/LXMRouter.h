@@ -319,6 +319,23 @@ namespace LXMF {
 		RNS::Bytes get_outbound_propagation_node() const { return _outbound_propagation_node; }
 
 		/**
+		 * @brief Whether the outbound propagation link is currently being
+		 * established (PENDING/HANDSHAKE) - i.e. send_propagated() has
+		 * created the Link but it hasn't reached ACTIVE yet. Lets UI code
+		 * distinguish this phase from "no link exists yet" (still resolving
+		 * path/identity) and from the actual resource transfer once the
+		 * link is up - see send_propagated()'s own "Establishing link to
+		 * propagation node..." early-return (LXMRouter.cpp).
+		 *
+		 * @return true if a propagation link exists and isn't ACTIVE/CLOSED yet
+		 */
+		bool is_outbound_propagation_link_establishing() const {
+			if (!_outbound_propagation_link) return false;
+			RNS::Type::Link::status status = _outbound_propagation_link.status();
+			return status == RNS::Type::Link::PENDING || status == RNS::Type::Link::HANDSHAKE;
+		}
+
+		/**
 		 * @brief Enable/disable fallback to PROPAGATED delivery
 		 *
 		 * When enabled, messages that fail DIRECT/OPPORTUNISTIC delivery will
@@ -493,6 +510,33 @@ namespace LXMF {
 				return front->state();
 			}
 			return Type::Message::GENERATING;
+		}
+
+		/**
+		 * @brief Whether a still-in-flight outbound message is currently
+		 * grinding its PROPAGATED proof-of-work stamp
+		 *
+		 * FIXED (local patch, not upstream): same "only the front of the
+		 * queue can match" sibling as pending_outbound_attempts_for()/
+		 * pending_outbound_state_for() above - added so a UI can report
+		 * "generating stamp" distinctly from "establishing link"/"awaiting
+		 * proof" while send_propagated() (LXMRouter.cpp) is blocked on
+		 * LXStamper's async worker (its own comment: cost=16 averages 30s,
+		 * up to ~2 minutes on bad luck) - neither of message.state()'s
+		 * existing OUTBOUND/SENDING/SENT values distinguishes this phase
+		 * from any other pre-transfer wait, so pending_outbound_state_for()
+		 * alone can't tell a UI this is happening.
+		 *
+		 * @param message_hash Hash of the message to check
+		 * @return true if message_hash matches the front of the outbound
+		 *   queue and its stamp computation is currently running
+		 */
+		bool pending_outbound_stamp_running_for(const RNS::Bytes& message_hash) {
+			LXMessage* front = pending_outbound_front();
+			if (front && front->hash() == message_hash) {
+				return front->is_propagation_stamp_running();
+			}
+			return false;
 		}
 
 		/**

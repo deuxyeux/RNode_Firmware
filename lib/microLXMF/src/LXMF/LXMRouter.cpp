@@ -1021,7 +1021,25 @@ void LXMRouter::process_outbound() {
 		if (_propagation_only || message.method() == Type::Message::PROPAGATED) {
 			DEBUG("  Using PROPAGATED delivery");
 			message.set_method(Type::Message::PROPAGATED);
-			message.increment_delivery_attempts();
+			// FIXED (local patch, not upstream): don't burn a real delivery
+			// attempt for the async stamp grind's own "still working, not
+			// done yet" poll (send_propagated()'s is_propagation_stamp_
+			// running() check, below) - LXStamper's own worst case is ~2
+			// minutes (that function's own comment), which would otherwise
+			// exhaust _max_delivery_attempts - a much shorter budget, sized
+			// for genuine failed delivery attempts at this retry cadence -
+			// well before a real proof-of-work grind can finish, on any
+			// propagation node that actually requires a stamp (confirmed:
+			// this firmware never attached one at all until messenger_
+			// refresh_prop_node_stamp_cost() started wiring it up,
+			// Messenger.h). Every other early-return inside send_
+			// propagated() (no path, no identity, link not active/
+			// establishing) still burns an attempt as before - unlike the
+			// stamp grind, none of those are provably still making
+			// progress.
+			if (!message.is_propagation_stamp_running()) {
+				message.increment_delivery_attempts();
+			}
 			if (send_propagated(message)) {
 				// Resource transfer to PN was initiated. Don't fire
 				// _sent_callback yet — python LXMF semantics: SENT
@@ -2145,6 +2163,37 @@ void LXMRouter::static_propagation_resource_concluded(const Resource& resource) 
 	} else {
 		snprintf(buf, sizeof(buf), "PROPAGATED resource transfer failed with status %d", (int)resource.status());
 		WARNING(buf);
+
+		// FIXED (local patch, not upstream): this branch never notified
+		// _failed_callback - a genuine propagation-node handoff failure
+		// (PN unreachable, resource transfer aborted mid-flight, ...) sat
+		// silently until the caller's own blind delivery-timeout backstop
+		// eventually gave up, rather than surfacing promptly the way every
+		// other failure path in this file already does. Same dedup-loop
+		// shape as the COMPLETE branch above, just for _failed_callback.
+		LXMRouter* notified_routers[ROUTER_REGISTRY_SIZE];
+		size_t notified_count = 0;
+
+		for (size_t i = 0; i < ROUTER_REGISTRY_SIZE; i++) {
+			if (_router_registry_pool[i].in_use) {
+				LXMRouter* router = _router_registry_pool[i].router;
+				bool already_notified = false;
+				for (size_t j = 0; j < notified_count; j++) {
+					if (notified_routers[j] == router) {
+						already_notified = true;
+						break;
+					}
+				}
+				if (!already_notified && router && router->_failed_callback) {
+					notified_routers[notified_count++] = router;
+					Bytes empty_hash;
+					LXMessage msg(empty_hash, empty_hash);
+					msg.hash(message_hash);
+					msg.state(Type::Message::FAILED);
+					router->_failed_callback(msg);
+				}
+			}
+		}
 	}
 
 	slot->clear();
