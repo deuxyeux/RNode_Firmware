@@ -397,21 +397,29 @@ Recall last heard app_data for a destination hash.
 							CRITICAL("This may indicate an attempt to modify network paths, or a random hash collision. The announce was rejected.");
 							return false;
 						}
-						else if (identity_entry._app_data.size() == 0 && app_data.size() > 0) {
-							// app_data backfill - the pubkey matches (same
-							// identity, nothing to reject), but the cached entry
-							// was first learned without app_data (a common case
-							// for RNode_Firmware's Messenger: a bare path
+						else if (app_data.size() > 0 && app_data != identity_entry._app_data) {
+							// app_data backfill/refresh - the pubkey matches (same
+							// identity, nothing to reject). Originally only fired
+							// when the cached entry had NO app_data yet (a common
+							// case for RNode_Firmware's Messenger: a bare path
 							// response answering Transport::request_path() for a
 							// manually-added destination hash resolves the
 							// identity but carries no app_data of its own,
-							// Messenger.h's "Add by Hash" feature) and this
-							// announce/path-response is the first one to actually
-							// carry it. Worth the one-time flash write this
-							// DIVERGENCE optimization otherwise skips entirely -
-							// without it, a peer's display name could never
-							// resolve for the lifetime of this cache entry, even
-							// once real app_data becomes available.
+							// Messenger.h's "Add by Hash" feature), so a peer's
+							// display name could resolve once real app_data
+							// became available. FIXED (local patch, not
+							// upstream): that left any ALREADY-cached app_data
+							// permanently frozen for the lifetime of this entry -
+							// confirmed live, LXMF::PropagationNodeManager
+							// (Messenger.h) kept reporting a propagation node's
+							// stamp cost from its very first cached announce,
+							// even after the node's real config changed and
+							// fresh path-responses carrying the new value kept
+							// arriving - nothing ever re-checked. Now also
+							// refreshes on a genuine content change, not just
+							// empty-to-populated, while still skipping the flash
+							// write for the common case (identical app_data
+							// again) this DIVERGENCE optimization exists for.
 							remember(packet.get_hash(), destination_hash, public_key, app_data);
 						}
 					}
