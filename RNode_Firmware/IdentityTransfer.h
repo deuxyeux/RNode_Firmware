@@ -29,6 +29,86 @@
 // reasoning as Vault.h's own path macros.
 #define VAULT_IDENTITY_KEYSIZE_BYTES 64
 
+// Base32 (RFC 4648) encode/decode for the identity's raw private key -
+// backs Menu.h's Display Identity Key / Restore Identity screens, a
+// manually-copyable/typeable paper backup independent of the KISS
+// export/import flow above (which ships an *encrypted* blob to a host
+// tool instead, never displayed on-screen). Base32, not hex - per user
+// request, matches the encoding this key is expected to be manually
+// transcribed in. Hardcoded to VAULT_IDENTITY_KEYSIZE_BYTES (64) bytes in
+// / VAULT_IDENTITY_KEY_BASE32_LEN (104) chars out rather than a generic
+// variable-length codec - the only caller is the identity key, and
+// hardcoding the group math (12 full 5-byte/8-char groups + one
+// 4-byte/7-char+1-pad tail group) is considerably simpler than a real
+// streaming implementation neither caller needs.
+#define VAULT_IDENTITY_KEY_BASE32_LEN 104 // ceil(64*8/5) rounded up to a multiple of 8 (RFC 4648 padding)
+
+inline std::string identity_key_to_base32(const RNS::Bytes& key) {
+	static const char* ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+	std::string out;
+	out.reserve(VAULT_IDENTITY_KEY_BASE32_LEN);
+	const uint8_t* data = key.data();
+	size_t len = key.size();
+	size_t i = 0;
+	for (; i + 5 <= len; i += 5) {
+		uint64_t buf = ((uint64_t)data[i] << 32) | ((uint64_t)data[i + 1] << 24) |
+		               ((uint64_t)data[i + 2] << 16) | ((uint64_t)data[i + 3] << 8) | data[i + 4];
+		for (int shift = 35; shift >= 0; shift -= 5) out += ALPHABET[(buf >> shift) & 0x1F];
+	}
+	size_t rem = len - i;
+	if (rem > 0) {
+		uint8_t buf5[5] = {0, 0, 0, 0, 0};
+		for (size_t j = 0; j < rem; j++) buf5[j] = data[i + j];
+		uint64_t buf = ((uint64_t)buf5[0] << 32) | ((uint64_t)buf5[1] << 24) |
+		               ((uint64_t)buf5[2] << 16) | ((uint64_t)buf5[3] << 8) | buf5[4];
+		static const int CHARS_FOR_REM[4] = {2, 4, 5, 7}; // indexed by rem-1 (rem is 1..4 here - a rem of 5 would be a full group, handled by the loop above)
+		int nchars = CHARS_FOR_REM[rem - 1];
+		for (int c = 0; c < nchars; c++) out += ALPHABET[(buf >> (35 - c * 5)) & 0x1F];
+		for (int c = nchars; c < 8; c++) out += '=';
+	}
+	return out;
+}
+
+// Strict decode - requires exactly VAULT_IDENTITY_KEY_BASE32_LEN chars,
+// uppercase A-Z/2-7 only (rejects 0/1/8/9 and anything else outright,
+// same "wrong key silently replaces the identity forever" reasoning
+// Messenger.h's own messenger_hash_from_hex() documents for its hex
+// decode), correct '=' padding position, and writes exactly
+// VAULT_IDENTITY_KEYSIZE_BYTES bytes to out.
+inline bool identity_key_from_base32(const char* b32, uint8_t* out) {
+	if (strlen(b32) != VAULT_IDENTITY_KEY_BASE32_LEN) return false;
+	auto charval = [](char c) -> int {
+		if (c >= 'A' && c <= 'Z') return c - 'A';
+		if (c >= '2' && c <= '7') return c - '2' + 26;
+		return -1;
+	};
+	size_t out_pos = 0;
+	for (int g = 0; g < 13; g++) {
+		const char *group = b32 + g * 8;
+		bool last = (g == 12);
+		int nchars = last ? 7 : 8;
+		int nbytes = last ? 4 : 5;
+		for (int i = nchars; i < 8; i++) if (group[i] != '=') return false;
+		uint64_t buf = 0;
+		for (int i = 0; i < nchars; i++) {
+			int v = charval(group[i]);
+			if (v < 0) return false;
+			buf = (buf << 5) | (uint64_t)v;
+		}
+		buf <<= (40 - nchars * 5);
+		for (int i = 0; i < nbytes; i++) out[out_pos++] = (uint8_t)((buf >> (32 - i * 8)) & 0xFF);
+	}
+	return out_pos == VAULT_IDENTITY_KEYSIZE_BYTES;
+}
+
+// Convenience wrapper for Menu.h's Display Identity Key screen - the
+// screen doesn't need to know this is a base32-of-the-raw-private-key
+// encoding, just that this function returns "the current identity key as
+// human-readable text".
+inline std::string urns_identity_key_encode() {
+	return identity_key_to_base32(urns_identity.get_private_key());
+}
+
 // --- Plain hold-to-confirm/tap-to-cancel screen, reusing vault_unlock_
 // active as the same exclusive-input gate vault_unlock_prompt() uses.
 // vault_confirm_mode (VaultUnlock.h) tells that file's own release
@@ -308,7 +388,7 @@ inline void vault_identity_import_flow(const RNS::Bytes& import_blob) {
 
 	kiss_indicate_identity_import_result(true);
 	vault_unlock_draw("Imported", "Restarting...");
-	// The already-running session's urns_identity/urns_destination/
+	// The already-running session's urns_identity/lxmf.delivery/
 	// Transport routing state are all built around the OLD identity
 	// (URNS.h, urns_init()) - swapping the file on disk doesn't change
 	// any of that live state, so a clean reboot (same as every other

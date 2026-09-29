@@ -27,6 +27,7 @@
   #pragma push_macro("MTU")
   #undef MTU
   #include <LXMF/MessageStore.h>
+  #include <LXMF/PropagationNodeManager.h>
   #pragma pop_macro("MTU")
 
   // Not reliably pulled in transitively just via Arduino.h in this build -
@@ -72,11 +73,29 @@
   #define MSNGR_BOOKMARK_TYPE_LXMF        0
   #define MSNGR_BOOKMARK_TYPE_PROPAGATION 1
 
+  // Per-contact desired outbound send method for an LXMF peer - MENU_STATE_
+  // MSNGR_PEER's own "Send Direct"/"Send Propagated" row (Menu.h's MSNGR_
+  // PEER_FIXED_ACTION_DELIVERY_MODE), right below Ping. DIRECT is every
+  // send's behavior before this setting existed - OPPORTUNISTIC, silently
+  // upgraded to DIRECT (an established Link) by LXMRouter for anything over
+  // LORA_ENCRYPTED_PACKET_MDU, same as msngr_send_method's own comment
+  // describes. PROPAGATED skips that path entirely - messenger_send_lxmf_
+  // resolved() (below) requests LXMF::Type::Message::PROPAGATED up front,
+  // which LXMRouter::handle_outbound() routes straight to the active
+  // propagation node (Bookmarks > <node> > Set Active) instead of ever
+  // attempting a direct exchange with the recipient. Persisted per-bookmark
+  // (MessengerBookmark::delivery_mode below) - see messenger_current_
+  // delivery_mode()'s own comment for what happens when the peer isn't
+  // bookmarked.
+  #define MSNGR_DELIVERY_MODE_DIRECT     0
+  #define MSNGR_DELIVERY_MODE_PROPAGATED 1
+
   struct MessengerBookmark {
     bool in_use = false;
     uint8_t hash[LXMF::PEER_HASH_SIZE];
     char name[MSNGR_NAME_MAX_LEN + 1];
     uint8_t type = MSNGR_BOOKMARK_TYPE_LXMF;
+    uint8_t delivery_mode = MSNGR_DELIVERY_MODE_DIRECT;
   };
   MessengerBookmark msngr_bookmarks[MSNGR_MAX_BOOKMARKS];
   uint8_t msngr_bookmark_count = 0;
@@ -678,16 +697,17 @@
     snprintf(dst, MSNGR_NAME_MAX_LEN + 1, "%s", name.c_str());
   }
 
-  // Manual "Add by Hash" bookmark entry (Menu.h, MSNGR_TEXT_ENTRY_PURPOSE_
-  // BOOKMARK_HASH) - decodes a typed hex string into a raw LXMF::
-  // PEER_HASH_SIZE-byte destination hash. Requires exactly 32 hex chars
+  // Manual hex entry (Menu.h, MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH and
+  // _IDENTITY_RESTORE both go through here) - decodes a typed hex string
+  // into a raw out_len-byte buffer. Requires exactly out_len*2 hex chars
   // (2 per byte, case-insensitive) and rejects anything else outright
-  // rather than accepting a short/padded hash, since a wrong hash here
-  // silently addresses a different (or nonexistent) destination forever.
-  bool messenger_hash_from_hex(const char *hex, uint8_t *out) {
+  // rather than accepting a short/padded value, since a wrong hash/key
+  // here silently addresses a different (or nonexistent) destination, or
+  // replaces the identity with the wrong key, forever.
+  bool messenger_hash_from_hex(const char *hex, uint8_t *out, size_t out_len) {
     size_t len = strlen(hex);
-    if (len != (size_t)(LXMF::PEER_HASH_SIZE * 2)) return false;
-    for (size_t i = 0; i < LXMF::PEER_HASH_SIZE; i++) {
+    if (len != out_len * 2) return false;
+    for (size_t i = 0; i < out_len; i++) {
       char hi = hex[i * 2], lo = hex[i * 2 + 1];
       if (!isxdigit((unsigned char)hi) || !isxdigit((unsigned char)lo)) return false;
       auto nibble = [](char c) -> uint8_t {
@@ -723,6 +743,7 @@
       o["hash"] = RNS::Bytes(msngr_bookmarks[i].hash, LXMF::PEER_HASH_SIZE).toHex();
       o["name"] = msngr_bookmarks[i].name;
       o["type"] = msngr_bookmarks[i].type;
+      o["delivery_mode"] = msngr_bookmarks[i].delivery_mode;
     }
     // Active propagation node (messenger_prop_node_set_active/_clear_
     // active below) - lives in this same file/object rather than its own
@@ -764,6 +785,10 @@
       // LXMF - every bookmark was an LXMF peer before Propagation-type
       // bookmarks existed.
       msngr_bookmarks[i].type = (uint8_t)(o["type"] | MSNGR_BOOKMARK_TYPE_LXMF);
+      // Absent "delivery_mode" (bookmarks saved before this feature)
+      // defaults to DIRECT - every existing bookmark already behaved this
+      // way, this setting only narrows that for whoever opts into PROPAGATED.
+      msngr_bookmarks[i].delivery_mode = (uint8_t)(o["delivery_mode"] | MSNGR_DELIVERY_MODE_DIRECT);
       msngr_bookmarks[i].in_use = true;
       i++;
     }
@@ -795,6 +820,76 @@
   bool messenger_bookmark_is_prop_node(const RNS::Bytes &hash) {
     int8_t idx = messenger_bookmark_find(hash);
     return idx >= 0 && msngr_bookmarks[idx].type == MSNGR_BOOKMARK_TYPE_PROPAGATION;
+  }
+
+  // Persisted half of the per-contact delivery-mode setting - MSNGR_
+  // DELIVERY_MODE_DIRECT for any hash that isn't bookmarked (nothing to
+  // read), same "not bookmarked = default behavior" fallback every other
+  // per-bookmark setting here already uses. Callers wanting the *current*
+  // mode (bookmarked or not, see the session fallback below) should use
+  // messenger_current_delivery_mode() instead - this is the raw persisted
+  // read only.
+  uint8_t messenger_bookmark_delivery_mode(const RNS::Bytes &hash) {
+    int8_t idx = messenger_bookmark_find(hash);
+    return (idx >= 0) ? msngr_bookmarks[idx].delivery_mode : MSNGR_DELIVERY_MODE_DIRECT;
+  }
+
+  // Returns false (no-op) for a hash that isn't bookmarked - there's no
+  // MessengerBookmark slot to write the mode into. messenger_set_delivery_
+  // mode() below is what non-bookmarked peers actually go through; this is
+  // just the persistence half of it.
+  bool messenger_bookmark_set_delivery_mode(const RNS::Bytes &hash, uint8_t mode) {
+    int8_t idx = messenger_bookmark_find(hash);
+    if (idx < 0) return false;
+    msngr_bookmarks[idx].delivery_mode = mode;
+    messenger_bookmarks_save();
+    return true;
+  }
+
+  // Session-only fallback for a peer that isn't bookmarked - toggling Send
+  // Direct/Send Propagated (MSNGR_PEER_FIXED_ACTION_DELIVERY_MODE, Menu.h)
+  // on a peer with nowhere to persist the choice (an Inbox conversation or
+  // Announces-list contact that's never been bookmarked) would otherwise
+  // silently revert to DIRECT the instant messenger_current_delivery_mode()
+  // re-reads it, which looks like the toggle did nothing. Remembering the
+  // last hash/mode pair here instead makes it stick for the rest of this
+  // boot - same "one thing tracked at a time" shape as msngr_send_state/
+  // msngr_ping_state above, since the contact screen only ever has one
+  // active peer. Per explicit user decision: no implicit auto-bookmarking,
+  // and no persistence across a reboot for a peer that was never bookmarked.
+  RNS::Bytes msngr_session_delivery_mode_hash;
+  uint8_t msngr_session_delivery_mode = MSNGR_DELIVERY_MODE_DIRECT;
+  bool msngr_session_delivery_mode_valid = false;
+
+  // What messenger_send_lxmf_resolved() (below) actually sends with, and
+  // what MENU_STATE_MSNGR_PEER's row label reads - bookmarked peers always
+  // reflect their persisted value (messenger_set_delivery_mode() below
+  // keeps the session mirror and the bookmark record in lock-step), so the
+  // session fallback only ever matters for a hash that was toggled while
+  // NOT bookmarked.
+  uint8_t messenger_current_delivery_mode(const RNS::Bytes &hash) {
+    if (msngr_session_delivery_mode_valid && messenger_hash_matches(msngr_session_delivery_mode_hash.data(), hash)) {
+      return msngr_session_delivery_mode;
+    }
+    return messenger_bookmark_delivery_mode(hash);
+  }
+
+  // Always updates the session mirror (so the toggle sticks for the rest of
+  // this boot regardless of bookmark status), and additionally persists to
+  // the bookmark record when one exists - messenger_bookmark_set_delivery_
+  // mode() is a silent no-op otherwise.
+  void messenger_set_delivery_mode(const RNS::Bytes &hash, uint8_t mode) {
+    msngr_session_delivery_mode_hash = hash;
+    msngr_session_delivery_mode = mode;
+    msngr_session_delivery_mode_valid = true;
+    messenger_bookmark_set_delivery_mode(hash, mode);
+  }
+
+  uint8_t messenger_toggle_delivery_mode(const RNS::Bytes &hash) {
+    uint8_t next = (messenger_current_delivery_mode(hash) == MSNGR_DELIVERY_MODE_PROPAGATED)
+      ? MSNGR_DELIVERY_MODE_DIRECT : MSNGR_DELIVERY_MODE_PROPAGATED;
+    messenger_set_delivery_mode(hash, next);
+    return next;
   }
 
   bool messenger_prop_node_is_active(const RNS::Bytes &hash) {
@@ -1066,12 +1161,11 @@
       msngr_kb_decode_utf8(msngr_announces[an].name, decoded, sizeof(decoded));
       return std::string(decoded);
     }
-    return peer_hash.toHex().substr(0, 16);
+    return peer_hash.toHex(true).substr(0, 16);
   }
 
   // Only ever sees announces from the delivery destinations of real LXMF
-  // peers (aspect_filter "lxmf.delivery") - not the "rnode.onboard" Phase 1
-  // test destination.
+  // peers (aspect_filter "lxmf.delivery").
   class MessengerAnnounceHandler : public RNS::AnnounceHandler {
   public:
     MessengerAnnounceHandler() : RNS::AnnounceHandler("lxmf.delivery") {}
@@ -1086,6 +1180,97 @@
     }
   };
   RNS::HAnnounceHandler msngr_announce_handler(new MessengerAnnounceHandler());
+
+  // Learns propagation nodes' advertised metadata (stamp_cost/transfer_
+  // limit/etc.) from their own "lxmf.propagation" announces - a complete,
+  // ready-made class already in lib/microLXMF, just never previously
+  // instantiated anywhere in this firmware. Plain global instance (not
+  // heap-allocated via `new`, unlike MessengerAnnounceHandler above) so
+  // messenger_refresh_prop_node_stamp_cost() below can call get_node()/
+  // has_node() on it directly - registered via a shared_ptr with a no-op
+  // deleter (Transport::register_announce_handler() needs an HAnnounceHandler,
+  // a std::shared_ptr<AnnounceHandler>) rather than one that would try to
+  // delete this static-storage object.
+  //
+  // Added specifically to fix PROPAGATED sends that silently vanish:
+  // send_propagated() (LXMRouter.cpp) already fully implements attaching a
+  // proof-of-work stamp when the router's _outbound_propagation_stamp_cost
+  // is non-zero, but LXMRouter::set_outbound_propagation_stamp_cost() had
+  // zero callers anywhere in this codebase - so a propagation node that
+  // requires a stamp (many do, as an anti-spam measure) would accept the
+  // resource transfer at the network layer (confirmed via _sent_callback,
+  // "Sent to Node" in the UI) and then silently discard the message at the
+  // LXMF layer for lacking one, never queuing it for the recipient -
+  // exactly the "Sent to Node, but sync shows 0 messages" symptom this
+  // closes.
+  LXMF::PropagationNodeManager msngr_prop_node_manager;
+  RNS::HAnnounceHandler msngr_prop_node_announce_handler(&msngr_prop_node_manager, [](RNS::AnnounceHandler*){});
+
+  // Pushes whatever msngr_prop_node_manager currently knows about the
+  // active propagation node's required stamp cost into the router -
+  // called by messenger_send_lxmf_resolved() right before every PROPAGATED
+  // send (defensively, every time, rather than once at Set Active - a
+  // node's announce/stamp cost may only be learned later, or change; this
+  // is cheap enough to just always re-check). Declared after messenger_
+  // prop_node_set_active() (above) but called only from further down this
+  // file - messenger_prop_node_set_active() itself doesn't call this, see
+  // its own comment for why (forward-declaration ordering; the boot-time
+  // request_path() nudge there is what actually matters for freshness).
+  // FIXED (local patch, not upstream): the request_path() nudges in
+  // messenger_prop_node_set_active()/messenger_init() turned out not to
+  // help at all - Transport::inbound() (microReticulum's Transport.cpp)
+  // explicitly skips notifying registered AnnounceHandlers for PATH_
+  // RESPONSE packets ("if (packet.context() != Type::Packet::PATH_
+  // RESPONSE) { ...dispatch to handlers... }"), on purpose (a path
+  // response is meant to be the lightweight option). So msngr_prop_node_
+  // manager could sit with has_node()==false indefinitely, until the node
+  // happens to emit a genuine spontaneous announce on its own schedule -
+  // commonly a long interval for a propagation node specifically, to
+  // reduce mesh chatter. Confirmed live: a real sync round-trip (which
+  // definitely resolves this node's identity/path) produced no "Discovered
+  // propagation node" log line at all, and a subsequent PROPAGATED send
+  // skipped the stamp step entirely.
+  //
+  // Fallback: RNS::Identity::recall_app_data() is a general-purpose cache
+  // that Transport populates from ANY validated announce for a
+  // destination, past or present, independent of whether an AnnounceHandler
+  // was even registered at the time - the same mechanism messenger_on_
+  // delivery()'s own comment above already relies on for peer display
+  // names. Feed whatever's currently cached there through the exact same
+  // received_announce() parsing path a live dispatch would have used,
+  // every time (see the FIXED comment below for why unconditionally, not
+  // just once).
+  //
+  // FIXED (local patch, not upstream): this used to only take the fallback
+  // path `if (!msngr_prop_node_manager.has_node(hash))` - meaning it only
+  // ever ran ONCE, the first time this node was seen (almost always via
+  // the one genuine live-dispatched announce that happened to arrive
+  // during initial discovery). Every subsequent call just re-read msngr_
+  // prop_node_manager's OWN pool - a SEPARATE cache from Identity's,
+  // populated once and never touched again by this function - so a
+  // manually-added propagation node's stamp cost was permanently frozen
+  // at whatever it was on first discovery for the rest of this boot, even
+  // after Identity::recall_app_data() itself got fresher data (e.g. via
+  // the Identity.cpp app_data-refresh fix this same session added) from a
+  // later path-response. Confirmed live: lowering the node's configured
+  // stamp cost server-side never took effect no matter how many sends or
+  // reboots followed. Now always re-derives from recall_app_data() and
+  // re-feeds it through received_announce() (a no-op-ish "Updated" log
+  // line if the content hasn't actually changed - cheap, and only runs
+  // once per deliberate PROPAGATED send, not continuously).
+  void messenger_refresh_prop_node_stamp_cost() {
+    if (!urns_lxmf_router) return;
+    if (msngr_active_prop_node_hash.size() != LXMF::PEER_HASH_SIZE) return;
+    RNS::Bytes cached_app_data = RNS::Identity::recall_app_data(msngr_active_prop_node_hash);
+    if (cached_app_data) {
+      RNS::Identity node_identity = RNS::Identity::recall(msngr_active_prop_node_hash);
+      msngr_prop_node_manager.received_announce(msngr_active_prop_node_hash, node_identity, cached_app_data);
+    }
+    LXMF::PropagationNodeInfo info = msngr_prop_node_manager.get_node(msngr_active_prop_node_hash);
+    if (info) {
+      urns_lxmf_router->set_outbound_propagation_stamp_cost(info.stamp_cost);
+    }
+  }
 
   // Delivery callback hook (registered from URNS.h's urns_init(), which
   // forward-declares this) - persists the message, refreshes the sender's
@@ -1167,6 +1352,15 @@
   // cover) - this one is a real, router-confirmed "it's not going to be
   // delivered", not just "we haven't heard back yet".
   #define MSNGR_SEND_FAILED     6
+  // PROPAGATED-only terminal success state - the message reached the
+  // active propagation node (static_propagation_resource_concluded(),
+  // LXMRouter.cpp, confirmed the resource transfer), not the final
+  // recipient. Distinct from MSNGR_SEND_DELIVERED on purpose: python LXMF
+  // itself draws this same distinction (a PN handoff is "sent", full
+  // end-to-end delivery confirmation for a PROPAGATED message isn't
+  // something this firmware tracks any further than that) - see
+  // messenger_on_sent()'s own comment below.
+  #define MSNGR_SEND_SENT_TO_NODE 7
   // Generous - OPPORTUNISTIC delivery's proof has to travel from the
   // recipient back to us, potentially multiple LoRa hops each way, with
   // no guaranteed path warm already. PacketReceipt's own auto-computed
@@ -1175,6 +1369,12 @@
   // will the Messenger screen wait before giving up on this specific
   // send", same reasoning as MSNGR_PING_PATH_TIMEOUT_MS/LINK_TIMEOUT_MS.
   #define MSNGR_SEND_DELIVERY_TIMEOUT_MS 60000
+  // Extra UI-timeout budget added on top of the above (and of the retry-
+  // budget extension below it) specifically for a PROPAGATED send whose
+  // active node requires a stamp - LXStamper's own documented worst case
+  // is ~2 minutes (send_propagated()'s comment, LXMRouter.cpp); this gives
+  // a comfortable margin above that rather than cutting it close.
+  #define MSNGR_SEND_STAMP_GRIND_BUDGET_MS 150000
   // LXMRouter::PATH_REQUEST_WAIT (LXMRouter.h) is the library's own
   // considered value for "how long a path request needs on LoRa" (its
   // comment: "Python: 7s, but LoRa needs more RX window") - matched here
@@ -1188,7 +1388,7 @@
   // Sync/NTP-Sync popups (Menu.h's menu_popup_process()), just implemented
   // locally here since this is a dedicated live-status screen
   // (MENU_STATE_MSNGR_SEND_RESULT), not the generic MENU_STATE_STATUS_POPUP.
-  #define MSNGR_SEND_RESULT_POPUP_MS 3000
+  #define MSNGR_SEND_RESULT_POPUP_MS 20000
   // Matches Menu.h's MSNGR_TEXT_ENTRY_MAX_LEN - can't reference that
   // constant directly, Menu.h is #include'd after this file (see
   // messenger_send_process()'s own comment on the same layering split).
@@ -1206,14 +1406,17 @@
   // DELIVERED/FAILED states. 1 means "first attempt, no retry yet".
   uint8_t msngr_send_attempt = 1;
   // Which method LXMessage::pack() actually resolved this send to
-  // (LXMF::Type::Message::OPPORTUNISTIC or ::DIRECT) - read straight off
-  // the local msg object in messenger_send_lxmf_resolved() right after
-  // handle_outbound() returns, since handle_outbound() calls pack()
-  // synchronously (LXMRouter.cpp) before queueing, so msg.method() is
-  // already resolved by then even though the caller only ever *requested*
-  // OPPORTUNISTIC - LXMRouter silently upgrades to DIRECT for anything
-  // over LORA_ENCRYPTED_PACKET_MDU. Displayed on the MSNGR_SEND_PENDING
-  // screen (Menu.h) so it's clear which path a given send actually took.
+  // (LXMF::Type::Message::OPPORTUNISTIC, ::DIRECT, or ::PROPAGATED) - read
+  // straight off the local msg object in messenger_send_lxmf_resolved()
+  // right after handle_outbound() returns, since handle_outbound() calls
+  // pack() synchronously (LXMRouter.cpp) before queueing, so msg.method()
+  // is already resolved by then even though the caller only ever
+  // *requested* OPPORTUNISTIC or PROPAGATED (messenger_current_delivery_
+  // mode(), per the peer's Send Direct/Send Propagated setting) - for
+  // Send Direct, LXMRouter silently upgrades OPPORTUNISTIC to DIRECT for
+  // anything over LORA_ENCRYPTED_PACKET_MDU. Displayed on the MSNGR_SEND_
+  // PENDING screen (Menu.h) so it's clear which path a given send actually
+  // took.
   uint8_t msngr_send_method = LXMF::Type::Message::OPPORTUNISTIC;
   // Live LXMF::Type::Message::State for the in-flight send (OUTBOUND/
   // SENDING/SENT), polled from urns_lxmf_router->pending_outbound_state_for()
@@ -1288,6 +1491,93 @@
     }
   }
 
+  // Registered via LXMRouter::register_sent_callback() (URNS.h) - the ONLY
+  // reliable, router-confirmed success signal PROPAGATED sends ever get in
+  // this library. PROPAGATED never routes through messenger_on_delivered()
+  // above - LXMRouter.cpp's static_propagation_resource_concluded()
+  // deliberately reports a confirmed PN handoff via _sent_callback, not
+  // _delivered_callback (see MSNGR_SEND_SENT_TO_NODE's own comment for
+  // why) - without this, a PROPAGATED send had no way to ever leave
+  // MSNGR_SEND_PENDING except the UI's own blind MSNGR_SEND_DELIVERY_
+  // TIMEOUT_MS backstop, which is exactly the "stuck on Sending Propagated,
+  // then Failed/No Confirmation" bug this fixes.
+  //
+  // This callback is NOT propagation-specific, though - OPPORTUNISTIC and
+  // DIRECT-via-link both also call it (LXMRouter.cpp's process_outbound()),
+  // immediately at transmission time, with the real full-content message,
+  // well before their own eventual messenger_on_delivered()/_on_failed()
+  // terminal outcome - that's not a terminal result for those two methods
+  // (delivery proof is still pending), so this must ignore those calls
+  // entirely and let their existing PENDING->DELIVERED/FAILED flow run
+  // undisturbed. msg.method() can't tell the two apart here - the hash-
+  // only placeholder static_propagation_resource_concluded() constructs
+  // never sets it, so it silently defaults to DIRECT (LXMessage's own
+  // member default) - msngr_send_method (already resolved and stashed
+  // right after handle_outbound() returns, see its own declaration) is
+  // the reliable signal instead: the currently-tracked send's own real,
+  // resolved method.
+  void messenger_on_sent(LXMF::LXMessage &msg) {
+    if (msngr_send_method != LXMF::Type::Message::PROPAGATED) return;
+    if (msngr_send_state == MSNGR_SEND_PENDING && msg.hash() == msngr_send_message_hash) {
+      // FIXED (local patch, not upstream): this used to call save_message()
+      // directly on msg here, same as messenger_on_delivered() above - but
+      // msg is the hash-only placeholder static_propagation_resource_
+      // concluded() constructs (empty destination/source hash), and
+      // MessageStore groups a saved OUTGOING message's conversation by
+      // destination_hash() (MessageStore.cpp's save_message()) - so that
+      // was writing a bogus conversation keyed by an EMPTY peer hash into
+      // the store's index every time a propagated send confirmed. That
+      // corrupted index then got rejected wholesale on reload
+      // (MessageStore.cpp's load_index_file(), now itself hardened to skip
+      // just the bad entry instead - see that fix's own comment), wiping
+      // every real conversation from the Inbox.
+      //
+      // Rebuilt here instead using what this firmware layer already
+      // retains locally - msngr_send_pending_dest_hash (the destination
+      // this exact send used, unconditionally populated by every
+      // messenger_send_lxmf() call, this file's own declaration) and
+      // msngr_send_pending_content (same call, same guarantee) - same
+      // construction shape messenger_send_lxmf_resolved() used to build
+      // the original message, just reconstructed here since process_
+      // outbound() (LXMRouter.cpp) already popped and discarded the real
+      // one the moment the resource transfer began, well before this
+      // confirmation ever arrives. Menu.h's msngr_active_peer_hash isn't
+      // visible from this file (included first, same layering split as
+      // everywhere else in this function) but would hold the same value.
+      RNS::Identity dest_identity = RNS::Identity::recall(msngr_send_pending_dest_hash);
+      if (dest_identity) {
+        RNS::Destination dest(dest_identity, RNS::Type::Destination::OUT, RNS::Type::Destination::SINGLE, "lxmf", "delivery");
+        LXMF::LXMessage saved_msg(dest, urns_lxmf_router->delivery_destination(),
+          RNS::bytesFromString(msngr_send_pending_content), RNS::Bytes(), LXMF::Type::Message::PROPAGATED);
+        saved_msg.hash(msngr_send_message_hash);
+        // _timestamp defaults to 0.0 and is normally only ever assigned
+        // inside pack() at actual send time (LXMessage.h's own comment) -
+        // this reconstructed message never goes through pack()/
+        // handle_outbound(), so it'd otherwise save with no timestamp at
+        // all. The exact original compose time isn't available here (the
+        // real message was already popped/discarded well before this
+        // confirmation arrives, see this function's own comment above) -
+        // "now" is the closest available approximation, and this whole
+        // round trip normally completes within seconds of the original
+        // send anyway.
+        saved_msg.timestamp(RNS::Utilities::OS::time());
+        // Same flash-I/O-vs-DIO0-ISR guard as messenger_on_delivered() above.
+        LoRa->maskDio0();
+        bool saved = urns_message_store->save_message(saved_msg);
+        LoRa->unmaskDio0();
+        if (!saved) {
+          DEBUG_LOG("[Messenger] sent-to-node: save_message failed for %s\r\n", saved_msg.hash().toHex().c_str());
+        }
+      } else {
+        DEBUG_LOG("[Messenger] sent-to-node: identity for %s not recallable, not saving to history\r\n", msngr_send_pending_dest_hash.toHex().c_str());
+      }
+      msngr_send_needs_cache_refresh = true;
+
+      msngr_send_state = MSNGR_SEND_SENT_TO_NODE;
+      msngr_send_result_at_ms = millis();
+    }
+  }
+
   // Polled every loop() iteration (RNode_Firmware.ino, alongside
   // messenger_ping_process()) - enforces MSNGR_SEND_DELIVERY_TIMEOUT_MS
   // (LXMRouter's own proof-timeout callback frees the library's internal
@@ -1308,8 +1598,27 @@
   // calls it.
   void messenger_send_lxmf_resolved(const RNS::Bytes &dest_hash, RNS::Identity &dest_identity, const char *content) {
     RNS::Destination dest(dest_identity, RNS::Type::Destination::OUT, RNS::Type::Destination::SINGLE, "lxmf", "delivery");
+    // Send Direct (the default, requests OPPORTUNISTIC - LXMRouter silently
+    // upgrades to DIRECT for anything over LORA_ENCRYPTED_PACKET_MDU, see
+    // msngr_send_method's own comment) vs Send Propagated (requests
+    // PROPAGATED up front, which handle_outbound() routes straight to the
+    // active propagation node instead of ever attempting delivery to
+    // dest_hash directly) - MENU_STATE_MSNGR_PEER's own row, right below
+    // Ping. See messenger_current_delivery_mode()'s own comment for the
+    // bookmarked-vs-session-only distinction.
+    LXMF::Type::Message::Method desired_method =
+      (messenger_current_delivery_mode(dest_hash) == MSNGR_DELIVERY_MODE_PROPAGATED)
+        ? LXMF::Type::Message::PROPAGATED : LXMF::Type::Message::OPPORTUNISTIC;
+    // Defensive refresh, every PROPAGATED send - see this function's own
+    // declaration for why. Must happen before handle_outbound() below:
+    // send_propagated() (LXMRouter.cpp) reads _outbound_propagation_stamp_
+    // cost the first time process_outbound() actually processes this
+    // message, which can happen as early as the very next loop() tick.
+    if (desired_method == LXMF::Type::Message::PROPAGATED) {
+      messenger_refresh_prop_node_stamp_cost();
+    }
     LXMF::LXMessage msg(dest, urns_lxmf_router->delivery_destination(), RNS::bytesFromString(content),
-      RNS::Bytes(), LXMF::Type::Message::OPPORTUNISTIC);
+      RNS::Bytes(), desired_method);
     urns_lxmf_router->handle_outbound(msg);
     // handle_outbound() calls pack() synchronously before queueing
     // (LXMRouter.cpp), so msg.method() already reflects OPPORTUNISTIC vs
@@ -1368,6 +1677,17 @@
       unsigned long effective_timeout_ms = MSNGR_SEND_DELIVERY_TIMEOUT_MS;
       unsigned long retry_budget_ms = (unsigned long)msngr_max_retries * (unsigned long)msngr_retry_delay_s * 1000UL + 10000UL;
       if (retry_budget_ms > effective_timeout_ms) { effective_timeout_ms = retry_budget_ms; }
+      // Same reasoning as the retry-budget extension above, for PROPAGATED's
+      // own extra pre-transfer phase: LXStamper's proof-of-work grind
+      // (send_propagated()'s own comment, LXMRouter.cpp) doesn't burn a
+      // delivery attempt while running (LXMRouter.cpp's own FIXED patch),
+      // so it isn't covered by retry_budget_ms at all - without this, this
+      // screen would auto-dismiss to "No Confirmation" on a send that's
+      // still genuinely, successfully grinding in the background whenever
+      // the active propagation node requires a stamp.
+      if (msngr_send_method == LXMF::Type::Message::PROPAGATED && urns_lxmf_router->outbound_propagation_stamp_cost() > 0) {
+        effective_timeout_ms += MSNGR_SEND_STAMP_GRIND_BUDGET_MS;
+      }
       if (millis() - msngr_send_started_ms > effective_timeout_ms) {
         msngr_send_state = MSNGR_SEND_TIMEOUT;
         msngr_send_result_at_ms = millis();
@@ -1398,6 +1718,14 @@
     #endif
     if (!urns_ready || !urns_message_store) return URNS_LXMF_SEND_NOT_READY;
 
+    // Remembered unconditionally (not just on the RESOLVING path below) so
+    // a later manual Retry from MENU_STATE_MSNGR_SEND_RESULT (Menu.h) can
+    // always re-fire the exact same destination/content without the caller
+    // having to keep its own copy around.
+    msngr_send_pending_dest_hash = dest_hash;
+    strncpy(msngr_send_pending_content, content, MSNGR_SEND_CONTENT_MAX_LEN);
+    msngr_send_pending_content[MSNGR_SEND_CONTENT_MAX_LEN] = 0;
+
     RNS::Identity dest_identity = RNS::Identity::recall(dest_hash);
     if (!dest_identity) {
       // Neither identity nor path is known - this node has never received/
@@ -1413,9 +1741,6 @@
       // MSNGR_SEND_RESOLVE_TIMEOUT_MS.
       DEBUG_LOG("[Messenger] send: no known identity for %s, requesting path\r\n", dest_hash.toHex().c_str());
       RNS::Transport::request_path(dest_hash);
-      msngr_send_pending_dest_hash = dest_hash;
-      strncpy(msngr_send_pending_content, content, MSNGR_SEND_CONTENT_MAX_LEN);
-      msngr_send_pending_content[MSNGR_SEND_CONTENT_MAX_LEN] = 0;
       msngr_send_state = MSNGR_SEND_RESOLVING;
       msngr_send_resolve_started_ms = millis();
       return URNS_LXMF_SEND_RESOLVING;
@@ -1465,6 +1790,14 @@
   uint8_t msngr_ping_state = MSNGR_PING_IDLE;
   double msngr_ping_rtt = 0.0; // seconds, valid once msngr_ping_state == MSNGR_PING_SUCCESS
   unsigned long msngr_ping_phase_started_ms = 0;
+  // Set alongside MSNGR_PING_SUCCESS below - consumed by Menu.h's
+  // msngr_ping_result_process() to auto-dismiss MENU_STATE_MSNGR_PING_
+  // RESULT after MSNGR_SEND_RESULT_POPUP_MS, same convention as (and
+  // reusing the same constant as) MSNGR_SEND_RESULT screen's own
+  // Delivered/Sent to Node auto-dismiss - only success does; TIMEOUT/
+  // NO_IDENTITY/FAILED still require manual BACK, same reasoning as
+  // MSNGR_SEND_RESULT's own error states.
+  unsigned long msngr_ping_result_at_ms = 0;
 
   // Set by msngr_ping_link_established() and consumed by
   // messenger_ping_process() on the next loop() pass - teardown() mutates
@@ -1485,6 +1818,7 @@
   void msngr_ping_link_established(RNS::Link &link) {
     msngr_ping_rtt = link.rtt();
     msngr_ping_state = MSNGR_PING_SUCCESS;
+    msngr_ping_result_at_ms = millis();
     msngr_ping_teardown_pending = true;
   }
 
@@ -1688,6 +2022,7 @@
       }
     #endif
     RNS::Transport::register_announce_handler(msngr_announce_handler);
+    RNS::Transport::register_announce_handler(msngr_prop_node_announce_handler);
     messenger_bookmarks_load();
     messenger_presets_load();
 

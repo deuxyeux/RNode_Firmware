@@ -298,10 +298,10 @@
   #define MENU_STATE_MSNGR_CLEAR_CONFIRM  40 // CLEAR/CANCEL list before a whole conversation is actually cleared - same pattern as MENU_STATE_FWUPD_CONFIRM
   #define MENU_STATE_MSNGR_TEXT_ENTRY     41 // on-screen keyboard for composing a free-text message, opened from MSNGR_PEER_FIXED_ACTION_SEND_CUSTOM
   #define MENU_STATE_MSNGR_DISCARD_CONFIRM 42 // DISCARD/CANCEL list before leaving MENU_STATE_MSNGR_TEXT_ENTRY with unsent text - same pattern as MENU_STATE_FWUPD_CONFIRM
-  #define MENU_STATE_MSNGR_PING_RESULT 43 // live status + BACK, opened from MSNGR_PEER_FIXED_ACTION_PING (Messenger.h's messenger_ping_start())
+  #define MENU_STATE_MSNGR_PING_RESULT 43 // live status + BACK, opened from MSNGR_PEER_FIXED_ACTION_PING (Messenger.h's messenger_ping_start()), auto-dismisses on Success (msngr_ping_result_process(), polled from loop(), reuses MSNGR_SEND_RESULT_POPUP_MS) - Timeout/No Identity/Failed still need manual BACK, same as MSNGR_SEND_RESULT's own error states
   #define MENU_STATE_URNS_PATH_HASH_VIEW 44 // full path hash, two plain lines, no captions - opened from MENU_STATE_URNS_PATH_DETAIL's Hash row, dismissed by any input
   #define MENU_STATE_URNS_FREE_DETAIL 45 // urns partition usage broken down by data type (HAS_URNS boards), opened from MENU_STATE_URNS_LIST's Free row - read-only, computed once on entry (never in a draw path - see project_urns_partition_growth memory)
-  #define MENU_STATE_MSNGR_SEND_RESULT 46 // live status (Sending.../Delivered/No Confirmation) + BACK, opened from MENU_STATE_MSNGR_PEER's Send Hi/Bye/SOS and MENU_STATE_MSNGR_TEXT_ENTRY's Send key - same "live status + BACK" shape as MENU_STATE_MSNGR_PING_RESULT, auto-dismisses on Delivered/No Confirmation (msngr_send_result_process(), polled from loop()) unlike Ping's manual-only dismiss
+  #define MENU_STATE_MSNGR_SEND_RESULT 46 // live status (Sending.../Delivered/No Confirmation) + BACK, opened from MENU_STATE_MSNGR_PEER's Send Hi/Bye/SOS and MENU_STATE_MSNGR_TEXT_ENTRY's Send key - same "live status + BACK" shape as MENU_STATE_MSNGR_PING_RESULT, auto-dismisses on Delivered/Sent to Node (msngr_send_result_process(), polled from loop())
   #define MENU_STATE_URNS_RADIO_LIST 47 // Radio submenu list - Frequency/Bandwidth/SF/CR/TX Power/Back - top-level item, sits right under URNS on boards that have it, not nested inside URNS_LIST, and not gated on HAS_URNS (configures the same TNC-mode EEPROM fields a connected host already uses independently of the onboard URNS node)
   #define MENU_STATE_URNS_RADIO_EDIT 48 // editing whichever of Frequency/Bandwidth/SF/CR/TX Power was selected
   #if HAS_GPS == true && HAS_GNSS_DEBUG_MENU == true
@@ -332,6 +332,8 @@
   #define MENU_STATE_URNS_PATH_DELETE_CONFIRM 67 // DELETE/CANCEL list before a single path-table entry is actually removed (HAS_URNS boards) - same pattern as MENU_STATE_MSNGR_DELETE_CONFIRM, opened from MENU_STATE_URNS_PATH_DETAIL's Delete Path row
   #define MENU_STATE_URNS_IDENTITIES 68 // fixed list of this node's own identity hash + registered destinations (HAS_URNS boards) - read-only, rows open the shared MENU_STATE_URNS_PATH_HASH_VIEW, opened from MENU_STATE_URNS_LIST's Identities row
   #define MENU_STATE_HW_REBOOT_CONFIRM 69 // REBOOT/CANCEL list before hard_reset() actually runs - same pattern as MENU_STATE_FWUPD_CONFIRM, opened from MENU_STATE_HW_LIST's Reboot row
+  #define MENU_STATE_URNS_IDENTITY_KEY_VIEW 70 // urns_identity's raw 64-byte private key, base32-encoded (urns_identity_key_encode(), IdentityTransfer.h), read-only, no header/footer chrome, dismissed by any input - scaled-up sibling of MENU_STATE_URNS_PATH_HASH_VIEW sized/wrapped for a full identity key instead of a truncated hash, opened from MENU_STATE_URNS_KEYS's Display Identity Key row (and returns there, not straight to MENU_STATE_URNS_LIST). Available whenever vault_enabled is true regardless of HAS_LXMF - unlike MENU_STATE_MSNGR_TEXT_ENTRY's identity-restore purpose, this is pure read-only display with no keyboard dependency.
+  #define MENU_STATE_URNS_KEYS 71 // small submenu (Display Identity Key always, Restore Identity on HAS_LXMF boards, BACK) for manual paper-backup key management - opened from MENU_STATE_URNS_LIST's Keys row (URNS_ITEM_KEYS), itself only reachable when vault_enabled is true (see that item's own comment) - HAS_URNS boards, own submenu, only BACK/its rows do anything, same shape as MENU_STATE_URNS_FREE_DETAIL.
 
   // The Hardware page used to only exist when there was board-level info
   // worth showing (battery/voltage sensing via HAS_PMU, or an ESP32-S3's
@@ -869,9 +871,9 @@
     // same "own submenu, only BACK does anything" shape as SENSORS_LIST.
     #define URNS_ITEM_PATHS (URNS_ITEM_VAULT + 1)
     // Opens MENU_STATE_URNS_IDENTITIES - a fixed, read-only list of this
-    // node's own identity hash and registered destinations (rnode.onboard,
-    // plus lxmf.delivery on HAS_LXMF boards), same "own submenu, only BACK
-    // does anything, rows open the shared full-hash view" shape as
+    // node's own identities and registered destinations (Transport ID and
+    // Probe, plus lxmf.delivery on HAS_LXMF boards), same "own submenu,
+    // only BACK does anything, rows open the shared full-hash view" shape as
     // URNS_ITEM_PATHS/URNS_PATH_DETAIL. Not a generic RNS::Transport::
     // destinations() dump - Destination has no public accessor for the
     // app_name/aspects string that would be needed to label an arbitrary
@@ -879,6 +881,13 @@
     // exactly the destinations this firmware itself constructs (URNS.h/
     // LXMRouter.cpp) instead.
     #define URNS_ITEM_IDENTITIES (URNS_ITEM_PATHS + 1)
+    // Opens MENU_STATE_URNS_KEYS - a small submenu (Display Identity Key/
+    // Restore Identity/BACK, see that state's own comment) for manually
+    // reading or restoring urns_identity's raw key as a paper backup, not
+    // reachable at all unless vault_enabled - see URNS_ITEM_VAULT_ONLY_
+    // FIRST/_LAST below and their use at the cursor-clamp/draw-compaction
+    // sites.
+    #define URNS_ITEM_KEYS (URNS_ITEM_IDENTITIES + 1)
     // Read-only info row - remaining free space on the "urns" LittleFS
     // partition (identity/path-table persistence + the LXMF MessageStore,
     // see MessageStore.h). LittleFS.usedBytes()/totalBytes() report for
@@ -890,9 +899,36 @@
     // does anything" shape as URNS_PATH_DETAIL/SENSORS_LIST. Computed
     // once on entry (urns_free_detail_refresh(), Menu.h) rather than in
     // the draw path - see the row's own draw-code comment for why.
-    #define URNS_ITEM_FREE (URNS_ITEM_IDENTITIES + 1)
+    #define URNS_ITEM_FREE (URNS_ITEM_KEYS + 1)
     #define URNS_ITEM_BACK (URNS_ITEM_FREE + 1)
     #define URNS_ITEM_COUNT (URNS_ITEM_BACK + 1)
+
+    // URNS_ITEM_KEYS is hidden whenever vault_enabled is false - see the
+    // clamp-skip loop in menu_encoder_rotate() and the label-array
+    // compaction in MENU_STATE_URNS_LIST's draw block for how this is
+    // actually enforced. Kept as a (single-item) range rather than a flat
+    // equality check purely so both of those call sites can stay
+    // unchanged if a second vault-only row is ever added here later.
+    #define URNS_ITEM_VAULT_ONLY_FIRST URNS_ITEM_KEYS
+    #define URNS_ITEM_VAULT_ONLY_LAST  URNS_ITEM_KEYS
+
+    // MENU_STATE_URNS_KEYS rows - Display is always compiled (no HAS_LXMF-
+    // gated keyboard dependency, see MENU_STATE_URNS_IDENTITY_KEY_VIEW's
+    // own comment); Restore only exists on HAS_LXMF boards, since it
+    // reuses Messenger's own on-screen keyboard (Menu.h's MSNGR_KB_*) -
+    // boards with HAS_URNS but not HAS_LXMF (e.g. MeshPoE-S3) still get
+    // Display, and fall back to the existing KISS CMD_IDENTITY_IMPORT
+    // flow (IdentityTransfer.h) for restore instead. No runtime hiding
+    // needed within this submenu itself (unlike URNS_ITEM_KEYS above) -
+    // the whole submenu is already unreachable unless vault_enabled.
+    #define URNS_KEYS_ITEM_DISPLAY 0
+    #if HAS_LXMF == true
+      #define URNS_KEYS_ITEM_RESTORE (URNS_KEYS_ITEM_DISPLAY + 1)
+      #define URNS_KEYS_ITEM_BACK (URNS_KEYS_ITEM_RESTORE + 1)
+    #else
+      #define URNS_KEYS_ITEM_BACK (URNS_KEYS_ITEM_DISPLAY + 1)
+    #endif
+    #define URNS_KEYS_ITEM_COUNT (URNS_KEYS_ITEM_BACK + 1)
 
     // MENU_STATE_URNS_FREE_DETAIL rows - each is one data-type bucket on
     // the urns partition (see urns_free_detail_refresh()):
@@ -941,16 +977,46 @@
 
     // MENU_STATE_URNS_IDENTITIES rows - see URNS_ITEM_IDENTITIES' own
     // comment for why this is a fixed list rather than a generic
-    // RNS::Transport::destinations() dump.
+    // RNS::Transport::destinations() dump. Two independent root
+    // RNS::Identity keypairs feed everything else here, each persisted to
+    // its own file on the urns LittleFS partition:
+    //   - Node Identity (urns_identity, /urns/identity) - this node's own
+    //     application identity. lxmf.delivery is a Destination built from
+    //     it plus an app_name/aspects pair (LXMF delivery). It used to also
+    //     back a second, general-purpose "rnode.onboard" Destination
+    //     (urns_destination) - that was only ever a Tier-1 bring-up
+    //     smoke-test beacon (its one caller, a boot-time urns_destination.
+    //     announce("URNS-TEST"), was removed once LXMF replaced it as the
+    //     real over-the-air proof the onboard node worked - see
+    //     urns_announce_lxmf()'s own comment, URNS.h) - nothing ever
+    //     registered a request/packet handler on it, so it was removed
+    //     outright rather than kept as a dead but still-displayed row.
+    //   - Transport Identity (RNS::Transport::identity(),
+    //     /urns/transport_identity, loaded/created unconditionally inside
+    //     Transport::start() - the same on-device counterpart to a plain
+    //     rnsd's own storage/transport_identity) - Probe is a Destination
+    //     built from *this* one instead, not Node Identity.
+    // Display order: Node ID, Transport ID, LXMF ID, Probe ID, BACK.
     #define URNS_ID_ITEM_NODE_IDENTITY 0
-    #define URNS_ID_ITEM_RNODE_DEST    1
+    // Unlike Node ID, this is always valid the moment this screen is
+    // reachable (Transport::start() runs unconditionally from
+    // urns_reticulum.start(), regardless of Transport Mode) - no N/A case.
+    #define URNS_ID_ITEM_TRANSPORT_IDENTITY (URNS_ID_ITEM_NODE_IDENTITY + 1)
     #if HAS_LXMF == true
-      #define URNS_ID_ITEM_LXMF_DEST (URNS_ID_ITEM_RNODE_DEST + 1)
+      #define URNS_ID_ITEM_LXMF_DEST (URNS_ID_ITEM_TRANSPORT_IDENTITY + 1)
       #define URNS_ID_NEXT_A (URNS_ID_ITEM_LXMF_DEST + 1)
     #else
-      #define URNS_ID_NEXT_A (URNS_ID_ITEM_RNODE_DEST + 1)
+      #define URNS_ID_NEXT_A (URNS_ID_ITEM_TRANSPORT_IDENTITY + 1)
     #endif
-    #define URNS_ID_ITEM_BACK  URNS_ID_NEXT_A
+    // Only exists at the RNS::Transport level while RNode Settings > URNS >
+    // Probe Destination is actually active (which itself requires Transport
+    // Mode on - see that row's own N/A comment) - row is always shown, same
+    // "explain why, don't hide it" reasoning as everywhere else in this
+    // menu, but its value falls back to N/A when RNS::Transport::
+    // probe_destination() is a default-constructed (Type::NONE) Destination.
+    #define URNS_ID_ITEM_PROBE_DEST URNS_ID_NEXT_A
+    #define URNS_ID_NEXT_B (URNS_ID_ITEM_PROBE_DEST + 1)
+    #define URNS_ID_ITEM_BACK  URNS_ID_NEXT_B
     #define URNS_ID_ITEM_COUNT (URNS_ID_ITEM_BACK + 1)
 
   #if HAS_LXMF == true
@@ -1033,8 +1099,15 @@
     // where the two pieces join.
     #define MSNGR_PEER_FIXED_ACTION_SEND_CUSTOM 0 // opens MENU_STATE_MSNGR_TEXT_ENTRY
     #define MSNGR_PEER_FIXED_ACTION_PING        1 // opens MENU_STATE_MSNGR_PING_RESULT
-    #define MSNGR_PEER_FIXED_ACTION_BOOKMARK    2 // label switches Add/Remove Bookmark
-    #define MSNGR_PEER_FIXED_ACTION_CLEAR       3 // opens MENU_STATE_MSNGR_CLEAR_CONFIRM
+    // Toggles the peer's outbound send method - label switches Send Direct
+    // (OPPORTUNISTIC, silently upgraded to DIRECT for oversized content)/
+    // Send Propagated (skips straight to the active propagation node,
+    // no direct attempt at all) - messenger_toggle_delivery_mode()
+    // (Messenger.h). Persisted per-bookmark; session-only for a peer
+    // that isn't bookmarked - see that function's own comment.
+    #define MSNGR_PEER_FIXED_ACTION_DELIVERY_MODE 2
+    #define MSNGR_PEER_FIXED_ACTION_BOOKMARK    3 // label switches Add/Remove Bookmark
+    #define MSNGR_PEER_FIXED_ACTION_CLEAR       4 // opens MENU_STATE_MSNGR_CLEAR_CONFIRM
     #if HAS_BLE_HID_HOST == true
       // Opens MENU_STATE_MSNGR_CHAT - leaner BLE-keyboard-only compose view
       // (no on-screen grid, no title/footer chrome) - only meaningful on a
@@ -1130,6 +1203,7 @@
     #define MSNGR_TEXT_ENTRY_PURPOSE_PRESET          2
     #define MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH   3 // MSNGR_BOOKMARKS' "Add by Hash" row - typing an arbitrary peer's destination hash directly, not learned from an announce/message
     #define MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_RENAME 4 // MSNGR_PEER_PROP_ACTION_RENAME - a friendly name for a Propagation-type bookmark, which (unlike an LXMF peer) never gets one automatically
+    #define MSNGR_TEXT_ENTRY_PURPOSE_IDENTITY_RESTORE 5 // URNS_KEYS_ITEM_RESTORE - typing the raw 64-byte identity private key as its VAULT_IDENTITY_KEY_BASE32_LEN-char Base32 encoding (IdentityTransfer.h), using its own dedicated MSNGR_KB_LAYOUT_BASE32 grid (not the hex one - identity keys aren't hex)
     uint8_t msngr_text_entry_purpose = MSNGR_TEXT_ENTRY_PURPOSE_MESSAGE;
 
     // Which kind of bookmark MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH's SAVE
@@ -1229,6 +1303,41 @@
       {'A', 'B', 'C', 'D', 'E', 'F', '\0', '\0', '\0', '\0', '\n'},
       {'\x04', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\x1b'},
     };
+
+    // MSNGR_TEXT_ENTRY_PURPOSE_IDENTITY_RESTORE's own grid - the identity
+    // key is Base32 (RFC 4648: A-Z, 2-7, '=' padding - see IdentityTransfer.h's
+    // identity_key_to_base32()/identity_key_from_base32()), not hex, so
+    // MSNGR_KB_LAYOUT_HEX's 0-9/A-F alphabet doesn't cover it. Unlike the
+    // hex grid, this uses the full standard MSNGR_KB_ROWS (4) - 33 symbol
+    // cells (26 letters + 6 digits + '=') don't fit hex's compact 3-row/
+    // mostly-empty-row-2 shape - so msngr_kb_active_rows() does NOT
+    // special-case this purpose (falls through to its own MSNGR_KB_ROWS
+    // default), only msngr_kb_active_layout()/_cursor_rc()/_active_key_
+    // count() do, same shape as the hex purpose gets but through its own
+    // table/order/count below instead of reusing hex's.
+    static const char MSNGR_KB_LAYOUT_BASE32[MSNGR_KB_ROWS][MSNGR_KB_COLS] = {
+      {'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', '\b'},
+      {'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', '\n'},
+      {'U', 'V', 'W', 'X', 'Y', 'Z', '2', '3', '4', '5', '\x1b'},
+      {'6', '7', '=', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0'},
+    };
+
+    // Same "explicit per-cursor-value (row,col) table, not division/
+    // modulo" reasoning as MSNGR_KB_HEX_ORDER above - MSNGR_KB_LAYOUT_
+    // BASE32 has real cells scattered unevenly (row 3 only has 3), so a
+    // flat division would let the cursor land on blank cells division
+    // alone can't skip. Reading order: A-J, DEL, K-T, SAVE, U-5, BACK,
+    // 6/7/=.
+    static const uint8_t MSNGR_KB_BASE32_ORDER[36][2] = {
+      {0,0}, {0,1}, {0,2}, {0,3}, {0,4}, {0,5}, {0,6}, {0,7}, {0,8}, {0,9}, // A-J
+      {0,10}, // DEL
+      {1,0}, {1,1}, {1,2}, {1,3}, {1,4}, {1,5}, {1,6}, {1,7}, {1,8}, {1,9}, // K-T
+      {1,10}, // SAVE
+      {2,0}, {2,1}, {2,2}, {2,3}, {2,4}, {2,5}, {2,6}, {2,7}, {2,8}, {2,9}, // U-Z,2-5
+      {2,10}, // BACK
+      {3,0}, {3,1}, {3,2}, // 6, 7, =
+    };
+    #define MSNGR_KB_BASE32_KEY_COUNT 36
 
     #define MSNGR_KB_CHAR      0
     #define MSNGR_KB_BACKSPACE 1
@@ -2067,6 +2176,7 @@
     // msngr_delete_confirm_cursor, defaulting to CANCEL for the same reason.
     uint8_t urns_path_delete_confirm_cursor = 1;
     uint8_t urns_identities_cursor = 0;
+    uint8_t urns_keys_cursor = 0;
     uint8_t urns_free_detail_cursor = URNS_FREE_DETAIL_ITEM_BACK;
     // Cached breakdown, computed once by urns_free_detail_refresh() when
     // MENU_STATE_URNS_FREE_DETAIL is entered - see URNS_ITEM_FREE's own
@@ -2190,26 +2300,31 @@
     char msngr_text_entry_buf[MSNGR_TEXT_ENTRY_MAX_LEN + 1] = {0};
 
     // Centralizes which layout table is "live" right now - the restricted
-    // hex grid for MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH, EN/RU otherwise -
-    // so every call site that indexes [kb_row][kb_col] does it through
-    // here instead of duplicating the purpose check. Returns a row-array
-    // pointer (decays to the same char(*)[MSNGR_KB_COLS] type no matter
-    // which table's actual row count is, since only MSNGR_KB_COLS - shared
-    // by all three tables - affects that pointer type) so callers don't
-    // need to know or care that MSNGR_KB_LAYOUT_HEX has fewer rows.
+    // hex grid for MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH, the Base32 grid
+    // for _IDENTITY_RESTORE, EN/RU otherwise - so every call site that
+    // indexes [kb_row][kb_col] does it through here instead of duplicating
+    // the purpose check. Returns a row-array pointer (decays to the same
+    // char(*)[MSNGR_KB_COLS] type no matter which table's actual row
+    // count is, since only MSNGR_KB_COLS - shared by every table - affects
+    // that pointer type) so callers don't need to know or care that
+    // MSNGR_KB_LAYOUT_HEX has fewer rows.
     const char (*msngr_kb_active_layout())[MSNGR_KB_COLS] {
       if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH) return MSNGR_KB_LAYOUT_HEX;
+      if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_IDENTITY_RESTORE) return MSNGR_KB_LAYOUT_BASE32;
       return msngr_kb_lang_ru ? MSNGR_KB_LAYOUT_RU : MSNGR_KB_LAYOUT;
     }
 
     // Row count of whichever layout msngr_kb_active_layout() would return
-    // right now - MSNGR_KB_HEX_ROWS for hash entry, MSNGR_KB_ROWS
-    // otherwise. Bounds the keyboard grid's own row-drawing loop so hash
-    // entry never draws (or leaves visible click-through space for) the
-    // extra row a straight MSNGR_KB_ROWS would otherwise leave underneath
-    // it - cursor navigation itself is bounded separately, by msngr_kb_
-    // active_key_count() below, since MSNGR_KB_LAYOUT_HEX's real cells
-    // aren't evenly spread across every row.
+    // right now - MSNGR_KB_HEX_ROWS for hash entry, MSNGR_KB_ROWS for
+    // everything else, IDENTITY_RESTORE included (MSNGR_KB_LAYOUT_BASE32
+    // uses the full standard row count, unlike hex's compact 3-row grid -
+    // see that table's own comment). Bounds the keyboard grid's own
+    // row-drawing loop so hash entry never draws (or leaves visible
+    // click-through space for) the extra row a straight MSNGR_KB_ROWS
+    // would otherwise leave underneath it - cursor navigation itself is
+    // bounded separately, by msngr_kb_active_key_count() below, since
+    // neither MSNGR_KB_LAYOUT_HEX's nor MSNGR_KB_LAYOUT_BASE32's real
+    // cells are evenly spread across every row.
     uint8_t msngr_kb_active_rows() {
       return msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH ? MSNGR_KB_HEX_ROWS : MSNGR_KB_ROWS;
     }
@@ -2233,14 +2348,20 @@
     #define MSNGR_KB_HEX_KEY_COUNT 20
 
     // Maps a linear cursor value to (row, col) for whichever layout is
-    // active - MSNGR_KB_HEX_ORDER above for hash entry, plain division/
-    // modulo for every other (uniform-grid) purpose. Shared by every call
-    // site that used to do the division/modulo itself, so none of them
-    // need their own purpose check.
+    // active - MSNGR_KB_HEX_ORDER for hash entry, MSNGR_KB_BASE32_ORDER
+    // for identity restore, plain division/modulo for every other
+    // (uniform-grid) purpose. Shared by every call site that used to do
+    // the division/modulo itself, so none of them need their own purpose
+    // check.
     void msngr_kb_cursor_rc(uint8_t cursor, uint8_t &row, uint8_t &col) {
       if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH) {
         row = MSNGR_KB_HEX_ORDER[cursor][0];
         col = MSNGR_KB_HEX_ORDER[cursor][1];
+        return;
+      }
+      if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_IDENTITY_RESTORE) {
+        row = MSNGR_KB_BASE32_ORDER[cursor][0];
+        col = MSNGR_KB_BASE32_ORDER[cursor][1];
         return;
       }
       row = cursor / MSNGR_KB_COLS;
@@ -2250,12 +2371,13 @@
     // Total selectable cells for whichever layout is active right now -
     // bounds cursor navigation (menu_encoder_rotate()'s MENU_STATE_MSNGR_
     // TEXT_ENTRY branch). MSNGR_KB_KEY_COUNT (rows*cols) for every normal
-    // purpose; MSNGR_KB_HEX_KEY_COUNT (MSNGR_KB_HEX_ORDER's own length)
-    // for hash entry - not msngr_kb_active_rows()*MSNGR_KB_COLS, which
-    // would let the cursor wander onto cells MSNGR_KB_HEX_ORDER doesn't
-    // have entries for.
+    // purpose; MSNGR_KB_HEX_KEY_COUNT/MSNGR_KB_BASE32_KEY_COUNT (their own
+    // order tables' lengths) for hash entry/identity restore - not
+    // msngr_kb_active_rows()*MSNGR_KB_COLS, which would let the cursor
+    // wander onto cells those order tables don't have entries for.
     uint8_t msngr_kb_active_key_count() {
       if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH) return MSNGR_KB_HEX_KEY_COUNT;
+      if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_IDENTITY_RESTORE) return MSNGR_KB_BASE32_KEY_COUNT;
       return MSNGR_KB_KEY_COUNT;
     }
 
@@ -2407,6 +2529,8 @@
       alt = msngr_kb_apply_shift(alt, msngr_kb_shift_on);
       size_t max_len = msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH
         ? (size_t)(LXMF::PEER_HASH_SIZE * 2)
+        : msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_IDENTITY_RESTORE
+        ? (size_t)VAULT_IDENTITY_KEY_BASE32_LEN
         : (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME ||
            msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_PRESET ||
            msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_RENAME)
@@ -2488,6 +2612,7 @@
       if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME) return MENU_STATE_MSNGR_SETTINGS;
       if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_PRESET) return MENU_STATE_MSNGR_PRESETS;
       if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH) return MENU_STATE_MSNGR_BOOKMARKS;
+      if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_IDENTITY_RESTORE) return MENU_STATE_URNS_KEYS;
       return MENU_STATE_MSNGR_PEER;
     }
 
@@ -2516,9 +2641,23 @@
     // nothing" shape as MSNGR_MSG_DETAIL's own content lines.
     uint8_t msngr_ping_result_cursor = 1;
 
-    // MENU_STATE_MSNGR_SEND_RESULT - same fixed 2-row shape as
-    // MSNGR_PING_RESULT above, default cursor on BACK.
+    // MENU_STATE_MSNGR_SEND_RESULT - 2-row screen (status + BACK) normally,
+    // growing to 3 (status + Retry + BACK) only once the send has reached
+    // a terminal failure state (TIMEOUT/UNRESOLVED/FAILED) - Retry doesn't
+    // exist before then, not just hidden-but-inert, so it can't be
+    // selected on an in-flight or successful send. Default cursor on BACK
+    // (last row, whichever index that currently is).
     uint8_t msngr_send_result_cursor = 1;
+
+    // True once the currently-tracked send has hit a terminal failure -
+    // the one point Menu.h's draw/input code for MENU_STATE_MSNGR_SEND_
+    // RESULT needs to agree on row count (2 vs 3) and BACK's index (1 vs
+    // 2) with.
+    bool msngr_send_result_failed() {
+      return msngr_send_state == MSNGR_SEND_TIMEOUT ||
+             msngr_send_state == MSNGR_SEND_UNRESOLVED ||
+             msngr_send_state == MSNGR_SEND_FAILED;
+    }
 
     // Appends an already-shift-resolved character to msngr_text_entry_buf,
     // respecting the same per-purpose length cap the on-screen keyboard's
@@ -2530,6 +2669,8 @@
     void msngr_kb_insert_char(char c) {
       size_t max_len = msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH
         ? (size_t)(LXMF::PEER_HASH_SIZE * 2)
+        : msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_IDENTITY_RESTORE
+        ? (size_t)VAULT_IDENTITY_KEY_BASE32_LEN
         : (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME ||
            msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_PRESET ||
            msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_RENAME)
@@ -2729,7 +2870,7 @@
         // "request keys" step is needed here - Send just resolves once an
         // announce comes back.
         uint8_t raw_hash[LXMF::PEER_HASH_SIZE];
-        if (messenger_hash_from_hex(msngr_text_entry_buf, raw_hash)) {
+        if (messenger_hash_from_hex(msngr_text_entry_buf, raw_hash, LXMF::PEER_HASH_SIZE)) {
           RNS::Bytes hash(raw_hash, LXMF::PEER_HASH_SIZE);
           if (messenger_bookmark_find(hash) < 0) {
             // Empty name, not messenger_peer_display_name(hash) - at this
@@ -2752,6 +2893,47 @@
           menu_open_popup("INVALID HASH", MENU_STATE_MSNGR_TEXT_ENTRY);
           menu_popup_auto_dismiss_at = millis() + ACTION_POPUP_MS;
         }
+      } else if (text_len > 0 && msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_IDENTITY_RESTORE) {
+        // Manually-typed identity restore - VAULT_IDENTITY_KEY_BASE32_LEN
+        // Base32 chars decode to the raw 64-byte private key (see
+        // URNS_KEYS_ITEM_RESTORE's own comment). Validate first, THEN
+        // confirm: this way a user who cancels the hold-gesture lands
+        // back on the entry screen with their fully-typed buffer still
+        // intact rather than having to retype the whole key, and an
+        // invalid string never reaches the destructive-confirm step at
+        // all. Reuses vault_identity_confirm()/vault_identity_commit()
+        // (IdentityTransfer.h) exactly as the existing KISS CMD_IDENTITY_
+        // IMPORT flow (vault_identity_import_flow()) already does for
+        // this same "replace the identity" moment, so both entry paths
+        // share one safety bar.
+        uint8_t raw_key[VAULT_IDENTITY_KEYSIZE_BYTES];
+        if (!identity_key_from_base32(msngr_text_entry_buf, raw_key)) {
+          menu_open_popup("INVALID KEY", MENU_STATE_MSNGR_TEXT_ENTRY);
+          menu_popup_auto_dismiss_at = millis() + ACTION_POPUP_MS;
+        } else {
+          bool confirmed = vault_identity_confirm("Replace Identity?", "Current key is lost.", "Cannot be undone.");
+          if (confirmed) {
+            RNS::Bytes identity_plain(raw_key, VAULT_IDENTITY_KEYSIZE_BYTES);
+            bool committed = vault_identity_commit(identity_plain);
+            RNS::secure_zero(identity_plain);
+            msngr_text_entry_buf[0] = 0;
+            if (committed) {
+              // Same "live session state is all built around the OLD
+              // identity, a clean reboot is required" reasoning vault_
+              // identity_import_flow() (IdentityTransfer.h) already
+              // documents for the KISS path.
+              vault_unlock_draw("Restored", "Restarting...");
+              vault_wdt_safe_delay(1500);
+              hard_reset();
+            } else {
+              menu_open_popup("ERROR", MENU_STATE_MSNGR_TEXT_ENTRY);
+            }
+          }
+          // Cancelled: stay on MENU_STATE_MSNGR_TEXT_ENTRY with the typed
+          // buffer intact - same "default to not losing the user's typing"
+          // reasoning as every other purpose's own failure path above.
+        }
+        memset(raw_key, 0, sizeof(raw_key));
       } else if (text_len > 0 && msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_RENAME) {
         // No UTF-8 expansion, same reasoning PRESET below gets away with
         // skipping it - this name never goes out over the air (unlike
@@ -2793,7 +2975,7 @@
           // started either way (see the preset-Send branch's own comment
           // above for why cache refresh isn't called directly here).
           msngr_text_entry_buf[0] = 0;
-          msngr_send_result_cursor = 1; // default BACK - see its own declaration
+          msngr_send_result_cursor = 1; // default BACK (2-row, fresh send never starts failed) - see its own declaration
           menu_state = MENU_STATE_MSNGR_SEND_RESULT;
         } else {
           menu_open_popup(urns_lxmf_send_result_text(msngr_last_send_result), MENU_STATE_MSNGR_TEXT_ENTRY);
@@ -2907,12 +3089,57 @@
         msngr_send_needs_cache_refresh = false;
         messenger_refresh_peer_cache(msngr_active_peer_hash);
       }
-      if ((msngr_send_state == MSNGR_SEND_DELIVERED || msngr_send_state == MSNGR_SEND_TIMEOUT ||
-           msngr_send_state == MSNGR_SEND_UNRESOLVED || msngr_send_state == MSNGR_SEND_FAILED) &&
+      // The Retry row only exists once msngr_send_result_failed() is true
+      // (Menu.h's draw code below draws 2 rows otherwise) - reset the
+      // cursor onto BACK's new index the moment that row appears or
+      // disappears, so a cursor left on BACK's old index doesn't land on
+      // the wrong row (Retry, or off the end of a shrunk 2-row list) after
+      // the transition. Tracked via last-seen failed-ness so this only
+      // fires once per transition, not every poll - a manual cursor move
+      // onto Retry while already failed must survive later polls here.
+      {
+        static bool was_failed = false;
+        bool now_failed = msngr_send_result_failed();
+        if (now_failed != was_failed) {
+          msngr_send_result_cursor = now_failed ? 2 : 1;
+          was_failed = now_failed;
+        }
+      }
+      // Per user request: error/uncertain outcomes (TIMEOUT/UNRESOLVED/
+      // FAILED) no longer auto-dismiss - MSNGR_SEND_TIMEOUT in particular
+      // is just this UI's own patience window running out, not a router-
+      // confirmed failure (see its own declaration), so a PROPAGATED send
+      // that's still genuinely succeeding in the background (a slow stamp
+      // grind, a slow multi-hop resource transfer) could silently pop back
+      // to the peer screen with the error easy to miss entirely. Only
+      // genuine success (Delivered/Sent to Node) still auto-returns -
+      // every error state now stays up until the user presses BACK
+      // (msngr_send_result_cursor's own confirm handler, above).
+      if ((msngr_send_state == MSNGR_SEND_DELIVERED || msngr_send_state == MSNGR_SEND_SENT_TO_NODE) &&
           menu_state == MENU_STATE_MSNGR_SEND_RESULT &&
           millis() - msngr_send_result_at_ms > MSNGR_SEND_RESULT_POPUP_MS) {
         menu_state = MENU_STATE_MSNGR_PEER;
         msngr_send_state = MSNGR_SEND_IDLE;
+      }
+    }
+
+    // Per user request: same success-only auto-dismiss as MSNGR_SEND_
+    // RESULT above, reusing its MSNGR_SEND_RESULT_POPUP_MS timeout -
+    // TIMEOUT/NO_IDENTITY/FAILED still require manual BACK (msngr_ping_
+    // result_cursor's own confirm handler), same "don't silently drop an
+    // error the user hasn't seen yet" reasoning as MSNGR_SEND_RESULT's own
+    // error states.
+    void msngr_ping_result_process() {
+      if (msngr_ping_state == MSNGR_PING_SUCCESS &&
+          menu_state == MENU_STATE_MSNGR_PING_RESULT &&
+          millis() - msngr_ping_result_at_ms > MSNGR_SEND_RESULT_POPUP_MS) {
+        // Same cleanup as a manual BACK press on this row (messenger_ping_
+        // cancel(), Messenger.h) - a no-op on the actual link teardown at
+        // this point (already handled by messenger_ping_process()'s own
+        // msngr_ping_teardown_pending poll, well before this timeout could
+        // fire), just resets the tracking state.
+        messenger_ping_cancel();
+        menu_state = MENU_STATE_MSNGR_PEER;
       }
     }
 
@@ -4803,6 +5030,22 @@
         return;
       }
     #endif
+    // Same exemption, same reasoning as GNSS Diagnostics/MSNGR_CHAT above -
+    // confirmed live: a PROPAGATED send genuinely in flight (proof-of-work
+    // stamp grind, then the resource transfer/PN confirmation wait) can
+    // easily run past SETTINGS_MENU_TIMEOUT (127s) with the user just
+    // watching the screen, not touching any input - this idle-close was
+    // silently kicking the user back to the home screen mid-operation,
+    // with no status shown at all (distinct from, and in addition to,
+    // msngr_send_result_process()'s own fix for error states no longer
+    // auto-dismissing - that one only ever applied once a terminal result
+    // existed to show; this covers the still-PENDING wait beforehand).
+    // MSNGR_PING_RESULT included for the same reason, even though a ping
+    // rarely runs long enough to hit this in practice.
+    if (menu_state == MENU_STATE_MSNGR_SEND_RESULT || menu_state == MENU_STATE_MSNGR_PING_RESULT) {
+      display_unblank();
+      return;
+    }
     if (millis() - menu_last_activity_ms > (unsigned long)SETTINGS_MENU_TIMEOUT * 1000UL) {
       menu_close_without_saving();
     }
@@ -5003,6 +5246,14 @@
       else if (menu_state == MENU_STATE_URNS_LIST) {
         buzzer_encoder_tick_melody();
         urns_menu_cursor = menu_clamp_cursor(urns_menu_cursor, dir, URNS_ITEM_COUNT, wrap);
+        // Skip over URNS_ITEM_KEYS while vault_enabled is false - it's
+        // absent from the drawn list (see the draw-block compaction
+        // below), so the cursor must never rest on it either. Bounded to
+        // at most 1 extra step since neither the first (URNS_ITEM_ENABLED)
+        // nor last (URNS_ITEM_BACK) row is ever hidden.
+        while (!vault_enabled && urns_menu_cursor >= URNS_ITEM_VAULT_ONLY_FIRST && urns_menu_cursor <= URNS_ITEM_VAULT_ONLY_LAST) {
+          urns_menu_cursor = menu_clamp_cursor(urns_menu_cursor, dir, URNS_ITEM_COUNT, wrap);
+        }
       } else if (menu_state == MENU_STATE_URNS_EDIT) {
         buzzer_encoder_tick_melody();
         // Cursor-dispatched toggle, same shape as ESP-NOW's MENU_STATE_
@@ -5028,6 +5279,9 @@
       } else if (menu_state == MENU_STATE_URNS_IDENTITIES) {
         buzzer_encoder_tick_melody();
         urns_identities_cursor = menu_clamp_cursor(urns_identities_cursor, dir, URNS_ID_ITEM_COUNT, wrap);
+      } else if (menu_state == MENU_STATE_URNS_KEYS) {
+        buzzer_encoder_tick_melody();
+        urns_keys_cursor = menu_clamp_cursor(urns_keys_cursor, dir, URNS_KEYS_ITEM_COUNT, wrap);
       } else if (menu_state == MENU_STATE_URNS_FREE_DETAIL) {
         buzzer_encoder_tick_melody();
         urns_free_detail_cursor = menu_clamp_cursor(urns_free_detail_cursor, dir, URNS_FREE_DETAIL_ITEM_COUNT, wrap);
@@ -5036,6 +5290,13 @@
         // it too, same as a confirm (see menu_confirm_select()).
         buzzer_encoder_tick_melody();
         menu_state = menu_hash_view_return_state;
+      } else if (menu_state == MENU_STATE_URNS_IDENTITY_KEY_VIEW) {
+        // Single fixed entry point (unlike MENU_STATE_URNS_PATH_HASH_VIEW,
+        // which is shared by several callers), so it returns straight to
+        // MENU_STATE_URNS_KEYS rather than through a shared return-state
+        // variable. Any rotation dismisses it, same as a confirm.
+        buzzer_encoder_tick_melody();
+        menu_state = MENU_STATE_URNS_KEYS;
       }
       #if HAS_LXMF == true
       else if (menu_state == MENU_STATE_MSNGR_LIST) {
@@ -5081,7 +5342,7 @@
         msngr_ping_result_cursor = menu_clamp_cursor(msngr_ping_result_cursor, dir, 2, wrap);
       } else if (menu_state == MENU_STATE_MSNGR_SEND_RESULT) {
         buzzer_encoder_tick_melody();
-        msngr_send_result_cursor = menu_clamp_cursor(msngr_send_result_cursor, dir, 2, wrap);
+        msngr_send_result_cursor = menu_clamp_cursor(msngr_send_result_cursor, dir, msngr_send_result_failed() ? 3 : 2, wrap);
       } else if (menu_state == MENU_STATE_MSNGR_SETTINGS) {
         buzzer_encoder_tick_melody();
         msngr_settings_cursor = menu_clamp_cursor(msngr_settings_cursor, dir, MSNGR_SETTINGS_ITEM_COUNT, wrap);
@@ -6263,6 +6524,9 @@
         } else if (urns_menu_cursor == URNS_ITEM_IDENTITIES) {
           urns_identities_cursor = 0;
           menu_state = MENU_STATE_URNS_IDENTITIES;
+        } else if (urns_menu_cursor == URNS_ITEM_KEYS) {
+          urns_keys_cursor = 0;
+          menu_state = MENU_STATE_URNS_KEYS;
         } else if (urns_menu_cursor == URNS_ITEM_FREE) {
           urns_free_detail_refresh();
           urns_free_detail_cursor = URNS_FREE_DETAIL_ITEM_BACK;
@@ -6339,24 +6603,50 @@
       } else if (menu_state == MENU_STATE_URNS_IDENTITIES) {
         if (urns_identities_cursor == URNS_ID_ITEM_BACK) {
           menu_state = MENU_STATE_URNS_LIST;
+        } else if (urns_identities_cursor == URNS_ID_ITEM_PROBE_DEST && !RNS::Transport::probe_destination()) {
+          // Inactive row (see its own N/A comment) - no hash to show, so
+          // selecting it is a no-op rather than opening the hash view on
+          // whatever unrelated hash happened to be there from a previous
+          // visit.
         } else {
           if (urns_identities_cursor == URNS_ID_ITEM_NODE_IDENTITY) {
             urns_path_detail_hash = urns_identity.hash();
-          } else if (urns_identities_cursor == URNS_ID_ITEM_RNODE_DEST) {
-            urns_path_detail_hash = urns_destination.hash();
           }
           #if HAS_LXMF == true
           else if (urns_identities_cursor == URNS_ID_ITEM_LXMF_DEST && urns_lxmf_router) {
             urns_path_detail_hash = urns_lxmf_router->delivery_destination().hash();
           }
           #endif
+          else if (urns_identities_cursor == URNS_ID_ITEM_TRANSPORT_IDENTITY) {
+            urns_path_detail_hash = RNS::Transport::identity().hash();
+          } else if (urns_identities_cursor == URNS_ID_ITEM_PROBE_DEST) {
+            urns_path_detail_hash = RNS::Transport::probe_destination().hash();
+          }
           menu_hash_view_return_state = MENU_STATE_URNS_IDENTITIES;
           menu_state = MENU_STATE_URNS_PATH_HASH_VIEW;
+        }
+      } else if (menu_state == MENU_STATE_URNS_KEYS) {
+        if (urns_keys_cursor == URNS_KEYS_ITEM_BACK) {
+          menu_state = MENU_STATE_URNS_LIST;
+        } else if (urns_keys_cursor == URNS_KEYS_ITEM_DISPLAY) {
+          menu_state = MENU_STATE_URNS_IDENTITY_KEY_VIEW;
+        #if HAS_LXMF == true
+        } else if (urns_keys_cursor == URNS_KEYS_ITEM_RESTORE) {
+          msngr_text_entry_purpose = MSNGR_TEXT_ENTRY_PURPOSE_IDENTITY_RESTORE;
+          msngr_text_entry_buf[0] = 0;
+          msngr_kb_cursor = 0;
+          menu_state = MENU_STATE_MSNGR_TEXT_ENTRY;
+        #endif
         }
       } else if (menu_state == MENU_STATE_URNS_PATH_HASH_VIEW) {
         // A single fixed view, nothing to select - any confirm just
         // dismisses it, same as MENU_STATE_STATUS_POPUP.
         menu_state = menu_hash_view_return_state;
+      } else if (menu_state == MENU_STATE_URNS_IDENTITY_KEY_VIEW) {
+        // Single fixed entry point - see menu_encoder_rotate()'s own
+        // handling of this state for why it returns straight to
+        // MENU_STATE_URNS_KEYS rather than menu_hash_view_return_state.
+        menu_state = MENU_STATE_URNS_KEYS;
       }
       #if HAS_LXMF == true
       else if (menu_state == MENU_STATE_MSNGR_LIST) {
@@ -6373,10 +6663,8 @@
           msngr_announces_cursor = 0;
         } else if (msngr_menu_cursor == MSNGR_TOP_ITEM_ANNOUNCE_NODE) {
           // Announces our own LXMF delivery destination (display name +
-          // stamp cost via LXMRouter::announce()'s own app_data build),
-          // not urns_destination's separate Phase 1 test destination -
-          // see urns_announce()'s own two-part comment (URNS.h) for why
-          // those are kept distinct.
+          // stamp cost via LXMRouter::announce()'s own app_data build) -
+          // see urns_announce_lxmf()'s own comment (URNS.h).
           if (urns_ready && urns_lxmf_router) {
             urns_lxmf_router->announce();
             menu_open_popup("ANNOUNCED", MENU_STATE_MSNGR_LIST);
@@ -6622,7 +6910,7 @@
               // rather than called here directly, since the RESOLVING path
               // only actually saves a message later, asynchronously, from
               // inside Messenger.h where this function isn't visible yet.
-              msngr_send_result_cursor = 1; // default BACK - see its own declaration
+              msngr_send_result_cursor = 1; // default BACK (2-row, fresh send never starts failed) - see its own declaration
               menu_state = MENU_STATE_MSNGR_SEND_RESULT;
             } else {
               menu_open_popup(urns_lxmf_send_result_text(msngr_last_send_result), MENU_STATE_MSNGR_PEER);
@@ -6645,6 +6933,8 @@
               messenger_ping_start(msngr_active_peer_hash);
               msngr_ping_result_cursor = 1; // default BACK - see its own declaration
               menu_state = MENU_STATE_MSNGR_PING_RESULT;
+            } else if (fixed_action == MSNGR_PEER_FIXED_ACTION_DELIVERY_MODE) {
+              messenger_toggle_delivery_mode(msngr_active_peer_hash);
             } else if (fixed_action == MSNGR_PEER_FIXED_ACTION_SEND_CUSTOM) {
               // Explicit reset, not a reliance on MSNGR_TEXT_ENTRY_
               // PURPOSE_MESSAGE just happening to be the compile-time
@@ -6842,18 +7132,31 @@
           menu_state = MENU_STATE_MSNGR_PEER;
         }
       } else if (menu_state == MENU_STATE_MSNGR_SEND_RESULT) {
-        // Row 0 (status) is read-only - only BACK does anything. If the
-        // packet's already gone out (PENDING/DELIVERED/TIMEOUT) there's
-        // nothing to tear down, same as Ping - this just stops watching
-        // for this send's proof so a late-arriving one doesn't affect
-        // whatever the screen shows next time it's opened for a different
-        // send. If still RESOLVING (waiting on identity/path -
-        // messenger_send_lxmf()/_process(), Messenger.h), setting state
-        // back to IDLE here doubles as a real cancel: nothing's been sent
-        // yet in that case, and messenger_send_process() only acts on
-        // MSNGR_SEND_RESOLVING, so the parked message is simply abandoned
-        // rather than firing off later without the user watching.
-        if (msngr_send_result_cursor == 1) {
+        // Row 0 (status) is read-only. Row 1 is BACK normally (2-row
+        // layout) but becomes Retry once the send has reached a terminal
+        // failure state, with BACK pushed to row 2 (3-row layout, draw
+        // code above) - msngr_send_result_failed() is the single source
+        // of truth both places agree on.
+        bool send_result_failed = msngr_send_result_failed();
+        uint8_t back_row = send_result_failed ? 2 : 1;
+        if (send_result_failed && msngr_send_result_cursor == 1) {
+          // Retry - re-fires the exact same destination/content
+          // (msngr_send_pending_dest_hash/_content, Messenger.h, populated
+          // unconditionally by every messenger_send_lxmf() call) rather
+          // than making the user back out and retype the message.
+          messenger_send_lxmf(msngr_send_pending_dest_hash, msngr_send_pending_content);
+        } else if (msngr_send_result_cursor == back_row) {
+          // BACK. If the packet's already gone out (PENDING/DELIVERED/
+          // TIMEOUT) there's nothing to tear down, same as Ping - this just
+          // stops watching for this send's proof so a late-arriving one
+          // doesn't affect whatever the screen shows next time it's opened
+          // for a different send. If still RESOLVING (waiting on identity/
+          // path - messenger_send_lxmf()/_process(), Messenger.h), setting
+          // state back to IDLE here doubles as a real cancel: nothing's
+          // been sent yet in that case, and messenger_send_process() only
+          // acts on MSNGR_SEND_RESOLVING, so the parked message is simply
+          // abandoned rather than firing off later without the user
+          // watching.
           msngr_send_state = MSNGR_SEND_IDLE;
           menu_state = MENU_STATE_MSNGR_PEER;
         }
@@ -7133,7 +7436,7 @@
         else if (menu_state == MENU_STATE_MSNGR_CLEAR_CONFIRM)    msngr_clear_confirm_cursor = 1;
         else if (menu_state == MENU_STATE_MSNGR_DISCARD_CONFIRM)  msngr_discard_confirm_cursor = 1;
         else if (menu_state == MENU_STATE_MSNGR_PING_RESULT)      msngr_ping_result_cursor = 1;
-        else if (menu_state == MENU_STATE_MSNGR_SEND_RESULT)      msngr_send_result_cursor = 1;
+        else if (menu_state == MENU_STATE_MSNGR_SEND_RESULT)      msngr_send_result_cursor = msngr_send_result_failed() ? 2 : 1;
         else if (menu_state == MENU_STATE_MSNGR_SETTINGS)         msngr_settings_cursor = MSNGR_SETTINGS_ITEM_COUNT - 1;
         else if (menu_state == MENU_STATE_MSNGR_PRESETS)          msngr_presets_cursor = msngr_presets_row_count() - 1;
         else if (menu_state == MENU_STATE_MSNGR_PRESET_DETAIL)    msngr_preset_detail_cursor = 2;
@@ -7376,6 +7679,12 @@
         // for why the linear step alone isn't "proper" navigation,
         // especially for MSNGR_KB_LAYOUT_HEX's tab order.
         bool hex_mode = (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH);
+        // Identity restore has its own restricted alphabet (Base32: A-Z/
+        // 2-7/=), not hex's 0-9/A-F - a separate flag rather than folding
+        // it into hex_mode, since the actual accepted character set (and
+        // the Type-cell Tab/Space handling just below, which only ever
+        // meant anything for BOOKMARK_HASH's bookmark-type toggle) differ.
+        bool base32_mode = (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_IDENTITY_RESTORE);
         if (ch == '\n') msngr_kb_do_send();
         else if (ch == '\b') msngr_kb_do_backspace();
         else if (ch == '\x1b') menu_msngr_text_entry_leave();
@@ -7421,7 +7730,17 @@
           char up = (ch >= 'a' && ch <= 'f') ? (char)(ch - 'a' + 'A') : ch;
           if ((up >= '0' && up <= '9') || (up >= 'A' && up <= 'F')) msngr_kb_insert_char(up);
         }
-        else if (!hex_mode && ch != 0) msngr_kb_insert_char(ch);
+        else if (base32_mode && ch != 0) {
+          // Base32 (RFC 4648): only A-Z/2-7/= are valid - no 0/1/8/9 (not
+          // in the alphabet, see identity_key_from_base32()'s own
+          // comment), no other symbols. Lowercase a-z normalized to
+          // uppercase, matching MSNGR_KB_LAYOUT_BASE32's own cells (never
+          // lowercase) - anything else silently dropped rather than
+          // inserted, same rule hex_mode's own filter documents.
+          char up = (ch >= 'a' && ch <= 'z') ? (char)(ch - 'a' + 'A') : ch;
+          if ((up >= 'A' && up <= 'Z') || (up >= '2' && up <= '7') || up == '=') msngr_kb_insert_char(up);
+        }
+        else if (!hex_mode && !base32_mode && ch != 0) msngr_kb_insert_char(ch);
         return;
       }
 
@@ -7895,12 +8214,16 @@
     // just dismisses it, see menu_confirm_select()/menu_encoder_rotate())
     // - the point of this screen is to be nothing but the hash, easy to
     // read at a glance instead of squeezed into a label+value list row.
+    // Uppercase A-F (toHex(true)) - same convention as every other
+    // destination/identity hash this firmware displays (Path Table,
+    // Path Detail, Identities), per-user request to keep hex display
+    // case consistent across the whole menu.
     void draw_menu_urns_path_hash_disp() {
       MENU_GFX.setFont(MENU_FONT);
       MENU_GFX.setTextSize(1);
       MENU_GFX.setTextColor(SSD1306_WHITE);
 
-      std::string full_hex = urns_path_detail_hash.toHex();
+      std::string full_hex = urns_path_detail_hash.toHex(true);
       std::string line1 = full_hex.size() >= 16 ? full_hex.substr(0, 16) : full_hex;
       std::string line2 = full_hex.size() > 16 ? full_hex.substr(16, 16) : "";
 
@@ -7914,6 +8237,63 @@
       MENU_GFX.print(line1.c_str());
       MENU_GFX.setCursor(cx - (int16_t)w2 / 2, cy + 8);
       MENU_GFX.print(line2.c_str());
+    }
+
+    // MENU_STATE_URNS_IDENTITY_KEY_VIEW - the full Base32-encoded raw
+    // private key of urns_identity, plain left-aligned lines, no field
+    // captions, no header/footer chrome (any input dismisses it, see
+    // menu_confirm_select()/menu_encoder_rotate()). Unlike every other
+    // hash this firmware displays, this is a PRIVATE key, not a public
+    // destination hash - reachable only from URNS_KEYS_ITEM_DISPLAY
+    // (MENU_STATE_URNS_KEYS), which is itself only reachable once
+    // vault_enabled is true (URNS_ITEM_KEYS). This is an
+    // intentional, explicit, user-initiated action (the user has to be
+    // physically at the device and navigate here on purpose), not an
+    // oversight - same "deliberate, physically-present operation"
+    // reasoning IdentityTransfer.h's own vault_identity_confirm() already
+    // documents for identity replacement.
+    //
+    // Doesn't fit MENU_STATE_URNS_PATH_HASH_VIEW's 2-line layout, so this
+    // gets its own function - wrapped to as many lines as it takes at
+    // MENU_CONTENT_W, left-aligned rather than centered so every line
+    // starts at the same x regardless of length. Real per-line wrap
+    // (measures actual glyph widths via getTextBounds(), same technique
+    // MENU_STATE_URNS_PATH_HASH_VIEW's own centered layout above already
+    // uses) rather than a flat chars-per-line guess - confirmed on
+    // hardware that a fixed budget either overflowed the right edge or
+    // left it too conservative depending on the guess. Baseline starts at
+    // MENU_HEADER_TEXT_Y, not y=2 - Org_01/SMALL_FONT's setCursor(x,y) is
+    // a baseline, not a top-left corner (see feedback_org01_font_baseline
+    // memory), so starting too close to y=0 clipped the first line's
+    // ascenders against the top of the canvas; MENU_HEADER_TEXT_Y is the
+    // same safe top-of-screen baseline every header title on this board
+    // already uses. 9px line spacing (not the tighter 8 the first pass
+    // used) to actually use the vertical room this chrome-less screen has
+    // to spare, confirmed too cramped near the top on hardware otherwise.
+    void draw_menu_urns_identity_key_disp() {
+      MENU_GFX.setFont(MENU_FONT);
+      MENU_GFX.setTextSize(1);
+      MENU_GFX.setTextColor(SSD1306_WHITE);
+
+      std::string full_key = urns_identity_key_encode();
+
+      int16_t y = MENU_HEADER_TEXT_Y;
+      size_t pos = 0;
+      while (pos < full_key.size()) {
+        size_t len = full_key.size() - pos;
+        while (len > 1) {
+          std::string candidate = full_key.substr(pos, len);
+          int16_t bx, by; uint16_t bw, bh;
+          MENU_GFX.getTextBounds(candidate.c_str(), 0, 0, &bx, &by, &bw, &bh);
+          if ((int16_t)bw <= MENU_CONTENT_W) break;
+          len--;
+        }
+        std::string line = full_key.substr(pos, len);
+        MENU_GFX.setCursor(MENU_CONTENT_X, y);
+        MENU_GFX.print(line.c_str());
+        pos += len;
+        y += 9;
+      }
     }
 
   #if HAS_LXMF == true
@@ -8199,6 +8579,13 @@
 
     void draw_menu_msngr_keyboard_disp() {
       const bool hex_mode = (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH);
+      // Identity restore shares hex_mode's "SAVE not SEND, no EN/RU
+      // toggle, show a N/max progress count" treatment, but NOT its
+      // compact 2-row grid/2-line preview (MSNGR_KB_LAYOUT_BASE32 needs
+      // the full standard row count - see that table's own comment) - so
+      // it gets its own flag rather than folding into hex_mode itself.
+      const bool base32_mode = (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_IDENTITY_RESTORE);
+      const bool save_label_mode = hex_mode || base32_mode;
       MENU_GFX.setFont(MENU_FONT);
       MENU_GFX.setTextSize(1);
       MENU_GFX.setTextColor(SSD1306_WHITE);
@@ -8212,7 +8599,8 @@
       MENU_GFX.print(msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME ? "Name" :
                      msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_PRESET ? "Preset" :
                      msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH ? "Add Hash" :
-                     msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_RENAME ? "Rename" : "Send Msg");
+                     msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_RENAME ? "Rename" :
+                     msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_IDENTITY_RESTORE ? "Restore Key" : "Send Msg");
 
       // Byte count, right-aligned on the same title line - "(N bytes)",
       // the actual UTF-8 payload size this buffer would send/save as
@@ -8236,11 +8624,14 @@
       // changes.
       {
         char count_buf[24];
-        // Hash entry cares about hitting exactly 32 hex chars, not the
-        // UTF-8 payload size every other purpose here sends/saves as -
-        // an N/32 progress count is the useful number to show instead.
+        // Hash entry/identity restore care about hitting an exact target
+        // length, not the UTF-8 payload size every other purpose here
+        // sends/saves as - an N/max progress count is the useful number
+        // to show instead.
         if (hex_mode) {
           snprintf(count_buf, sizeof(count_buf), " (%u/%u)", (unsigned)strlen(msngr_text_entry_buf), (unsigned)(LXMF::PEER_HASH_SIZE * 2));
+        } else if (base32_mode) {
+          snprintf(count_buf, sizeof(count_buf), " (%u/%u)", (unsigned)strlen(msngr_text_entry_buf), (unsigned)VAULT_IDENTITY_KEY_BASE32_LEN);
         } else {
           snprintf(count_buf, sizeof(count_buf), " (%u bytes)", (unsigned)msngr_kb_utf8_len(msngr_text_entry_buf));
         }
@@ -8248,11 +8639,12 @@
         int16_t cx1, cy1; uint16_t count_w, count_h;
         MENU_GFX.getTextBounds(count_buf, 0, 0, &cx1, &cy1, &count_w, &count_h);
 
-        if (hex_mode) {
-          // No EN/RU indicator - hex_mode's grid (MSNGR_KB_LAYOUT_HEX) has
-          // no language toggle at all (msngr_kb_lang_ru is forced/left
-          // false whenever this screen opens), so the box would just be
-          // permanently stuck showing "EN" with nothing to indicate.
+        if (save_label_mode) {
+          // No EN/RU indicator - neither hex_mode's grid (MSNGR_KB_LAYOUT_
+          // HEX) nor base32_mode's (MSNGR_KB_LAYOUT_BASE32) has a language
+          // toggle at all (msngr_kb_lang_ru is forced/left false whenever
+          // this screen opens for either purpose), so the box would just
+          // be permanently stuck showing "EN" with nothing to indicate.
           MENU_GFX.setCursor(MENU_CONTENT_X + MENU_CONTENT_W - (int16_t)count_w, header_y);
           MENU_GFX.print(count_buf);
         } else {
@@ -8297,20 +8689,23 @@
       const int16_t box_h = hex_mode ? (int16_t)(line_h * 2) : (int16_t)line_h;
       MENU_GFX.drawRect(box_x, box_y, box_w, box_h, SSD1306_WHITE);
       if (hex_mode) {
-        // Hard-capped at 32 chars (Menu.h's own MSNGR_TEXT_ENTRY_PURPOSE_
-        // BOOKMARK_HASH max_len) split 16/16 - always fits this box_w at
-        // Org_01's width (MSNGR_MSG_DETAIL_CHARS_PER_LINE=20 already fits
-        // 20 chars in the same MENU_CONTENT_W elsewhere), so unlike the
-        // scrolling tail below this never needs to measure/trim.
+        // Two lines of 16 chars each (32 total) fit this box_w at Org_01's
+        // width (MSNGR_MSG_DETAIL_CHARS_PER_LINE=20 already fits 20 chars
+        // in the same MENU_CONTENT_W elsewhere) - exactly BOOKMARK_HASH's
+        // own max_len (32), so its full buffer always fits with no
+        // scrolling needed - windowed to the last 32 chars typed purely
+        // as a defensive measure (never actually triggers at this
+        // purpose's own max_len), not because it's expected to overflow.
         std::string full(msngr_text_entry_buf);
-        std::string line1 = full.size() > 16 ? full.substr(0, 16) : full;
-        std::string line2 = full.size() > 16 ? full.substr(16) : "";
+        std::string windowed = full.size() > 32 ? full.substr(full.size() - 32) : full;
+        std::string line1 = windowed.size() > 16 ? windowed.substr(0, 16) : windowed;
+        std::string line2 = windowed.size() > 16 ? windowed.substr(16) : "";
         MENU_GFX.setCursor(box_x + 2, box_y + 6);
         MENU_GFX.print(line1.c_str());
         MENU_GFX.setCursor(box_x + 2, box_y + 6 + line_h);
         MENU_GFX.print(line2.c_str());
 
-        bool caret_on_line2 = full.size() >= 16;
+        bool caret_on_line2 = windowed.size() >= 16;
         const std::string &caret_line = caret_on_line2 ? line2 : line1;
         int16_t cx1, cy1; uint16_t cw, ch;
         MENU_GFX.getTextBounds(caret_line.c_str(), 0, 0, &cx1, &cy1, &cw, &ch);
@@ -8349,7 +8744,7 @@
       const uint8_t row_h = (uint8_t)((grid_bottom - (box_y + (int16_t)line_h + 1)) / MSNGR_KB_ROWS);
 
       int16_t x1, y1; uint16_t last_col_w, th;
-      MENU_GFX.getTextBounds(hex_mode ? "SAVE" : "SPACE", 0, 0, &x1, &y1, &last_col_w, &th);
+      MENU_GFX.getTextBounds(save_label_mode ? "SAVE" : "SPACE", 0, 0, &x1, &y1, &last_col_w, &th);
       last_col_w += 4;
       const uint8_t left_cols = MSNGR_KB_COLS - 1;
       int16_t usable_w = MENU_CONTENT_W - last_col_w;
@@ -8396,7 +8791,7 @@
           const char *label;
           switch (type) {
             case MSNGR_KB_BACKSPACE:   label = "DEL"; break;
-            case MSNGR_KB_SEND:        label = hex_mode ? "SAVE" : "SEND"; break; // hex_mode saves a bookmark locally, nothing goes out over the air - "SEND" would be misleading
+            case MSNGR_KB_SEND:        label = save_label_mode ? "SAVE" : "SEND"; break; // hex_mode/base32_mode save a bookmark/identity locally, nothing goes out over the air - "SEND" would be misleading
             case MSNGR_KB_SPACE:       label = "SPACE"; break;
             case MSNGR_KB_BACK:        label = "BACK"; break;
             case MSNGR_KB_SHIFT:       label = msngr_kb_shift_on ? "^^" : "^"; break;
@@ -9873,6 +10268,9 @@
         labels[URNS_ITEM_IDENTITIES] = "Identities";
         sprintf(valbufs[URNS_ITEM_IDENTITIES], ">"); // opens a submenu, not an inline value
 
+        labels[URNS_ITEM_KEYS] = "Keys";
+        sprintf(valbufs[URNS_ITEM_KEYS], ">"); // opens a submenu, not an inline value
+
         labels[URNS_ITEM_FREE] = "Free";
         {
           // update_display() (RNode_Firmware.ino) calls draw_settings_menu_disp()
@@ -9901,7 +10299,29 @@
         labels[URNS_ITEM_BACK] = "BACK";
         valbufs[URNS_ITEM_BACK][0] = 0;
 
-        draw_menu_list_disp("URNS", labels, valbufs, URNS_ITEM_COUNT, urns_menu_cursor);
+        // URNS_ITEM_KEYS (URNS_ITEM_VAULT_ONLY_FIRST..._LAST) is only
+        // shown once vault_enabled is true - see that range's own
+        // comment. draw_menu_list_disp() needs a
+        // contiguous array with cursor as a literal index into it, so
+        // compact into a second pair of arrays when hiding, translating
+        // urns_menu_cursor (still in raw enum-ID space, see menu_confirm_
+        // select()/menu_encoder_rotate()) to its position in the visible
+        // list.
+        if (vault_enabled) {
+          draw_menu_list_disp("URNS", labels, valbufs, URNS_ITEM_COUNT, urns_menu_cursor);
+        } else {
+          const char *visible_labels[URNS_ITEM_COUNT];
+          char visible_valbufs[URNS_ITEM_COUNT][24];
+          uint8_t visible_count = 0, visible_cursor = 0;
+          for (uint8_t i = 0; i < URNS_ITEM_COUNT; i++) {
+            if (i >= URNS_ITEM_VAULT_ONLY_FIRST && i <= URNS_ITEM_VAULT_ONLY_LAST) continue;
+            visible_labels[visible_count] = labels[i];
+            memcpy(visible_valbufs[visible_count], valbufs[i], 24);
+            if (i == urns_menu_cursor) visible_cursor = visible_count;
+            visible_count++;
+          }
+          draw_menu_list_disp("URNS", visible_labels, visible_valbufs, visible_count, visible_cursor);
+        }
       } else if (menu_state == MENU_STATE_URNS_FREE_DETAIL) {
         // Static snapshot from urns_free_detail_refresh() (called once on
         // entry, menu_confirm_select()) - NOT recomputed here, same
@@ -9978,7 +10398,7 @@
           uint8_t i = 0;
           for (auto it = pt.begin(); it != pt.end() && i < MENU_URNS_PATH_MAX_ROWS; ++it, i++) {
             auto entry = *it;
-            snprintf(label_bufs[i], sizeof(label_bufs[i]), "%s", entry.key.toHex().substr(0, 8).c_str());
+            snprintf(label_bufs[i], sizeof(label_bufs[i]), "%s", entry.key.toHex(true).substr(0, 8).c_str());
             labels[i] = label_bufs[i];
             uint8_t hops = entry.value._hops;
             sprintf(valbufs[i], "%u hop%s", hops, hops == 1 ? "" : "s");
@@ -10005,7 +10425,7 @@
         // Preview only (16 of 32 hex chars) - the Hash row itself is
         // enterable and opens MENU_STATE_URNS_PATH_HASH_VIEW for the full
         // value.
-        std::string full_hex = urns_path_detail_hash.toHex();
+        std::string full_hex = urns_path_detail_hash.toHex(true);
         labels[URNS_PATH_DETAIL_ITEM_HASH] = "Hash";
         snprintf(valbufs[URNS_PATH_DETAIL_ITEM_HASH], 24, "%s", full_hex.substr(0, 16).c_str());
 
@@ -10040,36 +10460,74 @@
         valbufs[1][0] = 0;
         draw_menu_list_disp("DELETE PATH?", labels, valbufs, 2, urns_path_delete_confirm_cursor);
       } else if (menu_state == MENU_STATE_URNS_IDENTITIES) {
-        // Fixed 3-4 row list (Node Identity + rnode.onboard, plus lxmf.
-        // delivery on HAS_LXMF boards) - see URNS_ID_ITEM_* comment for why
-        // this isn't a generic RNS::Transport::destinations() dump. Each
-        // row's value is the same 8-hex-char preview convention the Path
-        // Table list uses for its own rows; selecting one opens the shared
-        // full-hash view (MENU_STATE_URNS_PATH_HASH_VIEW).
+        // Fixed 3-4 row list (Node ID + Transport ID + Probe ID, plus
+        // LXMF ID on HAS_LXMF boards), in that display order - see
+        // URNS_ID_ITEM_* comment for why this isn't a generic RNS::
+        // Transport::destinations() dump. Each row's value is the same
+        // 8-hex-char preview convention the Path Table list uses for its
+        // own rows (uppercase A-F, same as every other hash display in
+        // this firmware - see draw_menu_urns_path_hash_disp()'s own
+        // comment); selecting one opens the shared full-hash view
+        // (MENU_STATE_URNS_PATH_HASH_VIEW).
         const char *labels[URNS_ID_ITEM_COUNT];
         char valbufs[URNS_ID_ITEM_COUNT][24];
 
-        labels[URNS_ID_ITEM_NODE_IDENTITY] = "Node Identity";
-        snprintf(valbufs[URNS_ID_ITEM_NODE_IDENTITY], 24, "%s", urns_identity.hexhash().substr(0, 8).c_str());
+        labels[URNS_ID_ITEM_NODE_IDENTITY] = "Node ID";
+        snprintf(valbufs[URNS_ID_ITEM_NODE_IDENTITY], 24, "%s", urns_identity.hash().toHex(true).substr(0, 8).c_str());
 
-        labels[URNS_ID_ITEM_RNODE_DEST] = "rnode.onboard";
-        snprintf(valbufs[URNS_ID_ITEM_RNODE_DEST], 24, "%s", urns_destination.hash().toHex().substr(0, 8).c_str());
+        labels[URNS_ID_ITEM_TRANSPORT_IDENTITY] = "Transport ID";
+        snprintf(valbufs[URNS_ID_ITEM_TRANSPORT_IDENTITY], 24, "%s", RNS::Transport::identity().hash().toHex(true).substr(0, 8).c_str());
 
         #if HAS_LXMF == true
-          labels[URNS_ID_ITEM_LXMF_DEST] = "lxmf.delivery";
+          labels[URNS_ID_ITEM_LXMF_DEST] = "LXMF ID";
           if (urns_lxmf_router) {
-            snprintf(valbufs[URNS_ID_ITEM_LXMF_DEST], 24, "%s", urns_lxmf_router->delivery_destination().hash().toHex().substr(0, 8).c_str());
+            snprintf(valbufs[URNS_ID_ITEM_LXMF_DEST], 24, "%s", urns_lxmf_router->delivery_destination().hash().toHex(true).substr(0, 8).c_str());
           } else {
             sprintf(valbufs[URNS_ID_ITEM_LXMF_DEST], "N/A");
           }
         #endif
 
+        labels[URNS_ID_ITEM_PROBE_DEST] = "Probe ID";
+        // Only exists at the RNS::Transport level once Probe Destination is
+        // actually active (see URNS_ID_ITEM_PROBE_DEST's own comment) -
+        // same live-flag-not-staged-value convention as the PIN Protection
+        // row above, since this reflects RNS::Transport's actual runtime
+        // state, not a pending menu edit.
+        if (RNS::Transport::probe_destination()) {
+          snprintf(valbufs[URNS_ID_ITEM_PROBE_DEST], 24, "%s", RNS::Transport::probe_destination().hash().toHex(true).substr(0, 8).c_str());
+        } else {
+          sprintf(valbufs[URNS_ID_ITEM_PROBE_DEST], "N/A");
+        }
+
         labels[URNS_ID_ITEM_BACK] = "BACK";
         valbufs[URNS_ID_ITEM_BACK][0] = 0;
 
         draw_menu_list_disp("IDENTITIES", labels, valbufs, URNS_ID_ITEM_COUNT, urns_identities_cursor);
+      } else if (menu_state == MENU_STATE_URNS_KEYS) {
+        // Fixed 2-3 row list (Display always, Restore on HAS_LXMF boards),
+        // same "own submenu, only BACK does anything besides opening a
+        // row" shape as MENU_STATE_URNS_IDENTITIES above - no runtime
+        // hiding needed here (unlike URNS_ITEM_KEYS itself), see that
+        // item's own comment.
+        const char *labels[URNS_KEYS_ITEM_COUNT];
+        char valbufs[URNS_KEYS_ITEM_COUNT][24];
+
+        labels[URNS_KEYS_ITEM_DISPLAY] = "Display Identity Key";
+        valbufs[URNS_KEYS_ITEM_DISPLAY][0] = 0;
+
+        #if HAS_LXMF == true
+          labels[URNS_KEYS_ITEM_RESTORE] = "Restore Identity";
+          valbufs[URNS_KEYS_ITEM_RESTORE][0] = 0;
+        #endif
+
+        labels[URNS_KEYS_ITEM_BACK] = "BACK";
+        valbufs[URNS_KEYS_ITEM_BACK][0] = 0;
+
+        draw_menu_list_disp("KEYS", labels, valbufs, URNS_KEYS_ITEM_COUNT, urns_keys_cursor);
       } else if (menu_state == MENU_STATE_URNS_PATH_HASH_VIEW) {
         draw_menu_urns_path_hash_disp();
+      } else if (menu_state == MENU_STATE_URNS_IDENTITY_KEY_VIEW) {
+        draw_menu_urns_identity_key_disp();
       }
       #if HAS_LXMF == true
       else if (menu_state == MENU_STATE_MSNGR_LIST) {
@@ -10439,6 +10897,12 @@
         icons[fixed_base + MSNGR_PEER_FIXED_ACTION_PING] = bm_menu_icon_msngr_ping;
         icon_widths[fixed_base + MSNGR_PEER_FIXED_ACTION_PING] = MENU_ICON_W_MSNGR_PING;
 
+        bool is_propagated = messenger_current_delivery_mode(msngr_active_peer_hash) == MSNGR_DELIVERY_MODE_PROPAGATED;
+        labels[fixed_base + MSNGR_PEER_FIXED_ACTION_DELIVERY_MODE] = is_propagated ? "Send Propagated" : "Send Direct";
+        valbufs[fixed_base + MSNGR_PEER_FIXED_ACTION_DELIVERY_MODE][0] = 0;
+        icons[fixed_base + MSNGR_PEER_FIXED_ACTION_DELIVERY_MODE] = is_propagated ? bm_menu_icon_msngr_prop_node : bm_menu_icon_msngr_direct;
+        icon_widths[fixed_base + MSNGR_PEER_FIXED_ACTION_DELIVERY_MODE] = is_propagated ? MENU_ICON_W_MSNGR_PROP_NODE : MENU_ICON_W_MSNGR_DIRECT;
+
         bool is_bookmarked = messenger_bookmark_find(msngr_active_peer_hash) >= 0;
         labels[fixed_base + MSNGR_PEER_FIXED_ACTION_BOOKMARK] = is_bookmarked ? "Remove Bookmark" : "Add Bookmark";
         valbufs[fixed_base + MSNGR_PEER_FIXED_ACTION_BOOKMARK][0] = 0;
@@ -10467,9 +10931,9 @@
         char title[24];
         snprintf(title, sizeof(title), "%s", messenger_peer_display_name(msngr_active_peer_hash).c_str());
         // icon_col_shared=false - only the message rows and the Compose
-        // message/Ping/Clear Conversation action rows above opted into
-        // icons[]/right_icons[], the remaining action rows stay at the
-        // plain x=8 they always used.
+        // message/Ping/Send Direct-Propagated/Bookmark/Clear Conversation
+        // action rows above opted into icons[]/right_icons[], the
+        // remaining action rows stay at the plain x=8 they always used.
         draw_menu_list_disp(title, labels, valbufs, row_count, msngr_peer_cursor, icons, icon_widths, icon_dx, false, text_dx, right_icons, right_icon_widths, right_dx, msg_rows);
       } else if (menu_state == MENU_STATE_MSNGR_MSG_DETAIL && msngr_msg_view_active) {
         // draw_delete_confirm=false - this screen's own Delete row is a
@@ -10741,7 +11205,8 @@
         valbufs[0][0] = 0;
         valbufs[1][0] = 0;
         const char *discard_title = (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH) ? "DISCARD HASH?" :
-                                     (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_RENAME) ? "DISCARD NAME?" : "DISCARD MSG?";
+                                     (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_RENAME) ? "DISCARD NAME?" :
+                                     (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_IDENTITY_RESTORE) ? "DISCARD KEY?" : "DISCARD MSG?";
         draw_menu_list_disp(discard_title, labels, valbufs, 2, msngr_discard_confirm_cursor);
       } else if (menu_state == MENU_STATE_MSNGR_PING_RESULT) {
         // Reads msngr_ping_state/msngr_ping_rtt fresh on every redraw -
@@ -10800,24 +11265,28 @@
         // this file) - unlike Ping, no manual BACK needed to see the
         // outcome and move on, matching the Announce/GPS-Sync/NTP-Sync
         // popups' own auto-dismiss convention.
-        const char *labels[2];
-        char valbufs[2][24];
+        const char *labels[3];
+        char valbufs[3][24];
         char status_buf[24];
         // Per user request: same OK/FAIL icons as MSNGR_PING_RESULT above -
         // OK on confirmed delivery, FAIL on any of the three terminal
         // failure/uncertain-failure states. RESOLVING/PENDING are still
         // in-progress, no outcome yet, left nullptr (no icon), same
-        // reasoning as Ping's own RESOLVING/ESTABLISHING.
-        const uint8_t *icons[2] = { nullptr, nullptr };
-        uint8_t icon_widths[2] = { 0, 0 };
+        // reasoning as Ping's own RESOLVING/ESTABLISHING. Retry/BACK rows
+        // never carry an icon.
+        const uint8_t *icons[3] = { nullptr, nullptr, nullptr };
+        uint8_t icon_widths[3] = { 0, 0, 0 };
         switch (msngr_send_state) {
           case MSNGR_SEND_RESOLVING:  snprintf(status_buf, sizeof(status_buf), "Resolving..."); break;
           case MSNGR_SEND_PENDING: {
             // msngr_send_method - which method LXMessage::pack() actually
             // resolved this send to (see its own declaration, Messenger.h) -
             // OPPORTUNISTIC vs the silent DIRECT upgrade for anything over
-            // LORA_ENCRYPTED_PACKET_MDU, not just always "Sending...".
-            const char *method_name = (msngr_send_method == LXMF::Type::Message::DIRECT) ? "Direct" : "Opportunistic";
+            // LORA_ENCRYPTED_PACKET_MDU (Send Direct), or PROPAGATED
+            // (Send Propagated, MSNGR_PEER_FIXED_ACTION_DELIVERY_MODE) -
+            // not just always "Sending...".
+            const char *method_name = (msngr_send_method == LXMF::Type::Message::DIRECT) ? "Direct" :
+                                       (msngr_send_method == LXMF::Type::Message::PROPAGATED) ? "Propagated" : "Opportunistic";
             // FIXED (local patch, not upstream): msngr_send_router_state
             // (Messenger.h, polled from LXMRouter::pending_outbound_state_
             // for()) now lets this distinguish "packet handed to the radio,
@@ -10827,7 +11296,33 @@
             // ("Awaiting proof") rather than combining phase+method+
             // attempt in one string - status_buf is only 24 bytes and
             // "Transmitting Opportunistic (2/5)" alone would overflow it.
-            if (msngr_send_router_state == LXMF::Type::Message::SENT) {
+            // Per user request: report the proof-of-work stamp grind
+            // explicitly rather than leaving it indistinguishable from
+            // "Sending Propagated" - LXStamper's own worst case is ~2
+            // minutes (send_propagated()'s comment, LXMRouter.cpp), so
+            // without this a stalled-looking send is actually still
+            // working. Checked ahead of the SENT/attempt-count branches
+            // below - a message can only be mid-stamp before its resource
+            // transfer even starts, so this and those are never both true
+            // at once, but the ordering documents that priority anyway.
+            // Checked ahead of the stamp/SENT/attempt-count branches below -
+            // send_propagated() (LXMRouter.cpp) only starts the stamp grind
+            // or the actual resource transfer once its own Link to the PN
+            // is ACTIVE, so this and those are never both true at once, but
+            // the ordering documents that priority anyway. PROPAGATED-only:
+            // DIRECT/OPPORTUNISTIC establish their link to the peer itself,
+            // not _outbound_propagation_link, so this would always read
+            // false for them regardless, but gate explicitly for clarity.
+            if (msngr_send_method == LXMF::Type::Message::PROPAGATED &&
+                urns_lxmf_router && urns_lxmf_router->is_outbound_propagation_link_establishing()) {
+              icons[0] = bm_menu_icon_msngr_waiting;
+              icon_widths[0] = MENU_ICON_W_MSNGR_WAITING;
+              snprintf(status_buf, sizeof(status_buf), "Establishing Link");
+            } else if (urns_lxmf_router && urns_lxmf_router->pending_outbound_stamp_running_for(msngr_send_message_hash)) {
+              icons[0] = bm_menu_icon_msngr_waiting;
+              icon_widths[0] = MENU_ICON_W_MSNGR_WAITING;
+              snprintf(status_buf, sizeof(status_buf), "Generating Stamp (%u)", (unsigned)urns_lxmf_router->outbound_propagation_stamp_cost());
+            } else if (msngr_send_router_state == LXMF::Type::Message::SENT) {
               // Same left-prefix icon convention as the OK/FAIL icons
               // below (bm_menu_icon_msngr_ping_ok/_fail) - narrower than
               // both (9px vs 13/18px) so the text_dx formula below (tuned
@@ -10839,7 +11334,7 @@
               } else {
                 snprintf(status_buf, sizeof(status_buf), "Awaiting Proof");
               }
-            } else if (msngr_send_attempt > 1) {
+            } else if (msngr_send_method != LXMF::Type::Message::PROPAGATED && msngr_send_attempt > 1) {
               // Only show the attempt count once a retry has actually
               // started (msngr_send_attempt > 1, set by messenger_send_
               // process()'s live poll of the router's own delivery_
@@ -10847,6 +11342,15 @@
               // Messenger.h) - keeps the common first-try case uncluttered.
               // Drops the "Sending" prefix in that case to leave room for
               // the attempt count within status_buf's 24-byte budget.
+              // PROPAGATED excluded (falls through to the plain "Sending
+              // Propagated" branch below) - unlike DIRECT/OPPORTUNISTIC,
+              // its delivery_attempts() also counts every process_outbound()
+              // cycle spent waiting on path/link establishment (see this
+              // method's own increment_delivery_attempts() call site,
+              // LXMRouter.cpp), not just genuine resource-retry attempts,
+              // so the count doesn't mean what it looks like it means here -
+              // confirmed on hardware: "3/5" shown with only 1 real
+              // low-level retry observed in the propagation node's own log.
               snprintf(status_buf, sizeof(status_buf), "%s (%u/%u)", method_name, (unsigned)msngr_send_attempt, (unsigned)msngr_max_retries);
             } else {
               snprintf(status_buf, sizeof(status_buf), "Sending %s", method_name);
@@ -10858,6 +11362,15 @@
             icons[0] = bm_menu_icon_msngr_ping_ok;
             icon_widths[0] = MENU_ICON_W_MSNGR_PING_OK;
             break;
+          // PROPAGATED-only success (messenger_on_sent(), Messenger.h) -
+          // reached the active propagation node, not the final recipient
+          // (MSNGR_SEND_SENT_TO_NODE's own comment) - worded distinctly
+          // from "Delivered" so it isn't read as end-to-end confirmation.
+          case MSNGR_SEND_SENT_TO_NODE:
+            snprintf(status_buf, sizeof(status_buf), "Sent to Node");
+            icons[0] = bm_menu_icon_msngr_ping_ok;
+            icon_widths[0] = MENU_ICON_W_MSNGR_PING_OK;
+            break;
           case MSNGR_SEND_TIMEOUT:    snprintf(status_buf, sizeof(status_buf), "No Confirmation"); break;
           case MSNGR_SEND_UNRESOLVED: snprintf(status_buf, sizeof(status_buf), "Unknown Destination"); break;
           // Router-confirmed failure (messenger_on_failed(), Messenger.h) -
@@ -10866,22 +11379,35 @@
           case MSNGR_SEND_FAILED:     snprintf(status_buf, sizeof(status_buf), "Delivery Failed"); break;
           default:                    snprintf(status_buf, sizeof(status_buf), "..."); break;
         }
-        if (msngr_send_state == MSNGR_SEND_TIMEOUT || msngr_send_state == MSNGR_SEND_UNRESOLVED || msngr_send_state == MSNGR_SEND_FAILED) {
+        bool send_failed = msngr_send_result_failed();
+        if (send_failed) {
           icons[0] = bm_menu_icon_msngr_ping_fail;
           icon_widths[0] = MENU_ICON_W_MSNGR_PING_FAIL;
         }
         labels[0] = status_buf;
         valbufs[0][0] = 0;
-        labels[1] = "BACK";
-        valbufs[1][0] = 0;
+        uint8_t row_count;
+        if (send_failed) {
+          labels[1] = "Retry";
+          valbufs[1][0] = 0;
+          icons[1] = bm_menu_icon_msngr_retry;
+          icon_widths[1] = MENU_ICON_W_MSNGR_RETRY;
+          labels[2] = "BACK";
+          valbufs[2][0] = 0;
+          row_count = 3;
+        } else {
+          labels[1] = "BACK";
+          valbufs[1][0] = 0;
+          row_count = 2;
+        }
         // Same fixed-column overlap fix as MSNGR_PING_RESULT above - the
         // wider ping-fail icon needs the label pushed right a bit further
         // than the narrower ping-ok icon does.
-        const int8_t text_dx[2] = { (int8_t)(icon_widths[0] > MENU_ICON_W_MSNGR_PING_OK ? icon_widths[0] - MENU_ICON_W_MSNGR_PING_OK : 0), 0 };
+        const int8_t text_dx[3] = { (int8_t)(icon_widths[0] > MENU_ICON_W_MSNGR_PING_OK ? icon_widths[0] - MENU_ICON_W_MSNGR_PING_OK : 0), 0, 0 };
 
         char title[24];
         snprintf(title, sizeof(title), "SEND: %s", messenger_peer_display_name(msngr_active_peer_hash).c_str());
-        draw_menu_list_disp(title, labels, valbufs, 2, msngr_send_result_cursor, icons, icon_widths, nullptr, false, text_dx);
+        draw_menu_list_disp(title, labels, valbufs, row_count, msngr_send_result_cursor, icons, icon_widths, nullptr, false, text_dx);
       } else if (menu_state == MENU_STATE_MSNGR_SETTINGS) {
         const char *labels[MSNGR_SETTINGS_ITEM_COUNT];
         char valbufs[MSNGR_SETTINGS_ITEM_COUNT][24];
