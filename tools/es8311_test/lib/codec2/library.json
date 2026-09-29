@@ -1,0 +1,35 @@
+{
+  "name": "codec2",
+  "version": "0.0.0-markqvist-00e01c9",
+  "description": "Codec2 low-bitrate speech vocoder, vendored (vocoder core only, no FreeDV modem/LDPC) from markqvist/codec2@00e01c9d72d3b1607e165c71c4c9c942d277dfac - the exact pinned fork/commit Sideband builds against (recipes/codec2/__init__.py). LGPL-2.1, see COPYING.",
+  "build": {
+    "flags": [
+      "-D__EMBEDDED__"
+    ],
+    "srcFilter": [
+      "-<*>",
+      "+<codec2.c>",
+      "+<codec2_fft.c>",
+      "+<kiss_fft.c>",
+      "+<dump.c>",
+      "+<interp.c>",
+      "+<lpc.c>",
+      "+<lsp.c>",
+      "+<nlp.c>",
+      "+<phase.c>",
+      "+<postfilter.c>",
+      "+<quantise.c>",
+      "+<pack.c>",
+      "+<sine.c>",
+      "+<mbest.c>",
+      "+<newamp1.c>",
+      "+<codebook.c>",
+      "+<codebookd.c>",
+      "+<codebookjmv.c>",
+      "+<codebookge.c>",
+      "+<codebooknewamp1.c>",
+      "+<codebooknewamp1_energy.c>",
+      "+<codec2_psram_alloc.c>"
+    ]
+  }
+}
