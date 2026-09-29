@@ -172,8 +172,27 @@ bool MessageStore::load_index() {
 		return true;
 	}
 
-	ERROR("No valid conversation index generation is available");
-	return false;
+	// FIXED (local patch, not upstream): used to just ERROR+return false
+	// here - and MessageStore::MessageStore() (below) never sets
+	// _initialized on a false return, which makes save_message() reject
+	// every single call for the rest of this boot (its own very first
+	// check), permanently: not just old conversations missing from the
+	// Inbox, but every new incoming/outgoing message too, silently,
+	// forever, until the next reboot - a far worse failure mode than
+	// "lost some history". If load_index_file() itself couldn't be taught
+	// to tolerate whatever's wrong with both generations (it already
+	// self-heals the specific known cases - a single malformed entry, a
+	// stale last-message pointer - see those fixes' own comments), the
+	// remaining unknown corruption isn't worth the whole store staying
+	// dead over: drop both generations and start fresh, same as the
+	// "neither file exists yet" bootstrap case above already does.
+	ERROR("No valid conversation index generation is available - starting fresh");
+	for (size_t i = 0; i < MAX_CONVERSATIONS; ++i) {
+		_conversations_pool[i].clear();
+	}
+	if (has_index) Utilities::OS::remove_file(index_path.c_str());
+	if (has_backup) Utilities::OS::remove_file(backup_path.c_str());
+	return true;
 }
 
 // Parse one index generation. The caller decides whether live or backup wins.
@@ -225,7 +244,20 @@ bool MessageStore::load_index_file(const std::string& index_path) {
 			Bytes peer_bytes;
 			peer_bytes.assignHex(peer_hex);
 			if (peer_bytes.size() != PEER_HASH_SIZE) {
-				return reject_index("Conversation index entry has invalid peer hash");
+				// FIXED (local patch, not upstream): used to reject_index()
+				// here - wiping every OTHER valid conversation in the pool
+				// over one malformed entry, same "one dangling pointer took
+				// the whole store down" class of bug the last-message-hash
+				// self-heal below already exists to avoid (see that fix's
+				// own comment). Concretely hit by a firmware bug (Messenger.
+				// h's messenger_on_sent(), RNode_Firmware) that briefly
+				// persisted exactly one conversation with an empty peer
+				// hash. Skip just this one entry instead - slot_index isn't
+				// advanced, so the next valid entry reuses this pool slot,
+				// and the next save_index() call naturally drops the bad
+				// entry from the file for good.
+				WARNING("Skipping conversation index entry with invalid peer hash");
+				continue;
 			}
 			if (!peer_hashes.insert(peer_bytes.toHex()).second) {
 				return reject_index("Conversation index contains a duplicate peer hash");
