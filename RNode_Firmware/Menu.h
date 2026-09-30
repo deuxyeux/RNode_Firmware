@@ -339,6 +339,10 @@
   #define MENU_STATE_HW_REBOOT_CONFIRM 69 // REBOOT/CANCEL list before hard_reset() actually runs - same pattern as MENU_STATE_FWUPD_CONFIRM, opened from MENU_STATE_HW_LIST's Reboot row
   #define MENU_STATE_URNS_IDENTITY_KEY_VIEW 70 // urns_identity's raw 64-byte private key, base32-encoded (urns_identity_key_encode(), IdentityTransfer.h), read-only, no header/footer chrome, dismissed by any input - scaled-up sibling of MENU_STATE_URNS_PATH_HASH_VIEW sized/wrapped for a full identity key instead of a truncated hash, opened from MENU_STATE_URNS_KEYS's Display Identity Key row (and returns there, not straight to MENU_STATE_URNS_LIST). Available whenever vault_enabled is true regardless of HAS_LXMF - unlike MENU_STATE_MSNGR_TEXT_ENTRY's identity-restore purpose, this is pure read-only display with no keyboard dependency.
   #define MENU_STATE_URNS_KEYS 71 // small submenu (Display Identity Key always, Restore Identity on HAS_LXMF boards, BACK) for manual paper-backup key management - opened from MENU_STATE_URNS_LIST's Keys row (URNS_ITEM_KEYS), itself only reachable when vault_enabled is true (see that item's own comment) - HAS_URNS boards, own submenu, only BACK/its rows do anything, same shape as MENU_STATE_URNS_FREE_DETAIL.
+  #define MENU_STATE_URNS_PATH_PURGE_CONFIRM 72 // PURGE/CANCEL list before every entry in RNS::Transport::new_path_table() is removed at once (HAS_URNS boards) - same pattern as MENU_STATE_URNS_PATH_DELETE_CONFIRM, just for the whole table instead of one entry, opened from MENU_STATE_URNS_FREE_DETAIL's Paths row
+  #if HAS_LXMF == true
+    #define MENU_STATE_URNS_MSG_PURGE_CONFIRM 73 // PURGE/CANCEL list before every stored LXMF message is wiped at once (MessageStore::clear_all()) - same pattern as MENU_STATE_URNS_PATH_PURGE_CONFIRM, opened from MENU_STATE_URNS_FREE_DETAIL's Messages row
+  #endif
 
   // The Hardware page used to only exist when there was board-level info
   // worth showing (battery/voltage sensing via HAS_PMU, or an ESP32-S3's
@@ -960,8 +964,23 @@
     #define URNS_FREE_DETAIL_ITEM_PATHS    2
     #define URNS_FREE_DETAIL_ITEM_MESSAGES 3
     #define URNS_FREE_DETAIL_ITEM_OTHER    4
-    #define URNS_FREE_DETAIL_ITEM_BACK     5
-    #define URNS_FREE_DETAIL_ITEM_COUNT    6
+    // Recomputes urns_free_detail_refresh()'s cached byte counts in place
+    // (screen stays open, cursor untouched) - added because Purge Paths/
+    // Purge Messages don't actually shrink their bucket's on-disk size
+    // right away: both are backed by microStore's append-only log
+    // (FileStore.h), so a delete/clear_all() just appends a tombstone
+    // record rather than truncating anything - urns_dir_size_recursive()
+    // (URNS.h) keeps reporting the pre-purge size until that segment file
+    // is next compacted, which happens on its own schedule
+    // (RNS::Transport::cull_new_path_table()/MessageStore's own
+    // compaction), not synchronously with the purge. The refresh right
+    // after each purge (MENU_STATE_URNS_PATH_PURGE_CONFIRM/MENU_STATE_URNS_
+    // MSG_PURGE_CONFIRM above) only re-reads whatever's on disk at that
+    // moment, so it can't show the drop either - this row exists so the
+    // user can manually re-check once compaction has actually run.
+    #define URNS_FREE_DETAIL_ITEM_REFRESH  5
+    #define URNS_FREE_DETAIL_ITEM_BACK     6
+    #define URNS_FREE_DETAIL_ITEM_COUNT    7
 
     // Path table rows are runtime-sized (RNS_PATH_TABLE_MAX is 100,
     // Transport.cpp) - this caps how many get built into on-screen rows
@@ -2286,6 +2305,16 @@
     // 0 = DELETE, 1 = CANCEL - same list-with-cursor pattern as
     // msngr_delete_confirm_cursor, defaulting to CANCEL for the same reason.
     uint8_t urns_path_delete_confirm_cursor = 1;
+    // 0 = PURGE, 1 = CANCEL - same shape as urns_path_delete_confirm_cursor,
+    // just for MENU_STATE_URNS_FREE_DETAIL's Paths row wiping every entry
+    // in the path table at once instead of one entry at a time.
+    uint8_t urns_path_purge_confirm_cursor = 1;
+    #if HAS_LXMF == true
+      // Same shape again, for MENU_STATE_URNS_FREE_DETAIL's Messages row -
+      // wipes every stored LXMF conversation at once (MessageStore::
+      // clear_all()).
+      uint8_t urns_msg_purge_confirm_cursor = 1;
+    #endif
     uint8_t urns_identities_cursor = 0;
     uint8_t urns_keys_cursor = 0;
     uint8_t urns_free_detail_cursor = URNS_FREE_DETAIL_ITEM_BACK;
@@ -2348,6 +2377,90 @@
       if (n > MENU_URNS_PATH_MAX_ROWS) n = MENU_URNS_PATH_MAX_ROWS;
       if (n == 0) return 2; // "No Paths" + BACK
       return (uint8_t)(n + 1); // paths + BACK
+    }
+
+    // Cache for MENU_STATE_URNS_PATHS - populated by urns_path_cache_
+    // refresh() below, NOT rebuilt on every redraw the way this screen
+    // originally worked. NewPathTable is a microStore TypedStore
+    // (Persistence::NewPathTable) over a flash-backed FileStore -
+    // TypedStore::iterator::operator++/* triggers a lazy per-entry value
+    // load (TypedStore.h's own load()), i.e. a real flash read, for every
+    // row it visits. draw_settings_menu_disp() runs every loop() iteration
+    // (see urns_dir_size_recursive()'s own comment, URNS.h) - walking up to
+    // MENU_URNS_PATH_MAX_ROWS (24) flash-backed entries from inside that
+    // per-frame draw path is exactly the same "expensive call from a
+    // redraw path" mistake Messenger's own msngr_peer_cache was already
+    // introduced to fix (see that struct's own comment, Messenger.h), just
+    // never caught here since MENU_STATE_URNS_PATH_DETAIL's single get()
+    // lookup never showed the symptom - this is what made Path Table's top
+    // level sluggish (and its button input feel bad, since the same
+    // loop() iteration that's stalled on flash reads is also the one
+    // polling the encoder/buttons) while Path Detail stayed fine.
+    struct UrnsPathCacheRow {
+      RNS::Bytes hash; // full key, not just the 8-hex-char label - lets the
+                        // confirm handler below hand this straight to
+                        // MENU_STATE_URNS_PATH_DETAIL without re-walking
+                        // the store a second time to find it by cursor
+                        // index, which is the other place this same cost
+                        // used to get paid.
+      char label[9];    // 8 hex chars + NUL
+      uint8_t hops;
+    };
+    UrnsPathCacheRow urns_path_cache[MENU_URNS_PATH_MAX_ROWS];
+    uint8_t urns_path_cache_count = 0;
+    // new_path_table().size() as of the last refresh - TypedStore::size()
+    // just returns the underlying store's live record count (no per-entry
+    // flash read, unlike begin()/++/*), so comparing against it is a cheap
+    // way to notice the table changed (an announce arrived, an entry
+    // expired/got culled, Delete Path ran) without paying iteration cost
+    // on every redraw. (size_t)-1 sentinel forces the very first call to
+    // always refresh. Same imprecision Messenger's own msngr_peer_cache_
+    // message_count already accepts - a same-count churn (one entry
+    // replaced by another between refreshes) goes unnoticed until the
+    // count next changes, which is fine for a mostly-static path table.
+    size_t urns_path_cache_table_size = (size_t)-1;
+
+    void urns_path_cache_refresh() {
+      RNS::Persistence::NewPathTable& pt = const_cast<RNS::Persistence::NewPathTable&>(RNS::Transport::new_path_table());
+      urns_path_cache_count = 0;
+      for (auto it = pt.begin(); it != pt.end() && urns_path_cache_count < MENU_URNS_PATH_MAX_ROWS; ++it) {
+        auto entry = *it;
+        UrnsPathCacheRow &row = urns_path_cache[urns_path_cache_count];
+        row.hash = entry.key;
+        snprintf(row.label, sizeof(row.label), "%s", entry.key.toHex(true).substr(0, 8).c_str());
+        row.hops = entry.value._hops;
+        urns_path_cache_count++;
+      }
+      urns_path_cache_table_size = pt.size();
+    }
+
+    void urns_path_cache_refresh_if_stale() {
+      if (RNS::Transport::new_path_table().size() != urns_path_cache_table_size) urns_path_cache_refresh();
+    }
+
+    // Wipes every entry in RNS::Transport::new_path_table() at once -
+    // opened from MENU_STATE_URNS_FREE_DETAIL's Paths row via MENU_STATE_
+    // URNS_PATH_PURGE_CONFIRM. Walks the live store directly rather than
+    // urns_path_cache above, which only ever holds up to MENU_URNS_PATH_
+    // MAX_ROWS entries for display - a purge has to reach every real
+    // entry, not just the ones currently visible on MENU_STATE_URNS_PATHS.
+    // The per-entry flash reads that walk costs are exactly what made
+    // doing this from a draw path sluggish (urns_path_cache's own comment)
+    // - fine here since this only ever runs once, synchronously, on an
+    // explicit user confirmation.
+    void urns_purge_path_table() {
+      RNS::Persistence::NewPathTable& pt = const_cast<RNS::Persistence::NewPathTable&>(RNS::Transport::new_path_table());
+      std::vector<RNS::Bytes> hashes;
+      for (auto it = pt.begin(); it != pt.end(); ++it) hashes.push_back((*it).key);
+      if (!hashes.empty()) {
+        // Same DIO0-masking reasoning as MENU_STATE_URNS_PATH_DELETE_
+        // CONFIRM's single remove_path() call just below - remove_paths()
+        // is the same TypedStore::remove() flash I/O, just looped.
+        LoRa->maskDio0();
+        RNS::Transport::remove_paths(hashes);
+        LoRa->unmaskDio0();
+      }
+      urns_path_cache_refresh();
     }
 
   #if HAS_LXMF == true
@@ -5499,7 +5612,17 @@
       } else if (menu_state == MENU_STATE_URNS_PATH_DELETE_CONFIRM) {
         buzzer_encoder_tick_melody();
         urns_path_delete_confirm_cursor = menu_clamp_cursor(urns_path_delete_confirm_cursor, dir, 2, wrap);
-      } else if (menu_state == MENU_STATE_URNS_IDENTITIES) {
+      } else if (menu_state == MENU_STATE_URNS_PATH_PURGE_CONFIRM) {
+        buzzer_encoder_tick_melody();
+        urns_path_purge_confirm_cursor = menu_clamp_cursor(urns_path_purge_confirm_cursor, dir, 2, wrap);
+      }
+      #if HAS_LXMF == true
+        else if (menu_state == MENU_STATE_URNS_MSG_PURGE_CONFIRM) {
+          buzzer_encoder_tick_melody();
+          urns_msg_purge_confirm_cursor = menu_clamp_cursor(urns_msg_purge_confirm_cursor, dir, 2, wrap);
+        }
+      #endif
+      else if (menu_state == MENU_STATE_URNS_IDENTITIES) {
         buzzer_encoder_tick_melody();
         urns_identities_cursor = menu_clamp_cursor(urns_identities_cursor, dir, URNS_ID_ITEM_COUNT, wrap);
       } else if (menu_state == MENU_STATE_URNS_KEYS) {
@@ -6750,37 +6873,73 @@
           menu_state = MENU_STATE_URNS_FREE_DETAIL;
         }
       } else if (menu_state == MENU_STATE_URNS_FREE_DETAIL) {
-        // All rows read-only info except BACK - same shape as
-        // MENU_STATE_URNS_PATH_DETAIL's Expiry/Hash split above.
+        // Identity/Announce/Other stay read-only info - Paths and Messages
+        // (on HAS_LXMF boards) are now also clickable, each opening its own
+        // PURGE/CANCEL confirm dialog before wiping that whole bucket at
+        // once, same "confirm before a destructive bulk action" shape as
+        // MENU_STATE_URNS_PATH_DELETE_CONFIRM (one entry) scaled up to
+        // "every entry".
         if (urns_free_detail_cursor == URNS_FREE_DETAIL_ITEM_BACK) {
           menu_state = MENU_STATE_URNS_LIST;
+        } else if (urns_free_detail_cursor == URNS_FREE_DETAIL_ITEM_PATHS) {
+          urns_path_purge_confirm_cursor = 1; // default CANCEL
+          menu_state = MENU_STATE_URNS_PATH_PURGE_CONFIRM;
+        #if HAS_LXMF == true
+        } else if (urns_free_detail_cursor == URNS_FREE_DETAIL_ITEM_MESSAGES) {
+          urns_msg_purge_confirm_cursor = 1; // default CANCEL
+          menu_state = MENU_STATE_URNS_MSG_PURGE_CONFIRM;
+        #endif
+        } else if (urns_free_detail_cursor == URNS_FREE_DETAIL_ITEM_REFRESH) {
+          // Screen stays open (menu_state untouched) - see this item's own
+          // #define comment for why a purge doesn't already make this
+          // redundant.
+          urns_free_detail_refresh();
         }
+      } else if (menu_state == MENU_STATE_URNS_PATH_PURGE_CONFIRM) {
+        if (urns_path_purge_confirm_cursor == 0) { // PURGE
+          urns_purge_path_table();
+          urns_free_detail_refresh();
+          urns_paths_menu_cursor = 0;
+          menu_open_popup("PURGED", MENU_STATE_URNS_FREE_DETAIL);
+          menu_popup_auto_dismiss_at = millis() + ACTION_POPUP_MS;
+        } else { // CANCEL
+          menu_state = MENU_STATE_URNS_FREE_DETAIL;
+        }
+      #if HAS_LXMF == true
+      } else if (menu_state == MENU_STATE_URNS_MSG_PURGE_CONFIRM) {
+        if (urns_msg_purge_confirm_cursor == 0) { // PURGE
+          // Same DIO0-masking reasoning as MENU_STATE_MSNGR_CLEAR_CONFIRM's
+          // delete_conversation() call - clear_all() is the same MessageStore
+          // flash I/O, just for every conversation at once.
+          LoRa->maskDio0();
+          if (urns_message_store) urns_message_store->clear_all();
+          LoRa->unmaskDio0();
+          urns_free_detail_refresh();
+          menu_open_popup("PURGED", MENU_STATE_URNS_FREE_DETAIL);
+          menu_popup_auto_dismiss_at = millis() + ACTION_POPUP_MS;
+        } else { // CANCEL
+          menu_state = MENU_STATE_URNS_FREE_DETAIL;
+        }
+      #endif
       } else if (menu_state == MENU_STATE_URNS_EDIT) {
         // Same deferred-commit reasoning as ESP-NOW's own Enabled field -
         // urns_init()/urns_radio_bringup() are boot-only, so nothing is
         // written here, only staged.
         menu_state = MENU_STATE_URNS_LIST;
       } else if (menu_state == MENU_STATE_URNS_PATHS) {
+        urns_path_cache_refresh_if_stale();
         uint8_t row_count = urns_path_display_row_count();
         if (urns_paths_menu_cursor == row_count - 1) {
           menu_state = MENU_STATE_URNS_LIST;
-        } else if (RNS::Transport::new_path_table().size() > 0) {
+        } else if (urns_paths_menu_cursor < urns_path_cache_count) {
           // A real path row, not the inert "No Paths" placeholder (which
-          // only ever sits at index 0 when the table's empty - cursor==0
-          // falls through to here doing nothing in that case since this
-          // whole branch is skipped when size()==0). The list only shows
-          // the first 8 hex chars, so re-walk the store up to the
-          // selected index to capture its full hash - MENU_STATE_URNS_
-          // PATH_DETAIL looks it back up by key on every draw call rather
-          // than being handed a copy here.
-          RNS::Persistence::NewPathTable& pt = const_cast<RNS::Persistence::NewPathTable&>(RNS::Transport::new_path_table());
-          uint8_t i = 0;
-          for (auto it = pt.begin(); it != pt.end(); ++it, i++) {
-            if (i == urns_paths_menu_cursor) {
-              urns_path_detail_hash = (*it).key;
-              break;
-            }
-          }
+          // only ever sits at index 0 when the cache is empty - cursor==0
+          // falls through to here doing nothing in that case). Full hash
+          // comes straight out of urns_path_cache - no need to re-walk the
+          // store a second time to find it by index, which is what this
+          // used to do (see that cache's own comment for why that was
+          // worth removing too, not just the draw path's own walk).
+          urns_path_detail_hash = urns_path_cache[urns_paths_menu_cursor].hash;
           urns_path_detail_cursor = 0;
           menu_state = MENU_STATE_URNS_PATH_DETAIL;
         }
@@ -10686,14 +10845,21 @@
         // esp_littlefs_info() call.
         const char *labels[URNS_FREE_DETAIL_ITEM_COUNT];
         char valbufs[URNS_FREE_DETAIL_ITEM_COUNT][24];
-        size_t vals[URNS_FREE_DETAIL_ITEM_COUNT - 1] = {
+        // Only the 5 real data buckets (Identity..Other) come from this
+        // vals/names pair - Refresh and BACK are plain fixed rows assigned
+        // separately below, same as every other explicit-icon-table screen
+        // (see MENU_STATE_MSNGR_PEER's own comment on why passing any icons
+        // table at all switches a list to this shape).
+        size_t vals[URNS_FREE_DETAIL_ITEM_OTHER + 1] = {
           urns_free_detail_identity, urns_free_detail_announce,
           urns_free_detail_paths, urns_free_detail_messages, urns_free_detail_other
         };
-        const char *names[URNS_FREE_DETAIL_ITEM_COUNT - 1] = {
+        const char *names[URNS_FREE_DETAIL_ITEM_OTHER + 1] = {
           "Identity", "Announce", "Paths", "Messages", "Other"
         };
-        for (uint8_t i = 0; i < URNS_FREE_DETAIL_ITEM_COUNT - 1; i++) {
+        const uint8_t *icons[URNS_FREE_DETAIL_ITEM_COUNT] = { nullptr };
+        uint8_t icon_widths[URNS_FREE_DETAIL_ITEM_COUNT] = { 0 };
+        for (uint8_t i = 0; i <= URNS_FREE_DETAIL_ITEM_OTHER; i++) {
           labels[i] = names[i];
           size_t v = vals[i];
           // Identity is a single small key file (bytes, not KB-scale) -
@@ -10704,10 +10870,19 @@
           else if (v >= 1024)     sprintf(valbufs[i], "%.1fKB", v / 1024.0);
           else                    sprintf(valbufs[i], "%zuB", v);
         }
+        labels[URNS_FREE_DETAIL_ITEM_REFRESH] = "Refresh";
+        valbufs[URNS_FREE_DETAIL_ITEM_REFRESH][0] = 0;
+        // Reuses the Propagation-bookmark Sync glyph - same "recompute
+        // live state" concept, just for this screen's own cached byte
+        // counts instead of a prop node's path table.
+        icons[URNS_FREE_DETAIL_ITEM_REFRESH] = bm_menu_icon_msngr_prop_sync;
+        icon_widths[URNS_FREE_DETAIL_ITEM_REFRESH] = MENU_ICON_W_MSNGR_PROP_SYNC;
         labels[URNS_FREE_DETAIL_ITEM_BACK] = "BACK";
         valbufs[URNS_FREE_DETAIL_ITEM_BACK][0] = 0;
+        icons[URNS_FREE_DETAIL_ITEM_BACK] = bm_menu_icon_back;
+        icon_widths[URNS_FREE_DETAIL_ITEM_BACK] = MENU_ICON_W_BACK;
 
-        draw_menu_list_disp("URNS FREE", labels, valbufs, URNS_FREE_DETAIL_ITEM_COUNT, urns_free_detail_cursor);
+        draw_menu_list_disp("URNS FREE", labels, valbufs, URNS_FREE_DETAIL_ITEM_COUNT, urns_free_detail_cursor, icons, icon_widths);
       } else if (menu_state == MENU_STATE_URNS_EDIT) {
         if (urns_menu_cursor == URNS_ITEM_ENABLED) {
           draw_menu_edit_disp("URNS ENABLED", staged_urns_enabled ? "ON" : "OFF");
@@ -10727,35 +10902,24 @@
           draw_menu_edit_disp("PROBE DESTINATION", staged_urns_probe_dest_enabled ? "ON" : "OFF");
         }
       } else if (menu_state == MENU_STATE_URNS_PATHS) {
-        // Built fresh every draw call, same "recompute live state each
-        // frame" convention as draw_menu_memory_disp()'s heap/PSRAM
-        // figures - the path table changes as announces arrive, and a
-        // stale snapshot would be actively misleading on a "live network
-        // state" screen like this one.
-        // new_path_table() returns a const&, but TypedStore's begin()/end()
-        // aren't const-qualified (neither is the BasicFileStore/HeapStore
-        // they wrap) even though iteration here is read-only - the
-        // const_cast is scoped to this one read-only display loop, not a
-        // library patch (unlike the Transport.cpp/Identity.cpp fixes,
-        // this isn't a bug, just an API that doesn't expose a const
-        // iteration path).
-        RNS::Persistence::NewPathTable& pt = const_cast<RNS::Persistence::NewPathTable&>(RNS::Transport::new_path_table());
+        // Reads urns_path_cache (refreshed only when new_path_table()'s
+        // cheap size() actually changes, urns_path_cache_refresh_if_
+        // stale() above), NOT rebuilt from the flash-backed store on every
+        // redraw - see that cache's own comment for why walking it here
+        // used to make this whole screen sluggish.
+        urns_path_cache_refresh_if_stale();
         uint8_t row_count = urns_path_display_row_count();
 
         const char *labels[MENU_URNS_PATH_MAX_ROWS + 1];
-        char label_bufs[MENU_URNS_PATH_MAX_ROWS][9];   // 8 hex chars + NUL
         char valbufs[MENU_URNS_PATH_MAX_ROWS + 1][24];
 
-        if (pt.size() == 0) {
+        if (urns_path_cache_count == 0) {
           labels[0] = "No Paths";
           valbufs[0][0] = 0;
         } else {
-          uint8_t i = 0;
-          for (auto it = pt.begin(); it != pt.end() && i < MENU_URNS_PATH_MAX_ROWS; ++it, i++) {
-            auto entry = *it;
-            snprintf(label_bufs[i], sizeof(label_bufs[i]), "%s", entry.key.toHex(true).substr(0, 8).c_str());
-            labels[i] = label_bufs[i];
-            uint8_t hops = entry.value._hops;
+          for (uint8_t i = 0; i < urns_path_cache_count; i++) {
+            labels[i] = urns_path_cache[i].label;
+            uint8_t hops = urns_path_cache[i].hops;
             sprintf(valbufs[i], "%u hop%s", hops, hops == 1 ? "" : "s");
           }
         }
@@ -10814,6 +10978,22 @@
         valbufs[0][0] = 0;
         valbufs[1][0] = 0;
         draw_menu_list_disp("DELETE PATH?", labels, valbufs, 2, urns_path_delete_confirm_cursor);
+      } else if (menu_state == MENU_STATE_URNS_PATH_PURGE_CONFIRM) {
+        // Plain 2-item list, same shape as MENU_STATE_URNS_PATH_DELETE_
+        // CONFIRM just above.
+        const char *labels[2] = { "PURGE", "CANCEL" };
+        char valbufs[2][24];
+        valbufs[0][0] = 0;
+        valbufs[1][0] = 0;
+        draw_menu_list_disp("PURGE PATHS?", labels, valbufs, 2, urns_path_purge_confirm_cursor);
+      #if HAS_LXMF == true
+      } else if (menu_state == MENU_STATE_URNS_MSG_PURGE_CONFIRM) {
+        const char *labels[2] = { "PURGE", "CANCEL" };
+        char valbufs[2][24];
+        valbufs[0][0] = 0;
+        valbufs[1][0] = 0;
+        draw_menu_list_disp("PURGE MESSAGES?", labels, valbufs, 2, urns_msg_purge_confirm_cursor);
+      #endif
       } else if (menu_state == MENU_STATE_URNS_IDENTITIES) {
         // Fixed 3-4 row list (Node ID + Transport ID + Probe ID, plus
         // LXMF ID on HAS_LXMF boards), in that display order - see
