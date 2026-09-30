@@ -1827,6 +1827,29 @@ void transmit(uint16_t size) {
           }
 
           add_airtime(written);
+          // Guard gap between a split packet's two radio-level fragments
+          // (2026-09-30). Without this, a receiving RNode running this same
+          // firmware can miss the second fragment outright - its own DIO0
+          // work is deferred out of the ISR and only drained on the next
+          // loop() pass (not synchronously in hardware), so back-to-back
+          // fragments with no gap can arrive faster than that receiver
+          // re-arms. 10ms wasn't enough (confirmed on hardware: identical
+          // failure), 100ms reliably works. Only fires for packets needing
+          // >1 physical LoRa frame (>254 payload bytes) - rare in practice,
+          // since Resource-based transfers (the path most real data takes)
+          // are pre-chunked to fit a single frame and never hit this. First
+          // surfaced by propagation-sync's content-download request, the
+          // one place a raw Link.request() payload scales with real data
+          // (message count) instead of always staying small - see
+          // project_urns_split_packet_gap memory for the full trail.
+          // vTaskDelay(), not delay()/yield() - matches endPacket()'s own
+          // TX-done poll loop just below, for the same reason documented
+          // there: a wait that doesn't genuinely yield to the scheduler can
+          // starve the idle task long enough to trip the interrupt watchdog.
+          // A/B test (2026-09-30) confirmed this gap is needed generally,
+          // not just for propagation sync: a large direct LXMF message also
+          // failed to deliver with this disabled. Re-enabled.
+          vTaskDelay(pdMS_TO_TICKS(100));
           CPV(CP_TX_BEGIN_PACKET, size);
           LoRa->beginPacket();
           LoRa->write(header);

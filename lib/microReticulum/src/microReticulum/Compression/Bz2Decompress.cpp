@@ -14,6 +14,10 @@ extern "C" {
 
 #include <cstdlib>
 
+#ifdef ESP_PLATFORM
+	#include <esp_heap_caps.h>
+#endif
+
 bool RNS::bz2_decompress(const Bytes& compressed, size_t expected_size, Bytes& out, size_t max_size) {
 	if (expected_size == 0) {
 		out = Bytes();
@@ -27,6 +31,36 @@ bool RNS::bz2_decompress(const Bytes& compressed, size_t expected_size, Bytes& o
 		ERROR("bz2_decompress: empty compressed input");
 		return false;
 	}
+
+#ifdef ESP_PLATFORM
+	// Fail-fast pre-check (2026-09-30). A bzip2 stream's first 4 bytes are
+	// always "BZh" followed by an ASCII '1'-'9' declaring blockSize100k -
+	// the compressor's chosen block size, which is what bzip2's internal
+	// decompression state size actually depends on, NOT the size of the
+	// original (or compressed) data. A tiny message compressed at a
+	// sender's default/max level can demand just as much decompression
+	// memory as a huge one - measured on real hardware at ~1.8MB for a
+	// level-9 (900KB block) stream under the small=1 decoder below, i.e.
+	// roughly 200KB per blockSize100k unit. There's no way to ask the
+	// sender for a smaller block size - Reticulum's Resource protocol has
+	// no such negotiation - so on a PSRAM-constrained board the best
+	// available response is failing fast and clearly here, rather than
+	// spending time inside BZ2_bzBuffToBuffDecompress only to hit its own
+	// internal BZ_MEM_ERROR (which this check would otherwise be
+	// indistinguishable from in the logs).
+	if (compressed.size() >= 4 && compressed.data()[0] == 'B' && compressed.data()[1] == 'Z' && compressed.data()[2] == 'h') {
+		int block_size_100k = compressed.data()[3] - '0';
+		if (block_size_100k >= 1 && block_size_100k <= 9) {
+			size_t estimated_need = (size_t)block_size_100k * 200000;
+			size_t largest_free = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM);
+			if (estimated_need > largest_free) {
+				ERRORF("bz2_decompress: refusing - stream's block size (%d00KB) needs an estimated %u bytes to decompress, largest free PSRAM block is only %u bytes",
+					block_size_100k, (unsigned)estimated_need, (unsigned)largest_free);
+				return false;
+			}
+		}
+	}
+#endif
 
 	// Plain malloc, not a Bytes/PSRAM-allocator buffer - this is a
 	// short-lived scratch destination for BZ2_bzBuffToBuffDecompress to
@@ -52,7 +86,18 @@ bool RNS::bz2_decompress(const Bytes& compressed, size_t expected_size, Bytes& o
 	int ret = BZ2_bzBuffToBuffDecompress(
 		(char*)dest, &destLen,
 		(char*)const_cast<uint8_t*>(compressed.data()), (unsigned int)compressed.size(),
-		0 /* small - use the FAST (tt[]) decoder, PSRAM covers the memory */,
+		// small=1 (2026-09-30): the fast (small=0) decoder needs ~400KB of
+		// internal working memory - fine on boards with generous PSRAM
+		// (e.g. MeshAdventurer-S3's 8MB) but BZ_MEM_ERROR (ret=-3 below)
+		// confirmed on hardware on a board with only 2MB PSRAM already
+		// shared with BLE/GNSS/display/RNS's own PSRAM containers -
+		// identical received bytes on both boards (verified byte-for-byte
+		// via live capture), only the memory-constrained board failed, and
+		// -3 is bzip2's own "couldn't allocate working memory" code, not a
+		// data error. small=1 uses ~2.3 bytes/block-byte instead of ~3.7 -
+		// slower decompression, fine here since this only runs when
+		// receiving a large message, not a hot path.
+		1 /* small - low-memory decoder, see project_urns_bz2_small_mode memory */,
 		0 /* verbosity - VPrintf* are no-ops in this port regardless */
 	);
 

@@ -2653,11 +2653,22 @@ void LXMRouter::on_message_list_response(const Bytes& response) {
 
 		// Request the messages
 		Bytes path((uint8_t*)"/get", 4);
-		_outbound_propagation_link.request(
+		RequestReceipt get_receipt = _outbound_propagation_link.request(
 			path, request_data,
 			static_get_response_cb,
 			static_get_failed_cb
 		);
+
+		// Unlike the list request above, this return value used to be
+		// discarded unchecked - a silently-failed send here just sat in
+		// PR_RECEIVING until the outer 60s sync timeout gave up, with no
+		// indication of what actually went wrong. Check and fail fast,
+		// matching the list request's own handling.
+		if (!get_receipt) {
+			WARNING("  Content request failed - request not sent");
+			on_sync_failed();
+			return;
+		}
 
 		_sync_state = PR_RECEIVING;
 		_sync_progress = 0.3f;
