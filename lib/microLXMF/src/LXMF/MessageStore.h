@@ -11,9 +11,22 @@
 
 namespace LXMF {
 
-	// Fixed pool sizes to eliminate heap fragmentation
-	static constexpr size_t MAX_CONVERSATIONS = 32;
-	static constexpr size_t MAX_MESSAGES_PER_CONVERSATION = 256;
+	// Fixed pool sizes to eliminate heap fragmentation. Overridable per-board
+	// via build_flags (eg 2MB-PSRAM boards like heltec32v4pa_urns, where the
+	// full 32/256 pool alone costs ~278KB of PSRAM). An earlier attempt at
+	// shrinking this for heltec32v4pa_urns hit a reproducible TLSF
+	// heap-corruption boot crash and was reverted; that turned out to be
+	// stale build/sdkconfig-cache state, not a real bug in the shrink itself -
+	// see project_urns_messagestore_psram_pool memory before touching this
+	// again, in case it resurfaces.
+	#ifndef LXMF_MAX_CONVERSATIONS
+	#define LXMF_MAX_CONVERSATIONS 32
+	#endif
+	#ifndef LXMF_MAX_MESSAGES_PER_CONVERSATION
+	#define LXMF_MAX_MESSAGES_PER_CONVERSATION 256
+	#endif
+	static constexpr size_t MAX_CONVERSATIONS = LXMF_MAX_CONVERSATIONS;
+	static constexpr size_t MAX_MESSAGES_PER_CONVERSATION = LXMF_MAX_MESSAGES_PER_CONVERSATION;
 	static constexpr size_t MESSAGE_HASH_SIZE = 32;  // SHA256 hash
 	static constexpr size_t PEER_HASH_SIZE = 16;     // Truncated hash
 
