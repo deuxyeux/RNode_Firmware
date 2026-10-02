@@ -107,6 +107,7 @@
 #endif
 
 #include "Utilities.h"
+#include "Audio.h"
 
 #if MCU_VARIANT == MCU_ESP32
   const char* cp_name(uint16_t id) {
@@ -651,6 +652,17 @@ void setup() {
 
   #if HAS_RTC == true
     rtc_init();
+  #endif
+
+  #if HAS_AUDIO == true
+    {
+      // Phase 0: confirm the ES8311 is reachable on the shared I2C bus
+      // (Wire is already up via display_init()/rtc_init()), then power it
+      // back down. Nothing else uses audio yet.
+      // (Result is logged from the heartbeat in Messenger.h - DEBUG_LOG
+      // is silent this early.)
+      audio_probe();
+    }
   #endif
 
   #if HAS_SENSORS == true
@@ -3229,6 +3241,9 @@ void loop() {
       urns_reticulum.loop();
       CP(CP_URNS_LXMF_LOOP);
       urns_lxmf_loop();
+      #if HAS_AUDIO == true
+        audio_poll();
+      #endif
       #if HAS_LXMF == true
         CP(CP_MSNGR_PING);
         messenger_ping_process();

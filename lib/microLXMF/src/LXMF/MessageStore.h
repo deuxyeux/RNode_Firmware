@@ -215,6 +215,10 @@ namespace LXMF {
 			bool incoming;
 			int state;  // Type::Message::State as int
 			bool valid;  // True if loaded successfully
+			// FIELD_AUDIO summary (AudioField.h) recorded at save time so list
+			// views don't need the full packed blob. mode 0 = no audio.
+			uint8_t audio_mode = 0;
+			uint32_t audio_bytes = 0;
 		};
 
 	public:

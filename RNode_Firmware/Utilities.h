@@ -359,6 +359,7 @@ void buzzer_wait_for_melody();
   #else
     inline void vault_unlock_boot_screen() {}
   #endif
+  #include "Audio.h"
   #include "URNS.h"
   // KISS identity export/import - needs urns_ready (URNS.h, just above)
   // plus Vault.h/VaultUnlock.h's PIN-entry plumbing, but nothing from

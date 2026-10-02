@@ -623,6 +623,15 @@
       #define PIN_ENCODER_DOWN 10
       #define PIN_ENCODER_PRESS 11
 
+      // ES8311 audio codec (see Audio.h). Ported from tools/es8311_test/
+      // src/pins.h; I2C control shares the OLED/RTC bus (SDA_OLED/SCL_OLED).
+      #define HAS_AUDIO true
+      #define PIN_AUDIO_BCK 12
+      #define PIN_AUDIO_WS 13
+      #define PIN_AUDIO_DOUT 14
+      #define PIN_AUDIO_DIN 38
+      #define PIN_AUDIO_EN 46
+
       #if HAS_NP == false
         #if defined(EXTERNAL_LEDS)
           const int pin_led_rx = 48;
@@ -2581,6 +2590,10 @@
 
   #ifndef HAS_BUSY
     const int pin_busy = -1;
+  #endif
+
+  #ifndef HAS_AUDIO
+    #define HAS_AUDIO false
   #endif
 
   #ifndef HAS_BUZZER

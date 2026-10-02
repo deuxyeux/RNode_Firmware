@@ -39,6 +39,12 @@ using namespace RNS::Utilities;
 // compressed blob that claims to expand to something absurd - not a
 // real expected-traffic ceiling.
 static const size_t RESOURCE_BZ2_MAX_DECOMPRESSED_SIZE = 65536;
+// Receiver-side sanity bound on an advertised Resource (wire size and
+// uncompressed size). The whole transfer is held in RAM and the advertisement
+// is unauthenticated, so without this a remote sender could demand an
+// arbitrarily large allocation. Generous vs. the few-KB voice/text messages
+// this node actually expects.
+static const size_t RESOURCE_MAX_ACCEPT_SIZE = 262144;
 
 
 // ============================================================================
@@ -72,6 +78,10 @@ Resource Resource::accept(const Packet& advertisement_packet, Callbacks::conclud
 	ResourceAdvertisement adv = ResourceAdvertisement::unpack(advertisement_packet.plaintext());
 	if (!adv._h) {
 		DEBUG("Could not decode resource advertisement, dropping resource");
+		return {Type::NONE};
+	}
+	if (adv._t > RESOURCE_MAX_ACCEPT_SIZE || adv._d > RESOURCE_MAX_ACCEPT_SIZE) {
+		WARNING("Resource advertisement too large (transfer=" + std::to_string(adv._t) + " data=" + std::to_string(adv._d) + "), dropping resource");
 		return {Type::NONE};
 	}
 

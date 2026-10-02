@@ -27,6 +27,7 @@
   #pragma push_macro("MTU")
   #undef MTU
   #include <LXMF/MessageStore.h>
+  #include <LXMF/AudioField.h>
   #include <LXMF/PropagationNodeManager.h>
   #pragma pop_macro("MTU")
 
@@ -418,6 +419,8 @@
   std::string msngr_msg_detail_cache_content;
   bool msngr_msg_detail_cache_incoming = false;
   bool msngr_msg_detail_cache_valid = false;
+  // Set only when this board can actually play it (HAS_AUDIO + a supported mode).
+  bool msngr_msg_detail_has_audio = false;
   // Unix epoch seconds, straight from LXMessage's own _timestamp (set at
   // pack time if never explicitly assigned - see LXMessage.cpp) - always
   // populated for any real message, 0 only when meta.valid is false.
@@ -501,6 +504,17 @@
     out[oi] = 0;
   }
 
+  // "[Voice 3s]" for a message carrying FIELD_AUDIO (any board - boards
+  // without HAS_AUDIO can still see that one arrived, just not play it).
+  // Unsupported modes (450/Opus/...) show "[Voice ?]".
+  void messenger_voice_label(uint8_t mode, uint32_t bytes, char *out, size_t cap) {
+    #if HAS_AUDIO == true
+      uint32_t ms = audio_duration_ms(mode, bytes);
+      if (ms) { snprintf(out, cap, "[Voice %us]", (unsigned)((ms + 500) / 1000)); return; }
+    #endif
+    snprintf(out, cap, "[Voice ?]");
+  }
+
   // Called once when MENU_STATE_MSNGR_PEER is (re-)entered - on first
   // opening it from Inbox/Bookmarks/Announces, and again right after a
   // successful Send (a new message just got added). NOT called from the
@@ -540,7 +554,14 @@
       if (meta.valid) {
         char snippet_decoded[sizeof(msngr_peer_cache[i].snippet)];
         msngr_kb_decode_utf8(meta.content.c_str(), snippet_decoded, sizeof(snippet_decoded));
-        snprintf(msngr_peer_cache[i].snippet, sizeof(msngr_peer_cache[i].snippet), "%s", snippet_decoded);
+        if (meta.audio_mode) {
+          char voice[24];
+          messenger_voice_label(meta.audio_mode, meta.audio_bytes, voice, sizeof(voice));
+          snprintf(msngr_peer_cache[i].snippet, sizeof(msngr_peer_cache[i].snippet), "%s%s%s",
+                   voice, snippet_decoded[0] ? " " : "", snippet_decoded);
+        } else {
+          snprintf(msngr_peer_cache[i].snippet, sizeof(msngr_peer_cache[i].snippet), "%s", snippet_decoded);
+        }
       } else {
         snprintf(msngr_peer_cache[i].snippet, sizeof(msngr_peer_cache[i].snippet), "?");
       }
@@ -677,10 +698,54 @@
     } else {
       msngr_msg_detail_cache_content = "(unavailable)";
     }
+    msngr_msg_detail_has_audio = false;
+    if (meta.valid && meta.audio_mode) {
+      char voice[24];
+      messenger_voice_label(meta.audio_mode, meta.audio_bytes, voice, sizeof(voice));
+      // Voice messages usually carry no text - show the label instead of
+      // an empty preview.
+      if (msngr_msg_detail_cache_content.empty()) msngr_msg_detail_cache_content = voice;
+      #if HAS_AUDIO == true
+        msngr_msg_detail_has_audio = audio_mode_info(meta.audio_mode) != nullptr;
+      #endif
+    }
     msngr_msg_detail_cache_incoming = meta.valid && meta.incoming;
     msngr_msg_detail_cache_timestamp = meta.valid ? meta.timestamp : 0;
     msngr_msg_detail_cache_valid = true;
   }
+
+  #if HAS_AUDIO == true
+    #define MSNGR_VOICE_VOLUME_PCT 80
+    // Loads the stored message, pulls the Codec2 payload out of FIELD_AUDIO
+    // into a PSRAM buffer and hands it to the audio task (which owns/frees
+    // it). Loop-task only: the LittleFS read is masked against DIO0 like
+    // every other flash I/O in the menu handlers, and audio_play_lxmf()
+    // does the codec's I2C setup (shared Wire with the display).
+    bool messenger_voice_play(const RNS::Bytes &message_hash) {
+      if (!urns_message_store || audio_state() != AUDIO_IDLE) return false;
+      #if HAS_BUZZER == true
+        buzzer_wait_for_melody();
+      #endif
+      uint8_t *buf = nullptr;
+      size_t len = 0;
+      uint8_t mode = 0;
+      LoRa->maskDio0();
+      {
+        LXMF::LXMessage msg = urns_message_store->load_message(message_hash);
+        LXMF::AudioField af;
+        if (LXMF::parse_audio_field(msg, af) && af.size) {
+          buf = (uint8_t *)heap_caps_malloc(af.size, MALLOC_CAP_SPIRAM);
+          if (buf) { memcpy(buf, af.data, af.size); len = af.size; mode = af.mode; }
+        }
+      }
+      LoRa->unmaskDio0();
+      DEBUG_LOG("[Audio] play request: loaded=%d mode=%u len=%u\r\n", buf != nullptr, mode, (unsigned)len);
+      if (!buf) return false;
+      bool started = audio_play_lxmf(mode, buf, len, MSNGR_VOICE_VOLUME_PCT);
+      DEBUG_LOG("[Audio] audio_play_lxmf -> %d\r\n", started);
+      return started;
+    }
+  #endif
 
   bool messenger_hash_matches(const uint8_t *stored, const RNS::Bytes &hash) {
     if (hash.size() != LXMF::PEER_HASH_SIZE) return false;
@@ -2017,6 +2082,30 @@
         (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
         (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
       );
+      #if HAS_AUDIO == true
+        {
+          static uint32_t audio_diag_seen = 0;
+          if (audio_diag_seen != audio_diag_seq) {
+            audio_diag_seen = audio_diag_seq;
+            DEBUG_LOG("[Audio] %s\r\n", audio_diag);
+          }
+        }
+        if (audio_task_stack_hwm) {
+          DEBUG_LOG("[Audio] play task done, min free stack=%u bytes\r\n", (unsigned)audio_task_stack_hwm);
+          audio_task_stack_hwm = 0;
+        }
+        {
+          // Repeats for the first few heartbeats - the very first one
+          // (and anything else logged in the boot burst) gets dropped.
+          static uint8_t audio_reports = 0;
+          if (audio_reports < 4 && audio_probe_done) {
+            audio_reports++;
+            DEBUG_LOG("[Audio] ES8311 %s addr=0x%02X chipid=0x%02X/0x%02X\r\n",
+                      audio_probe_found ? "found" : "NOT FOUND",
+                      audio_probe_addr, audio_probe_id1, audio_probe_id2);
+          }
+        }
+      #endif
       // One-shot path table size report, a few seconds into uptime - fires
       // through this function's own direct-Serial0 DEBUG_LOG call (not
       // RNS::logf()'s queued path, which drops lines under the boot-time

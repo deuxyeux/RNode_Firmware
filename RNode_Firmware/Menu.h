@@ -3098,7 +3098,8 @@
 
     uint8_t msngr_msg_detail_row_count() {
       if (!msngr_msg_detail_cache_valid) return 2;
-      return (uint8_t)(msngr_msg_detail_wrapped_count + 4); // content lines + REPLY + DELETE + FULL MESSAGE + BACK
+      // content lines + [PLAY/STOP, voice messages only] + REPLY + DELETE + FULL MESSAGE + BACK
+      return (uint8_t)(msngr_msg_detail_wrapped_count + 4 + (msngr_msg_detail_has_audio ? 1 : 0));
     }
 
     // Full-screen, ornament-free single-message view, real word-wrap
@@ -7379,6 +7380,12 @@
         } else if (msngr_msg_detail_cursor == row_count - 3) {
           msngr_delete_confirm_cursor = 1; // default CANCEL - see its own declaration
           menu_state = MENU_STATE_MSNGR_DELETE_CONFIRM;
+        #if HAS_AUDIO == true
+        } else if (msngr_msg_detail_has_audio && msngr_msg_detail_cursor == row_count - 5) {
+          // Play / Stop (voice messages only, sits just above Reply).
+          if (audio_state() == AUDIO_IDLE) messenger_voice_play(msngr_active_message_hash);
+          else audio_play_stop();
+        #endif
         } else if (msngr_msg_detail_cursor == row_count - 4) {
           // Same reset sequence MSNGR_PEER_FIXED_ACTION_SEND_CUSTOM uses to
           // open the keyboard fresh - msngr_active_peer_hash is already
@@ -11512,16 +11519,16 @@
         uint8_t row_count = msngr_msg_detail_row_count();
         // +4, not +1 - content lines plus the trailing Reply, Delete,
         // Full Message and BACK rows.
-        const char *labels[MSNGR_MSG_DETAIL_MAX_LINES + 4];
-        char valbufs[MSNGR_MSG_DETAIL_MAX_LINES + 4][24];
-        const uint8_t *icons[MSNGR_MSG_DETAIL_MAX_LINES + 4] = { nullptr };
-        uint8_t icon_widths[MSNGR_MSG_DETAIL_MAX_LINES + 4] = { 0 };
+        const char *labels[MSNGR_MSG_DETAIL_MAX_LINES + 5];
+        char valbufs[MSNGR_MSG_DETAIL_MAX_LINES + 5][24];
+        const uint8_t *icons[MSNGR_MSG_DETAIL_MAX_LINES + 5] = { nullptr };
+        uint8_t icon_widths[MSNGR_MSG_DETAIL_MAX_LINES + 5] = { 0 };
         // Per user request: the content-preview rows lose their previous
         // 8px left padding (draw_menu_list_disp()'s own "plain x=8"
         // default for icon-less rows) to better use the screen width -
         // Reply/Delete/Full Message (icons[i] set, below) and BACK (its
         // own auto-icon path) are unaffected, left at 0/default.
-        int8_t text_dx[MSNGR_MSG_DETAIL_MAX_LINES + 4] = { 0 };
+        int8_t text_dx[MSNGR_MSG_DETAIL_MAX_LINES + 5] = { 0 };
 
         // msngr_msg_detail_wrapped_lines (populated by msngr_msg_detail_
         // refresh_wrap_cache() when the message row was selected, above) -
@@ -11529,7 +11536,8 @@
         // re-chopping msngr_msg_detail_cache_content here, same "don't
         // recompute from flash-backed content on every draw" reasoning as
         // MENU_STATE_MSNGR_PEER above.
-        uint8_t lines = row_count - 4; // content lines - Reply, Delete, Full Message, BACK are appended after
+        const uint8_t voice_rows = msngr_msg_detail_has_audio ? 1 : 0;
+        uint8_t lines = row_count - 4 - voice_rows; // content lines - [Play], Reply, Delete, Full Message, BACK are appended after
         for (uint8_t i = 0; i < lines; i++) {
           labels[i] = msngr_msg_detail_wrapped_lines[i].c_str();
           valbufs[i][0] = 0;
@@ -11540,21 +11548,38 @@
           text_dx[i] = -7;
         }
 
-        labels[lines] = "Reply";
-        valbufs[lines][0] = 0;
-        icons[lines] = bm_menu_icon_msngr_reply;
-        icon_widths[lines] = MENU_ICON_W_MSNGR_REPLY;
-        labels[lines + 1] = "Delete";
-        valbufs[lines + 1][0] = 0;
-        icons[lines + 1] = bm_menu_icon_msngr_delete;
-        icon_widths[lines + 1] = MENU_ICON_W_MSNGR_DELETE;
+        #if HAS_AUDIO == true
+        if (voice_rows) {
+          AudioState as = audio_state();
+          if (as == AUDIO_IDLE) {
+            labels[lines] = "Play";
+            valbufs[lines][0] = 0;
+          } else if (as == AUDIO_DECODING) {
+            labels[lines] = "Stop";
+            snprintf(valbufs[lines], sizeof(valbufs[lines]), "decoding");
+          } else {
+            labels[lines] = "Stop";
+            snprintf(valbufs[lines], sizeof(valbufs[lines]), "%u/%us",
+                     (unsigned)(audio_play_elapsed_ms() / 1000), (unsigned)((audio_play_total_ms() + 500) / 1000));
+          }
+        }
+        #endif
+        const uint8_t t = lines + voice_rows;
+        labels[t] = "Reply";
+        valbufs[t][0] = 0;
+        icons[t] = bm_menu_icon_msngr_reply;
+        icon_widths[t] = MENU_ICON_W_MSNGR_REPLY;
+        labels[t + 1] = "Delete";
+        valbufs[t + 1][0] = 0;
+        icons[t + 1] = bm_menu_icon_msngr_delete;
+        icon_widths[t + 1] = MENU_ICON_W_MSNGR_DELETE;
         // Per user request: right under Delete, above BACK.
-        labels[lines + 2] = "Full Message";
-        valbufs[lines + 2][0] = 0;
-        icons[lines + 2] = bm_menu_icon_msngr_full_message;
-        icon_widths[lines + 2] = MENU_ICON_W_MSNGR_FULL_MESSAGE;
-        labels[lines + 3] = "BACK";
-        valbufs[lines + 3][0] = 0;
+        labels[t + 2] = "Full Message";
+        valbufs[t + 2][0] = 0;
+        icons[t + 2] = bm_menu_icon_msngr_full_message;
+        icon_widths[t + 2] = MENU_ICON_W_MSNGR_FULL_MESSAGE;
+        labels[t + 3] = "BACK";
+        valbufs[t + 3][0] = 0;
 
         // Local (Timezone-shifted) time+date, same apply_tz_offset()
         // convention as the RTC list's own Time/Date rows - time first,

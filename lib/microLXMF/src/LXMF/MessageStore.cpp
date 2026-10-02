@@ -1,4 +1,5 @@
 #include "MessageStore.h"
+#include "AudioField.h"
 #include <microReticulum/Log.h>
 #include <microReticulum/Utilities/OS.h>
 
@@ -521,6 +522,16 @@ bool MessageStore::save_message(const LXMessage& message) {
 		_json_doc["incoming"] = message.incoming();
 		_json_doc["timestamp"] = message.timestamp();
 		_json_doc["state"] = static_cast<int>(message.state());
+		{
+			// Voice-message summary (mode + payload size only - kept in the
+			// clear like the hashes/timestamp, so the conversation list can
+			// show "[Voice 3s]" without parsing the packed blob).
+			AudioField af;
+			if (parse_audio_field(message, af)) {
+				_json_doc["am"] = af.mode;
+				_json_doc["ab"] = (uint32_t)af.size;
+			}
+		}
 
 		// "content"/"packed" go through the optional field cipher
 		// (set_field_cipher(), PIN/passphrase vault - see MessageStore.h's
@@ -1346,6 +1357,8 @@ MessageStore::MessageMetadata MessageStore::load_message_metadata(const Bytes& m
 		filter["timestamp"] = true;
 		filter["incoming"] = true;
 		filter["state"] = true;
+		filter["am"] = true;
+		filter["ab"] = true;
 		// Needed only to decrypt "content" below when "enc" is set - both
 		// are tiny fixed-length hex strings, negligible next to skipping
 		// "packed" (the whole point of this filtered parse).
@@ -1392,6 +1405,8 @@ MessageStore::MessageMetadata MessageStore::load_message_metadata(const Bytes& m
 		meta.timestamp = _json_doc["timestamp"] | 0.0;
 		meta.incoming = _json_doc["incoming"] | true;
 		meta.state = _json_doc["state"] | 0;
+		meta.audio_mode = _json_doc["am"] | 0;
+		meta.audio_bytes = _json_doc["ab"] | 0;
 		meta.valid = true;
 
 		return meta;
