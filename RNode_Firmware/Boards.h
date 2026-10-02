@@ -1144,15 +1144,9 @@
       const int pin_sclk = 9;
 
     #elif BOARD_MODEL == BOARD_HELTEC32_V4 || BOARD_MODEL == BOARD_HELTEC32_V4_R8
-      // Shared block - R8 (0xF8) differs from the base V4 (0x3F) only in
-      // PSRAM bus width (Quad/2MB vs Octal/8MB), which is entirely a
-      // build-time platformio.ini/sdkconfig concern (board_build.arduino.
-      // memory_type, or Kconfig under combined mode) - nothing here needs
-      // to differ. See BOARD_HELTEC32_V4_R8's own comment above for why
-      // that still needs a distinct BOARD_MODEL rather than just a build
-      // flag: PSRAM protocol mismatches crash before app_main() with no
-      // recovery, so RNode's flasher/hash-verification tooling needs a
-      // real device-identity distinction to pick the right firmware.
+      // Radio SPI and OLED wiring are shared, but the R8 moves peripheral
+      // GPIOs away from GPIO33-37, which are reserved for octal PSRAM.
+      // R8 reference: meshtastic/firmware variants/esp32s3/heltec_v4_r8.
       #define IS_ESP32S3 true
       #undef HAS_DISPLAY
       #define HAS_DISPLAY true
@@ -1183,31 +1177,31 @@
       #define PIN_WAKEUP GPIO_NUM_0
       #define WAKEUP_LEVEL 0
       #define OCP_TUNED 0x38
-      #define Vext GPIO_NUM_36
-      #define LORA_PA_MODEL LORA_PA_UNKNOWN
+      #if BOARD_MODEL == BOARD_HELTEC32_V4_R8
+        #define Vext GPIO_NUM_40
+        #define LORA_PA_MODEL LORA_PA_KCT8103L
+      #else
+        #define Vext GPIO_NUM_36
+        #define LORA_PA_MODEL LORA_PA_UNKNOWN
+      #endif
 
-      // Built-in L76K GNSS - unlike T114's board revision, this one has a
-      // real dedicated enable pin (not shared with Vext/the display), plus
-      // a working reset pin and the same soft-standby line - all fully
-      // wired (not commented out) in the vendor reference design, so this
-      // is a standard always-populated feature, not an optional add-on -
-      // GNSS_ENABLED_DEFAULT stays at its global default (true).
-      // gnss_set_enabled() (GNSS.h) drives both PIN_GPS_EN and
-      // PIN_GPS_STANDBY together on Enabled toggle - harmless overlap
-      // (STANDBY is moot with EN off; both HIGH when on matches the
-      // reference driver's own behavior of using both independently).
+      // GNSS uses Serial1; on R8 it is an optional expansion-kit receiver.
       #define HAS_GPS true
       #define GPS_MODEL GPS_MODEL_L76K
       #define GPS_SERIAL Serial1
-      #define GPS_BAUD_RATE 9600 // L76K's factory-default NMEA baud
-
-      #define PIN_GPS_RX 39      // MCU RX - wired to GPS TX-out
-      #define PIN_GPS_TX 38      // MCU TX - wired to GPS RX-in
+      #define GPS_BAUD_RATE 9600
+      #define PIN_GPS_RX 39
+      #define PIN_GPS_TX 38
       #define PIN_GPS_PPS 41
-      #define PIN_GPS_EN 34      // active LOW
-      #define PIN_GPS_RESET 42   // active LOW, needs a >100ms hold to reset
-      #define PIN_GPS_STANDBY 40 // HIGH=force wake, LOW=allow sleep
-      #define GNSS_DUTY_CYCLE_CAPABLE true // both pins - soft-sleep short intervals, hard power-off long ones
+      #if BOARD_MODEL == BOARD_HELTEC32_V4_R8
+        #define PIN_GPS_EN 42 // active LOW; GPIO40 belongs to Vext
+        #define GNSS_ENABLED_DEFAULT false
+      #else
+        #define PIN_GPS_EN 34
+        #define PIN_GPS_RESET 42
+        #define PIN_GPS_STANDBY 40
+      #endif
+      #define GNSS_DUTY_CYCLE_CAPABLE true
 
       // RNode Settings menu (Menu.h), button-only navigation (tap = next,
       // double-tap = back, hold = select/open - see menu_button_press()).
@@ -1227,6 +1221,9 @@
       #if defined(EXTERNAL_LEDS)
         const int pin_led_rx = 13;
         const int pin_led_tx = 14;
+      #elif BOARD_MODEL == BOARD_HELTEC32_V4_R8
+        const int pin_led_rx = 46;
+        const int pin_led_tx = 46;
       #else
         const int pin_led_rx = 35;
         const int pin_led_tx = 35;
@@ -1242,7 +1239,11 @@
       #define LNA_GD_THRSHLD (-109)
       #define LNA_GD_LIMIT   (-89)
 
-      #define LORA_LNA_GAIN  17
+      #if BOARD_MODEL == BOARD_HELTEC32_V4_R8
+        #define LORA_LNA_GAIN 21
+      #else
+        #define LORA_LNA_GAIN 17
+      #endif
       #define LORA_LNA_GVT   12
       #define LORA_PA_PWR_EN  7
       #define LORA_PA_CSD     2 // Same pin on GC1109

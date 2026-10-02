@@ -767,7 +767,7 @@ bool display_init() {
       delay(50);
       Wire.begin(SDA_OLED, SCL_OLED);
     #elif BOARD_MODEL == BOARD_HELTEC32_V4 || BOARD_MODEL == BOARD_HELTEC32_V4_R8
-      // enable vext / pin 36
+      // Enable peripheral power (V4: GPIO36, R8: GPIO40).
       pinMode(Vext, OUTPUT);
       digitalWrite(Vext, LOW);
       delay(50);

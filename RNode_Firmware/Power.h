@@ -137,7 +137,9 @@ float pmu_temperature = PMU_TEMP_MIN-1;
   #define BAT_V_FLOAT     4.33
   #define BAT_SAMPLES     7
   const uint8_t pin_vbat = 1;
-  const uint8_t pin_ctrl = 37;
+  #if BOARD_MODEL == BOARD_HELTEC32_V4
+    const uint8_t pin_ctrl = 37;
+  #endif
   float bat_p_samples[BAT_SAMPLES];
   float bat_v_samples[BAT_SAMPLES];
   uint8_t bat_samples_count = 0;
@@ -289,7 +291,10 @@ void measure_battery() {
 
     #if BOARD_MODEL == BOARD_HELTEC32_V3
       float battery_measurement = (float)(analogRead(pin_vbat)) * 0.0041;
-    #elif BOARD_MODEL == BOARD_HELTEC32_V4 || BOARD_MODEL == BOARD_HELTEC32_V4_R8
+    #elif BOARD_MODEL == BOARD_HELTEC32_V4_R8
+      // R8 divider and attenuation from Meshtastic's R8 variant (4.9 * 1.035).
+      float battery_measurement = analogReadMilliVolts(pin_vbat) / 1000.0f * 5.0715f;
+    #elif BOARD_MODEL == BOARD_HELTEC32_V4
       float battery_measurement = (float)(analogRead(pin_vbat)) * 0.00418;
     #elif BOARD_MODEL == BOARD_T3S3
       float battery_measurement = (float)(analogRead(pin_vbat)) / 4095.0*6.7828;
@@ -612,7 +617,11 @@ bool init_pmu() {
     pinMode(pin_ctrl,OUTPUT);
     digitalWrite(pin_ctrl, pin_ctrl_active);
     return true;
-  #elif BOARD_MODEL == BOARD_HELTEC32_V4 || BOARD_MODEL == BOARD_HELTEC32_V4_R8
+  #elif BOARD_MODEL == BOARD_HELTEC32_V4_R8
+    // The R8 divider has no GPIO37 enable; GPIO37 is the PSRAM strobe.
+    analogSetPinAttenuation(pin_vbat, ADC_2_5db);
+    return true;
+  #elif BOARD_MODEL == BOARD_HELTEC32_V4
     pinMode(pin_ctrl,OUTPUT);
     digitalWrite(pin_ctrl, HIGH);
     return true;
