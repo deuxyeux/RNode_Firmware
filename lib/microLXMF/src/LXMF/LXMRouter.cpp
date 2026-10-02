@@ -1384,6 +1384,77 @@ void LXMRouter::process_outbound() {
 	}
 }
 
+bool LXMRouter::queue_stamp_check(const LXMessage& message, const RNS::Packet* packet) {
+	if (message.stamp().size() != LXStamper::STAMP_SIZE || !message.hash()) {
+		DEBUG("  No valid stamp attached");
+		return false;
+	}
+
+	StampCheck* free_slot = nullptr;
+	for (auto& e : _stamp_checks) {
+		if (!e.in_use) {
+			if (!free_slot) free_slot = &e;
+		} else if (e.message.hash() == message.hash()) {
+			// Retransmit of a message already being validated - the first
+			// copy will be proved/delivered when it completes.
+			DEBUG("  Stamp check already pending for this message");
+			return true;
+		}
+	}
+	if (!free_slot) {
+		WARNING("  Stamp check queue full");
+		return false;
+	}
+
+	free_slot->in_use = true;
+	free_slot->started = false;
+	free_slot->has_packet = (packet != nullptr);
+	free_slot->seq = ++_stamp_check_seq;
+	free_slot->cost = _stamp_cost;
+	free_slot->message = message;
+	if (packet) free_slot->packet = *packet;
+	INFO("  Stamp validation queued");
+	return true;
+}
+
+void LXMRouter::service_stamp_checks() {
+	if (LXStamper::is_validate_done()) {
+		StampCheck* running = nullptr;
+		for (auto& e : _stamp_checks) {
+			if (e.in_use && e.started) { running = &e; break; }
+		}
+		const bool valid = LXStamper::take_validate_result();
+		if (running) {
+			if (valid) {
+				INFO("  Stamp validated");
+				running->message.set_stamp_valid(true);
+				if (running->has_packet) {
+					Packet proof_packet = running->packet;
+					INFO("  Sending delivery proof");
+					proof_packet.prove();
+				}
+				pending_inbound_push(running->message);
+			} else {
+				WARNING("  Rejecting message with invalid stamp");
+			}
+			running->message = LXMessage();
+			running->packet = Packet(RNS::Type::NONE);
+			running->in_use = false;
+			running->started = false;
+		}
+	}
+
+	if (LXStamper::is_validate_busy()) return;
+
+	StampCheck* next = nullptr;
+	for (auto& e : _stamp_checks) {
+		if (e.in_use && !e.started && (!next || e.seq < next->seq)) next = &e;
+	}
+	if (next && LXStamper::start_validate_async(next->message.hash(), next->message.stamp(), next->cost)) {
+		next->started = true;
+	}
+}
+
 // Process inbound queue
 void LXMRouter::process_inbound() {
 	// Unconditional (before the early-return below) - idle incoming links
@@ -1391,6 +1462,7 @@ void LXMRouter::process_inbound() {
 	// happens to be pending right now. See sweep_incoming_links()'s own
 	// comment (LXMRouter.h).
 	sweep_incoming_links();
+	service_stamp_checks();
 
 	if (_pending_inbound_count == 0) {
 		return;
@@ -1467,8 +1539,13 @@ void LXMRouter::announce(const Bytes& app_data, bool path_response) {
 			MsgPack::bin_t<uint8_t> name_bin;
 			name_bin = name_bytes;
 			packer.pack(name_bin);
-			// Pack stamp_cost as nil (not used)
-			packer.packNil();
+			// Advertise the inbound stamp cost so senders mine a stamp;
+			// nil when none is required (matches Python LXMF).
+			if (_stamp_cost > 0 && _enforce_stamps) {
+				packer.pack(static_cast<uint8_t>(_stamp_cost));
+			} else {
+				packer.packNil();
+			}
 
 			announce_data = Bytes(packer.data(), packer.size());
 			snprintf(buf, sizeof(buf), "  Built LXMF app_data for display_name: %s", _display_name.c_str());
@@ -1613,14 +1690,14 @@ void LXMRouter::on_packet(const Bytes& data, const Packet& packet) {
 			}
 		}
 
-		// Stamp enforcement (if enabled)
+		// Stamp enforcement (if enabled): validated off-thread; the proof and
+		// inbound push happen in service_stamp_checks() once it finishes.
 		if (_stamp_cost > 0 && _enforce_stamps) {
-			if (!message.validate_stamp(_stamp_cost)) {
+			if (!queue_stamp_check(message, &packet)) {
 				snprintf(buf, sizeof(buf), "  Rejecting message with invalid or missing stamp (required cost=%u)", _stamp_cost);
 				WARNING(buf);
-				return;
 			}
-			INFO("  Stamp validated");
+			return;
 		}
 
 		// Send delivery proof back to sender (matches Python LXMF packet.prove())
@@ -2160,14 +2237,14 @@ void LXMRouter::on_resource_concluded(const RNS::Resource& resource) {
 			}
 		}
 
-		// Stamp enforcement (if enabled)
+		// Stamp enforcement (if enabled): validated off-thread, delivered
+		// from service_stamp_checks() once it finishes.
 		if (_stamp_cost > 0 && _enforce_stamps) {
-			if (!message.validate_stamp(_stamp_cost)) {
+			if (!queue_stamp_check(message, nullptr)) {
 				snprintf(buf, sizeof(buf), "  Rejecting message with invalid or missing stamp (required cost=%u)", _stamp_cost);
 				WARNING(buf);
-				return;
 			}
-			INFO("  Stamp validated");
+			return;
 		}
 
 		// Note: We don't need to send a custom delivery proof here.

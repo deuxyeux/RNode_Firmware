@@ -454,3 +454,115 @@ std::pair<Bytes, uint8_t> LXStamper::take_async_result() {
 	g_async_stamp.state.store(AsyncState::IDLE, std::memory_order_release);
 	return out;
 }
+
+// =============================================================================
+// Async stamp validation — keeps the workblock build off loopTask.
+// =============================================================================
+namespace {
+	struct AsyncValidateSlot {
+		std::atomic<AsyncState> state{AsyncState::IDLE};
+		Bytes message_id;
+		Bytes stamp;
+		uint8_t target_cost{0};
+		uint16_t expand_rounds{0};
+		bool result{false};
+		std::mutex slot_mutex;
+	};
+	static AsyncValidateSlot g_async_validate;
+
+	static bool run_validation(const Bytes& message_id, const Bytes& stamp,
+	                           uint8_t target_cost, uint16_t expand_rounds) {
+		Bytes workblock = LXStamper::stamp_workblock(message_id, expand_rounds);
+		return LXStamper::stamp_valid(stamp, target_cost, workblock);
+	}
+}
+
+#ifdef ESP_PLATFORM
+extern "C" {
+static void validate_worker_task(void* arg) {
+	(void)arg;
+	Bytes message_id, stamp;
+	uint8_t target_cost;
+	uint16_t expand_rounds;
+	{
+		std::lock_guard<std::mutex> lk(g_async_validate.slot_mutex);
+		message_id = g_async_validate.message_id;
+		stamp = g_async_validate.stamp;
+		target_cost = g_async_validate.target_cost;
+		expand_rounds = g_async_validate.expand_rounds;
+	}
+	bool ok = run_validation(message_id, stamp, target_cost, expand_rounds);
+	{
+		std::lock_guard<std::mutex> lk(g_async_validate.slot_mutex);
+		g_async_validate.result = ok;
+		g_async_validate.state.store(AsyncState::DONE_SUCCESS,
+		                             std::memory_order_release);
+	}
+	vTaskDelete(nullptr);
+}
+}  // extern "C"
+#endif
+
+bool LXStamper::start_validate_async(
+	const Bytes& message_id,
+	const Bytes& stamp,
+	uint8_t target_cost,
+	uint16_t expand_rounds)
+{
+	if (g_async_validate.state.load(std::memory_order_acquire) != AsyncState::IDLE) {
+		return false;
+	}
+	{
+		std::lock_guard<std::mutex> lk(g_async_validate.slot_mutex);
+		g_async_validate.message_id = message_id;
+		g_async_validate.stamp = stamp;
+		g_async_validate.target_cost = target_cost;
+		g_async_validate.expand_rounds = expand_rounds;
+		g_async_validate.result = false;
+	}
+	g_async_validate.state.store(AsyncState::RUNNING, std::memory_order_release);
+
+#ifdef ESP_PLATFORM
+	// Same stack/priority/core as the generation worker; core 0 keeps
+	// loopTask's core free.
+	BaseType_t ok = xTaskCreatePinnedToCore(
+		validate_worker_task, "lxvalid", 12 * 1024, nullptr, 1, nullptr, 0);
+	if (ok != pdPASS) {
+		ERROR("LXStamper::start_validate_async: xTaskCreate failed");
+		g_async_validate.state.store(AsyncState::IDLE, std::memory_order_release);
+		return false;
+	}
+	return true;
+#else
+	bool valid = run_validation(message_id, stamp, target_cost, expand_rounds);
+	{
+		std::lock_guard<std::mutex> lk(g_async_validate.slot_mutex);
+		g_async_validate.result = valid;
+		g_async_validate.state.store(AsyncState::DONE_SUCCESS,
+		                             std::memory_order_release);
+	}
+	return true;
+#endif
+}
+
+bool LXStamper::is_validate_busy() {
+	return g_async_validate.state.load(std::memory_order_acquire) != AsyncState::IDLE;
+}
+
+bool LXStamper::is_validate_done() {
+	return g_async_validate.state.load(std::memory_order_acquire) == AsyncState::DONE_SUCCESS;
+}
+
+bool LXStamper::take_validate_result() {
+	if (!is_validate_done()) return false;
+	bool out;
+	{
+		std::lock_guard<std::mutex> lk(g_async_validate.slot_mutex);
+		out = g_async_validate.result;
+		g_async_validate.result = false;
+		g_async_validate.message_id = Bytes();
+		g_async_validate.stamp = Bytes();
+	}
+	g_async_validate.state.store(AsyncState::IDLE, std::memory_order_release);
+	return out;
+}

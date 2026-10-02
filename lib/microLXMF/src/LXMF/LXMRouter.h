@@ -975,6 +975,19 @@ namespace LXMF {
 		bool pending_inbound_push(const LXMessage& msg);
 		bool pending_inbound_pop(LXMessage& msg);
 		LXMessage* pending_inbound_front();
+		/**
+		 * @brief Hand an inbound message's stamp to the validation worker
+		 *
+		 * Workblock generation takes seconds on an ESP32, so validation
+		 * runs on LXStamper's worker task instead of blocking the caller.
+		 * service_stamp_checks() (from process_inbound()) completes the
+		 * delivery - proof (when `packet` is non-null) then inbound queue.
+		 *
+		 * @return false if the stamp is missing or the check queue is full
+		 *         (message must be rejected)
+		 */
+		bool queue_stamp_check(const LXMessage& message, const RNS::Packet* packet);
+		void service_stamp_checks();
 		bool failed_outbound_push(const LXMessage& msg);
 		bool failed_outbound_pop(LXMessage& msg);
 
@@ -996,6 +1009,20 @@ namespace LXMF {
 		size_t _pending_inbound_head = 0;
 		size_t _pending_inbound_tail = 0;
 		size_t _pending_inbound_count = 0;
+
+		// Inbound messages awaiting async stamp validation (see queue_stamp_check)
+		static constexpr size_t STAMP_CHECK_SIZE = 4;
+		struct StampCheck {
+			bool in_use = false;
+			bool started = false;
+			bool has_packet = false;
+			uint32_t seq = 0;
+			uint8_t cost = 0;
+			LXMessage message;
+			RNS::Packet packet = {RNS::Type::NONE};
+		};
+		StampCheck _stamp_checks[STAMP_CHECK_SIZE];
+		uint32_t _stamp_check_seq = 0;
 
 		static constexpr size_t FAILED_OUTBOUND_SIZE = 8;
 		LXMessage _failed_outbound_pool[FAILED_OUTBOUND_SIZE];

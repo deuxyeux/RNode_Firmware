@@ -144,6 +144,7 @@ namespace LXMF {
 		 * @brief Check if message has a valid stamp
 		 */
 		inline bool has_valid_stamp() const { return _stamp_valid; }
+		inline void set_stamp_valid(bool valid) { _stamp_valid = valid; }
 
 		/**
 		 * @brief True while a required stamp is still to be generated

@@ -141,6 +141,31 @@ namespace LXMF {
 		static std::pair<RNS::Bytes, uint8_t> take_async_result();
 
 		/**
+		 * @brief Validate a stamp on a worker task (ESP32: core 0)
+		 *
+		 * Building the 768KB workblock takes several seconds on an ESP32,
+		 * which would block loop(). Separate slot from start_async() so
+		 * validation never contends with outbound stamp mining. Poll
+		 * is_validate_done() then take_validate_result().
+		 *
+		 * @return false if a validation is already in flight/unconsumed
+		 */
+		static bool start_validate_async(
+			const RNS::Bytes& message_id,
+			const RNS::Bytes& stamp,
+			uint8_t target_cost,
+			uint16_t expand_rounds = WORKBLOCK_EXPAND_ROUNDS);
+
+		/** @brief True while an async validation is unconsumed (running or done). */
+		static bool is_validate_busy();
+
+		/** @brief True if the async validation finished. */
+		static bool is_validate_done();
+
+		/** @brief Take the async validation verdict; frees the slot. */
+		static bool take_validate_result();
+
+		/**
 		 * @brief Validate a propagation node stamp
 		 *
 		 * Extracts and validates a stamp from propagation node transient data.
