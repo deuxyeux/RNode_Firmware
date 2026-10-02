@@ -28,6 +28,12 @@
 extern bool audio_probe_done, audio_probe_found;
 extern uint8_t audio_probe_addr, audio_probe_id1, audio_probe_id2;
 
+// True only if the ES8311 answered the boot-time probe. Everything voice-
+// related in the UI (Voice message row, Play, Playback Volume) is gated on
+// this at runtime, since HAS_AUDIO only says the board *can* carry the codec
+// (some builds ship without it populated).
+inline bool audio_available() { return audio_probe_done && audio_probe_found; }
+
 bool audio_probe(uint8_t *addr = nullptr, uint8_t *id1 = nullptr, uint8_t *id2 = nullptr);
 
 // Number of Codec2 frames' worth of bytes produced for `samples32k` input
@@ -75,6 +81,30 @@ uint32_t audio_play_elapsed_ms();
 uint32_t audio_play_total_ms();
 // Loop-task housekeeping: powers the codec down once playback finished.
 void audio_poll();
+
+// ---- Recording (voice message capture) ----
+// Records mono 32kHz from the ES8311 mic into PSRAM, peak-normalizes, then
+// Codec2-encodes (AUDIO_REC_LXMF_MODE) on the same core-0 task. Loop-task
+// API, same Wire-sharing rule as playback.
+#define AUDIO_REC_LXMF_MODE 8        // LXMF.AM_CODEC2_2400 - Sideband's default
+#define AUDIO_REC_MAX_SECONDS 10     // ~3KB at 2400bps: keeps the LoRa Resource transfer short
+
+enum AudioRecState : uint8_t { REC_IDLE = 0, REC_RECORDING, REC_ENCODING, REC_READY, REC_FAILED };
+
+bool audio_record_start();
+void audio_record_stop();      // finish early; encoding then proceeds
+void audio_record_discard();   // drop any clip / cancel a capture in progress
+AudioRecState audio_record_state();
+uint32_t audio_record_elapsed_ms();
+// REC_READY only: hands the encoded Codec2 frames to the caller (heap_caps
+// buffer, caller frees) and returns the state to REC_IDLE.
+bool audio_record_take(uint8_t **data, size_t *len, uint8_t *lxmf_mode);
+// REC_READY only: clip size/duration without taking it.
+// REC_READY only: play the clip back through the speaker without consuming it.
+bool audio_record_preview(uint8_t volume_pct);
+size_t audio_record_clip_bytes();
+uint32_t audio_record_clip_ms();
+
 // Stack high-water mark (bytes free at worst) of the last audio task run.
 extern uint32_t audio_task_stack_hwm;
 // Last playback diagnostics (set by the audio task / audio_play_lxmf, read by

@@ -17,6 +17,11 @@
 #include <freertos/task.h>
 
 static void diag(const char *fmt, ...);
+static bool audio_worker_ensure();
+static TaskHandle_t worker_h = nullptr;
+enum WorkerJob : uint8_t { WORKER_NONE = 0, WORKER_PLAY, WORKER_REC };
+static volatile WorkerJob worker_job = WORKER_NONE;
+static void *volatile worker_arg = nullptr;
 
 namespace {
 
@@ -82,10 +87,20 @@ bool es_init() {
   return ok;
 }
 
+// Percent -> DAC volume register (0x32: 0.5dB/step, 0xBF = 0dB, 0xFF = +32dB).
+// The old linear pct*256/100 put 100% at +32dB (clipping) and 80% at +6dB.
+// Now 100% = +6dB (reg 0xCB, the loudest level playback has always used) and
+// each 10% step down is 3dB, so 10% = -21dB. 0% is a hard mute (reg 0).
 void es_set_volume(uint8_t pct) {
   if (pct > 100) pct = 100;
-  es_write(0x32, pct == 0 ? 0 : (uint8_t)(((uint16_t)pct * 256 / 100) - 1));
+  if (pct == 0) { es_write(0x32, 0); return; }
+  int steps_down = (100 - pct + 5) / 10;  // nearest 10% step
+  int reg = 0xCB - steps_down * 6;
+  if (reg < 1) reg = 1;
+  es_write(0x32, (uint8_t)reg);
 }
+
+void es_set_mic_gain(uint8_t g) { es_write(0x16, g); }  // 0..7 = 0..42dB in 6dB steps
 
 void es_set_mute(bool mute) {
   uint8_t r = 0;
@@ -178,12 +193,17 @@ bool audio_probe(uint8_t *addr, uint8_t *id1, uint8_t *id2) {
 
   bool found = false;
   const uint8_t candidates[] = {ES_ADDR_LOW, ES_ADDR_HIGH};
-  for (uint8_t a : candidates) {
-    Wire.beginTransmission(a);
-    if (Wire.endTransmission() == 0) {
-      es_addr = a;
-      found = true;
-      break;
+  // A few attempts: a single missed ACK at boot would otherwise disable all
+  // voice features until the next reboot.
+  for (int attempt = 0; attempt < 3 && !found; attempt++) {
+    if (attempt) delay(15);
+    for (uint8_t a : candidates) {
+      Wire.beginTransmission(a);
+      if (Wire.endTransmission() == 0) {
+        es_addr = a;
+        found = true;
+        break;
+      }
     }
   }
   uint8_t c1 = 0, c2 = 0;
@@ -196,6 +216,7 @@ bool audio_probe(uint8_t *addr, uint8_t *id1, uint8_t *id2) {
   if (id2) *id2 = c2;
 
   digitalWrite(PIN_AUDIO_EN, LOW);
+  if (found) audio_worker_ensure();
   audio_probe_done = true;
   audio_probe_found = found;
   audio_probe_addr = found ? es_addr : 0;
@@ -354,7 +375,6 @@ void play_task(void *arg) {
   audio_task_stack_hwm = uxTaskGetStackHighWaterMark(nullptr) * sizeof(StackType_t);
   delete j;
   play_state = AUDIO_DONE;
-  vTaskDelete(nullptr);
 }
 
 }  // namespace
@@ -373,7 +393,9 @@ static void diag(const char *fmt, ...) {
 
 bool audio_play_lxmf(uint8_t lxmf_mode, uint8_t *data, size_t len, uint8_t volume_pct) {
   const AudioModeInfo *m = audio_mode_info(lxmf_mode);
-  if (!m || !es_addr || play_state != AUDIO_IDLE || len < m->bytes_per_frame) {
+  if (!m || !es_addr || !worker_h || play_state != AUDIO_IDLE || len < m->bytes_per_frame) {
+    diag("play refused: mode=%d addr=0x%02X worker=%d state=%d len=%u", m != nullptr, es_addr, worker_h != nullptr,
+         (int)play_state, (unsigned)len);
     if (data) free(data);
     return false;
   }
@@ -396,15 +418,9 @@ bool audio_play_lxmf(uint8_t lxmf_mode, uint8_t *data, size_t len, uint8_t volum
   play_elapsed_ms = 0;
   play_total_ms = audio_duration_ms(lxmf_mode, len);
   play_state = AUDIO_DECODING;
-  // Codec2's DSP needs far more than the 8KB default (confirmed: stack
-  // canary at 8KB in the bring-up project). Internal RAM, not PSRAM - a
-  // PSRAM-stack task faults whenever the flash cache is disabled (LittleFS
-  // writes). Transient: freed when the task deletes itself.
-  if (xTaskCreatePinnedToCore(play_task, "audio_play", 32768, j, 1, nullptr, 0) != pdPASS) {
-    play_state = AUDIO_DONE;  // audio_poll() powers the codec back down
-    free_job(j);
-    return false;
-  }
+  worker_job = WORKER_PLAY;
+  worker_arg = j;
+  xTaskNotifyGive(worker_h);
   return true;
 }
 
@@ -416,14 +432,193 @@ AudioState audio_state() { return play_state; }
 uint32_t audio_play_elapsed_ms() { return play_elapsed_ms; }
 uint32_t audio_play_total_ms() { return play_total_ms; }
 
+// ---- Recording task ----
+
+namespace {
+
+volatile AudioRecState rec_state = REC_IDLE;
+volatile bool rec_stop_req = false;
+volatile bool rec_discard_req = false;
+volatile uint32_t rec_elapsed_ms = 0;
+uint8_t *rec_clip = nullptr;
+size_t rec_clip_len = 0;
+I2SClass i2s_in;
+
+void rec_task(void *) {
+  const size_t max_samples = (size_t)AUDIO_REC_MAX_SECONDS * AUDIO_SAMPLE_RATE;
+  int16_t *pcm = (int16_t *)heap_caps_malloc(max_samples * sizeof(int16_t), MALLOC_CAP_SPIRAM);
+  size_t n = 0;
+  bool manual_stop = false;
+  if (pcm) {
+    i2s_in.setPins(PIN_AUDIO_BCK, PIN_AUDIO_WS, PIN_AUDIO_DOUT, PIN_AUDIO_DIN);
+    if (i2s_in.begin(I2S_MODE_STD, AUDIO_SAMPLE_RATE, I2S_DATA_BIT_WIDTH_16BIT,
+                     I2S_SLOT_MODE_MONO, I2S_STD_SLOT_LEFT, I2S_ROLE_MASTER)) {
+      const size_t CHUNK = 1024;
+      while (n < max_samples && !rec_stop_req && !rec_discard_req) {
+        size_t want = max_samples - n < CHUNK ? max_samples - n : CHUNK;
+        size_t got = i2s_in.readBytes((char *)(pcm + n), want * sizeof(int16_t)) / sizeof(int16_t);
+        if (got == 0) break;
+        n += got;
+        rec_elapsed_ms = (uint32_t)((uint64_t)n * 1000 / AUDIO_SAMPLE_RATE);
+      }
+      manual_stop = rec_stop_req;
+      i2s_in.end();
+    }
+  }
+
+  // Drop the codec's start-up settling (first ~64ms) and, if the user
+  // stopped it, the trailing ~120ms where the stop click lands.
+  size_t start = 2048, tail = manual_stop ? 3840 : 0;
+  rec_state = REC_ENCODING;
+  size_t out_len = 0;
+  uint8_t *out = nullptr;
+  if (pcm && !rec_discard_req && n > start + tail + AUDIO_SAMPLE_RATE / 4) {  // >= ~0.25s of audio
+    int16_t *seg = pcm + start;
+    size_t seg_n = n - start - tail;
+    // Peak-normalize (Sideband does the same) - capped so room noise on a
+    // silent clip isn't amplified into hiss.
+    int32_t peak = 1;
+    for (size_t i = 0; i < seg_n; i++) { int32_t a = seg[i] < 0 ? -(int32_t)seg[i] : seg[i]; if (a > peak) peak = a; }
+    float gain = 29000.0f / (float)peak;
+    if (gain > 8.0f) gain = 8.0f;
+    if (gain > 1.05f) for (size_t i = 0; i < seg_n; i++) seg[i] = clamp16(seg[i] * gain);
+    const AudioModeInfo *mi = audio_mode_info(AUDIO_REC_LXMF_MODE);
+    size_t cap = ((size_t)AUDIO_REC_MAX_SECONDS * 1000 / mi->ms_per_frame + 2) * mi->bytes_per_frame;
+    out = (uint8_t *)heap_caps_malloc(cap, MALLOC_CAP_SPIRAM);
+    if (out) {
+      out_len = audio_c2_encode(mi->codec2_mode, seg, seg_n, out, cap);
+      if (!out_len) { free(out); out = nullptr; }
+    }
+  }
+  if (pcm) free(pcm);
+  diag("recorded %u samples, encoded %u bytes (manual=%d discard=%d)", (unsigned)n, (unsigned)out_len,
+       (int)manual_stop, (int)rec_discard_req);
+  audio_task_stack_hwm = uxTaskGetStackHighWaterMark(nullptr) * sizeof(StackType_t);
+  if (rec_discard_req || !out) {
+    if (out) free(out);
+    rec_state = rec_discard_req ? REC_IDLE : REC_FAILED;
+  } else {
+    rec_clip = out;
+    rec_clip_len = out_len;
+    rec_state = REC_READY;
+  }
+}
+
+}  // namespace
+
+// ---- Persistent worker task ----
+// One long-lived task owns the big Codec2 stack. It used to be created per
+// play/record, which failed intermittently: a ~32KB contiguous internal-RAM
+// block isn't reliably available once the heap has fragmented (BLE/WiFi/LoRa/
+// LXMF), so xTaskCreate returned failure after the codec was already powered
+// (silent Play). The stack is now reserved once, at boot, while the heap is
+// still unfragmented, and jobs are handed over with a task notification.
+// Internal RAM, not PSRAM: a PSRAM-stack task faults whenever the flash cache
+// is disabled (LittleFS writes). Peak use measured ~16.5KB.
+#define AUDIO_WORKER_STACK 24576
+
+namespace {
+
+void worker_task(void *) {
+  for (;;) {
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    WorkerJob job = worker_job;
+    worker_job = WORKER_NONE;
+    if (job == WORKER_PLAY) play_task(worker_arg);
+    else if (job == WORKER_REC) rec_task(nullptr);
+  }
+}
+
+}  // namespace
+
+static bool audio_worker_ensure() {
+  if (worker_h) return true;
+  size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+  if (xTaskCreatePinnedToCore(worker_task, "audio", AUDIO_WORKER_STACK, nullptr, 1, &worker_h, 0) != pdPASS) {
+    diag("worker create FAILED (largest internal block %u)", (unsigned)largest);
+    return false;
+  }
+  diag("worker up, stack=%u (largest internal block was %u)", (unsigned)AUDIO_WORKER_STACK, (unsigned)largest);
+  return true;
+}
+
+bool audio_record_start() {
+  if (!es_addr || !worker_h || play_state != AUDIO_IDLE) return false;
+  if (rec_state == REC_RECORDING || rec_state == REC_ENCODING) return false;
+  audio_record_discard();  // drop any previous clip
+  digitalWrite(PIN_AUDIO_EN, HIGH);
+  vTaskDelay(pdMS_TO_TICKS(20));
+  if (!es_init()) {
+    diag("record: es_init FAILED");
+    digitalWrite(PIN_AUDIO_EN, LOW);
+    return false;
+  }
+  es_set_mic_gain(4);     // 24dB, as validated in the bring-up project
+  es_set_volume(0);
+  es_set_mute(true);      // no speaker output while the mic is live
+  codec_powered = true;
+  rec_stop_req = false;
+  rec_discard_req = false;
+  rec_elapsed_ms = 0;
+  rec_state = REC_RECORDING;
+  worker_job = WORKER_REC;
+  worker_arg = nullptr;
+  xTaskNotifyGive(worker_h);
+  return true;
+}
+
+void audio_record_stop() {
+  if (rec_state == REC_RECORDING) rec_stop_req = true;
+}
+
+void audio_record_discard() {
+  if (rec_state == REC_RECORDING) {
+    rec_discard_req = true;  // task ends on its own and returns to IDLE
+  } else if (rec_state == REC_ENCODING) {
+    rec_discard_req = true;
+  } else {
+    if (rec_clip) { free(rec_clip); rec_clip = nullptr; }
+    rec_clip_len = 0;
+    rec_state = REC_IDLE;
+  }
+}
+
+AudioRecState audio_record_state() { return rec_state; }
+uint32_t audio_record_elapsed_ms() { return rec_elapsed_ms; }
+size_t audio_record_clip_bytes() { return rec_state == REC_READY ? rec_clip_len : 0; }
+uint32_t audio_record_clip_ms() { return rec_state == REC_READY ? audio_duration_ms(AUDIO_REC_LXMF_MODE, rec_clip_len) : 0; }
+
+bool audio_record_preview(uint8_t volume_pct) {
+  if (rec_state != REC_READY || !rec_clip) return false;
+  uint8_t *copy = (uint8_t *)heap_caps_malloc(rec_clip_len, MALLOC_CAP_SPIRAM);
+  if (!copy) return false;
+  memcpy(copy, rec_clip, rec_clip_len);
+  return audio_play_lxmf(AUDIO_REC_LXMF_MODE, copy, rec_clip_len, volume_pct);
+}
+
+bool audio_record_take(uint8_t **data, size_t *len, uint8_t *lxmf_mode) {
+  if (rec_state != REC_READY || !rec_clip) return false;
+  *data = rec_clip;
+  *len = rec_clip_len;
+  *lxmf_mode = AUDIO_REC_LXMF_MODE;
+  rec_clip = nullptr;
+  rec_clip_len = 0;
+  rec_state = REC_IDLE;
+  return true;
+}
+
 void audio_poll() {
   if (play_state == AUDIO_DONE) {
-    if (codec_powered) {
-      es_set_mute(true);
-      digitalWrite(PIN_AUDIO_EN, LOW);
-      codec_powered = false;
-    }
     play_state = AUDIO_IDLE;
+  }
+  // The codec only needs to be powered while playing or capturing; once
+  // the record task moves on to encoding (or either side finishes), power
+  // it down.
+  bool need = (play_state == AUDIO_DECODING || play_state == AUDIO_PLAYING || rec_state == REC_RECORDING);
+  if (codec_powered && !need) {
+    es_set_mute(true);
+    digitalWrite(PIN_AUDIO_EN, LOW);
+    codec_powered = false;
   }
 }
 

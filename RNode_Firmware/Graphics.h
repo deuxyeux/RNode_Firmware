@@ -762,6 +762,10 @@ const unsigned char bm_hg_high [] PROGMEM = {
 #define MENU_ICON_W_MSNGR_DELETE 11
 #define MENU_ICON_W_MSNGR_REPLY 10
 #define MENU_ICON_W_MSNGR_COMPOSE 11
+#define MENU_ICON_W_MSNGR_MIC 9
+#define MENU_ICON_W_MSNGR_PLAY 7
+#define MENU_ICON_W_MSNGR_PAUSE 9
+#define MENU_ICON_W_MSNGR_SPEAKER 11
 #define MENU_ICON_W_MSNGR_NODE 11
 #define MENU_ICON_W_MSNGR_REMOVE_BOOKMARK 11
 #define MENU_ICON_W_MSNGR_ADD_BY_HASH 10
@@ -1377,6 +1381,58 @@ const unsigned char bm_menu_icon_msngr_waiting [] PROGMEM = {
 // export), converted to this project's 1bpp/PROGMEM format the same way
 // every other icon here is (see bm_menu_icon_msngr_settings's comment
 // above).
+// Voice-message icons (Downloads/Icons/rnode-settings-mic.c, -speaker.c) -
+// same row-padded MSB-first 10-row layout as the other Messenger icons.
+const unsigned char bm_menu_icon_msngr_mic [] PROGMEM = {
+  0x00, 0x00,
+  0x1c, 0x00,
+  0x1c, 0x00,
+  0x7f, 0x00,
+  0x55, 0x00,
+  0x5d, 0x00,
+  0x41, 0x00,
+  0x22, 0x00,
+  0x1c, 0x00,
+  0x00, 0x00,
+};
+// Play/Stop action icons (Downloads/Icons/rnode-settings-play.c, -pause.c).
+const unsigned char bm_menu_icon_msngr_play [] PROGMEM = {
+  0x00,
+  0x60,
+  0x70,
+  0x78,
+  0x7c,
+  0x7c,
+  0x78,
+  0x70,
+  0x60,
+  0x00,
+};
+const unsigned char bm_menu_icon_msngr_pause [] PROGMEM = {
+  0x00, 0x00,
+  0x77, 0x00,
+  0x77, 0x00,
+  0x77, 0x00,
+  0x77, 0x00,
+  0x77, 0x00,
+  0x77, 0x00,
+  0x77, 0x00,
+  0x77, 0x00,
+  0x00, 0x00,
+};
+const unsigned char bm_menu_icon_msngr_speaker [] PROGMEM = {
+  0x00, 0x00,
+  0x06, 0x00,
+  0x0a, 0x80,
+  0x32, 0x40,
+  0x42, 0x40,
+  0x42, 0x40,
+  0x32, 0x40,
+  0x0a, 0x80,
+  0x06, 0x00,
+  0x00, 0x00,
+};
+
 const unsigned char bm_menu_icon_msngr_compose [] PROGMEM = {
   0x00, 0x00,
   0x79, 0x00,

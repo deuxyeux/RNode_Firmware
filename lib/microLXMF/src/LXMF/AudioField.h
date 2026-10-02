@@ -46,4 +46,33 @@ inline bool parse_audio_field(const LXMessage& msg, AudioField& out) {
 	return true;
 }
 
+// Encode [mode, bin] as the raw msgpack value fields_set() expects for
+// FIELD_AUDIO (what umsgpack produces for [int, bytes] in Python LXMF).
+inline RNS::Bytes build_audio_field(uint8_t mode, const uint8_t* data, size_t len) {
+	RNS::Bytes out;
+	out.append((uint8_t)0x92);  // fixarray(2)
+	if (mode < 0x80) {
+		out.append(mode);
+	} else {
+		out.append((uint8_t)0xCC);
+		out.append(mode);
+	}
+	if (len <= 0xFF) {
+		out.append((uint8_t)0xC4);
+		out.append((uint8_t)len);
+	} else if (len <= 0xFFFF) {
+		out.append((uint8_t)0xC5);
+		out.append((uint8_t)(len >> 8));
+		out.append((uint8_t)len);
+	} else {
+		out.append((uint8_t)0xC6);
+		out.append((uint8_t)(len >> 24));
+		out.append((uint8_t)(len >> 16));
+		out.append((uint8_t)(len >> 8));
+		out.append((uint8_t)len);
+	}
+	out.append(data, len);
+	return out;
+}
+
 }  // namespace LXMF

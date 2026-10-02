@@ -423,6 +423,15 @@
   #define ADDR_CONF_BLEKBD_PEER_ADDR_TYPE 280
   #define ADDR_CONF_BLEKBD_PEER_ADDR      281 // .. 286 (6 bytes)
 
+  // Messenger voice-message playback volume, percent (10-100 in steps of
+  // 10; HAS_AUDIO boards) - RNode Settings > Messenger > Settings >
+  // Playback Volume (Menu.h). Raw physical byte in the same unclaimed
+  // 256-823 gap as the entries above, no eeprom_addr() wrapper. Erased
+  // (0xFF) or any out-of-range value keeps the compiled default (100% -
+  // the loudest level, identical to what playback used before this was
+  // adjustable).
+  #define ADDR_CONF_MSNGR_PLAYBACK_VOLUME 287
+
   #define CONFIG_SIZE     256
   #define ADDR_CONF_SSID 0x00
   #define ADDR_CONF_PSK  0x21

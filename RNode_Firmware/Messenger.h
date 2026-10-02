@@ -157,6 +157,20 @@
     if (urns_lxmf_router) urns_lxmf_router->set_outbound_retry_delay((double)seconds);
   }
 
+  #if HAS_AUDIO == true
+    // Voice playback volume in percent (10-100, steps of 10) - see
+    // ADDR_CONF_MSNGR_PLAYBACK_VOLUME (ROM.h). Used by messenger_voice_play()
+    // and the voice screen's preview (Menu.h); Audio.cpp's es_set_volume()
+    // maps it to the codec's DAC register.
+    #define MSNGR_PLAYBACK_VOLUME_DEFAULT 100
+    uint8_t msngr_playback_volume_pct = MSNGR_PLAYBACK_VOLUME_DEFAULT;
+
+    void msngr_playback_volume_conf_save(uint8_t pct) {
+      msngr_playback_volume_pct = pct;
+      eeprom_update(ADDR_CONF_MSNGR_PLAYBACK_VOLUME, pct);
+    }
+  #endif
+
   // Whether RNode_Firmware.ino's existing one-shot post-boot LXMF announce
   // (urns_announce_lxmf(), URNS.h) actually runs - gates that call, does
   // NOT touch LXMRouter's own _announce_at_start (see ADDR_CONF_MSNGR_
@@ -333,6 +347,7 @@
     uint8_t hash[LXMF::MESSAGE_HASH_SIZE];
     char snippet[MSNGR_PEER_SNIPPET_CAP];
     bool incoming;
+    bool voice; // FIELD_AUDIO present - Menu.h draws the speaker icon instead of the direction arrow
   };
   MessengerPeerMsgCacheRow msngr_peer_cache[MSNGR_PEER_MAX_MSG_ROWS];
   uint8_t msngr_peer_cache_count = 0;
@@ -504,17 +519,6 @@
     out[oi] = 0;
   }
 
-  // "[Voice 3s]" for a message carrying FIELD_AUDIO (any board - boards
-  // without HAS_AUDIO can still see that one arrived, just not play it).
-  // Unsupported modes (450/Opus/...) show "[Voice ?]".
-  void messenger_voice_label(uint8_t mode, uint32_t bytes, char *out, size_t cap) {
-    #if HAS_AUDIO == true
-      uint32_t ms = audio_duration_ms(mode, bytes);
-      if (ms) { snprintf(out, cap, "[Voice %us]", (unsigned)((ms + 500) / 1000)); return; }
-    #endif
-    snprintf(out, cap, "[Voice ?]");
-  }
-
   // Called once when MENU_STATE_MSNGR_PEER is (re-)entered - on first
   // opening it from Inbox/Bookmarks/Announces, and again right after a
   // successful Send (a new message just got added). NOT called from the
@@ -554,18 +558,14 @@
       if (meta.valid) {
         char snippet_decoded[sizeof(msngr_peer_cache[i].snippet)];
         msngr_kb_decode_utf8(meta.content.c_str(), snippet_decoded, sizeof(snippet_decoded));
-        if (meta.audio_mode) {
-          char voice[24];
-          messenger_voice_label(meta.audio_mode, meta.audio_bytes, voice, sizeof(voice));
-          snprintf(msngr_peer_cache[i].snippet, sizeof(msngr_peer_cache[i].snippet), "%s%s%s",
-                   voice, snippet_decoded[0] ? " " : "", snippet_decoded);
-        } else {
-          snprintf(msngr_peer_cache[i].snippet, sizeof(msngr_peer_cache[i].snippet), "%s", snippet_decoded);
-        }
+        // A voice message is marked by the speaker icon (Menu.h) - no
+        // duration text here, just whatever text was sent with it.
+        snprintf(msngr_peer_cache[i].snippet, sizeof(msngr_peer_cache[i].snippet), "%s", snippet_decoded);
       } else {
         snprintf(msngr_peer_cache[i].snippet, sizeof(msngr_peer_cache[i].snippet), "?");
       }
       msngr_peer_cache[i].incoming = meta.valid && meta.incoming;
+      msngr_peer_cache[i].voice = meta.valid && meta.audio_mode != 0;
     }
     msngr_peer_cache_count = n;
   }
@@ -633,7 +633,13 @@
       if (meta.valid) {
         char snippet_decoded[sizeof(msngr_chat_cache[i].snippet)];
         msngr_kb_decode_utf8(meta.content.c_str(), snippet_decoded, sizeof(snippet_decoded));
-        snprintf(msngr_chat_cache[i].snippet, sizeof(msngr_chat_cache[i].snippet), "%s", snippet_decoded);
+        if (meta.audio_mode) {
+          // The dialog view has no icon column - spell it out instead.
+          snprintf(msngr_chat_cache[i].snippet, sizeof(msngr_chat_cache[i].snippet), "Voice%s%s",
+                   snippet_decoded[0] ? " " : "", snippet_decoded);
+        } else {
+          snprintf(msngr_chat_cache[i].snippet, sizeof(msngr_chat_cache[i].snippet), "%s", snippet_decoded);
+        }
       } else {
         snprintf(msngr_chat_cache[i].snippet, sizeof(msngr_chat_cache[i].snippet), "?");
       }
@@ -700,13 +706,11 @@
     }
     msngr_msg_detail_has_audio = false;
     if (meta.valid && meta.audio_mode) {
-      char voice[24];
-      messenger_voice_label(meta.audio_mode, meta.audio_bytes, voice, sizeof(voice));
-      // Voice messages usually carry no text - show the label instead of
-      // an empty preview.
-      if (msngr_msg_detail_cache_content.empty()) msngr_msg_detail_cache_content = voice;
+      // Voice messages usually carry no text - show a label instead of an
+      // empty preview.
+      if (msngr_msg_detail_cache_content.empty()) msngr_msg_detail_cache_content = "Voice message";
       #if HAS_AUDIO == true
-        msngr_msg_detail_has_audio = audio_mode_info(meta.audio_mode) != nullptr;
+        msngr_msg_detail_has_audio = audio_available() && audio_mode_info(meta.audio_mode) != nullptr;
       #endif
     }
     msngr_msg_detail_cache_incoming = meta.valid && meta.incoming;
@@ -715,7 +719,6 @@
   }
 
   #if HAS_AUDIO == true
-    #define MSNGR_VOICE_VOLUME_PCT 80
     // Loads the stored message, pulls the Codec2 payload out of FIELD_AUDIO
     // into a PSRAM buffer and hands it to the audio task (which owns/frees
     // it). Loop-task only: the LittleFS read is masked against DIO0 like
@@ -741,7 +744,7 @@
       LoRa->unmaskDio0();
       DEBUG_LOG("[Audio] play request: loaded=%d mode=%u len=%u\r\n", buf != nullptr, mode, (unsigned)len);
       if (!buf) return false;
-      bool started = audio_play_lxmf(mode, buf, len, MSNGR_VOICE_VOLUME_PCT);
+      bool started = audio_play_lxmf(mode, buf, len, msngr_playback_volume_pct);
       DEBUG_LOG("[Audio] audio_play_lxmf -> %d\r\n", started);
       return started;
     }
@@ -1506,6 +1509,20 @@
   // fields so it survives the RESOLVING wait too (messenger_send_process()
   // below passes it through once Identity::recall() comes good).
   uint8_t msngr_send_pending_forced_method = 0;
+  // Raw msgpack FIELD_AUDIO value (LXMF::build_audio_field()) for a voice
+  // send, empty for text sends. Lives alongside msngr_send_pending_content
+  // for the same reason: Retry, the post-RESOLVING deferred build and
+  // messenger_on_delivered()'s propagated-history reconstruction all rebuild
+  // the message from these globals rather than from the original object.
+  RNS::Bytes msngr_send_pending_audio;
+  // The exact packed bytes (hash/signature/timestamp/fields) of the message
+  // currently being tracked, kept from handle_outbound() until the next send.
+  // DIRECT deliveries (any Resource: long text, voice) are confirmed with a
+  // hash-only placeholder from LXMRouter::handle_direct_proof(), and so are
+  // PROPAGATED handoffs - neither carries the real message, so history is
+  // saved by unpacking these bytes instead (messenger_save_sent_from_packed()).
+  RNS::Bytes msngr_send_pending_packed;
+  uint8_t msngr_send_pending_audio_mode = 0;
   // Set by messenger_send_lxmf_resolved() whenever it actually saves a new
   // outgoing message - consumed by Menu.h's msngr_send_result_process()
   // (polled from loop() same as this file's own messenger_send_process())
@@ -1515,6 +1532,27 @@
   // messenger_refresh_peer_cache() isn't visible yet (same layering split
   // as msngr_send_result_process() itself).
   bool msngr_send_needs_cache_refresh = false;
+
+  // Saves the tracked send to history from its retained packed bytes - an
+  // exact reconstruction (same hash, signature, timestamp, fields) of what
+  // went on the air, unlike rebuilding from the content string. Returns false
+  // if `hash` isn't the tracked message or nothing was retained.
+  bool messenger_save_sent_from_packed(const RNS::Bytes &hash) {
+    if (!urns_message_store || !msngr_send_pending_packed.size() || !(hash == msngr_send_message_hash)) return false;
+    bool saved = false;
+    LoRa->maskDio0();
+    try {
+      LXMF::LXMessage saved_msg = LXMF::LXMessage::unpack_from_bytes(msngr_send_pending_packed, LXMF::Type::Message::DIRECT, true);
+      saved_msg.incoming(false);
+      saved_msg.state(LXMF::Type::Message::DELIVERED);
+      if (saved_msg.hash() == hash) saved = urns_message_store->save_message(saved_msg);
+    } catch (const std::exception &e) {
+      DEBUG_LOG("[Messenger] save_sent_from_packed: %s\r\n", e.what());
+    }
+    LoRa->unmaskDio0();
+    if (!saved) DEBUG_LOG("[Messenger] save_sent_from_packed failed for %s\r\n", hash.toHex().c_str());
+    return saved;
+  }
 
   // Registered via LXMRouter::register_delivered_callback() (URNS.h) -
   // fires once for every outbound message this router gets delivery proof
@@ -1533,13 +1571,23 @@
   // queue and hands it to this callback - see that function's own
   // comment - rather than the hash-only placeholder it used to pass).
   void messenger_on_delivered(LXMF::LXMessage &msg) {
-    // See messenger_on_delivery()'s own comment (this file) for why -
-    // same flash-I/O-vs-DIO0-ISR hazard.
-    LoRa->maskDio0();
-    bool saved = urns_message_store->save_message(msg);
-    LoRa->unmaskDio0();
-    if (!saved) {
-      DEBUG_LOG("[Messenger] delivered: save_message failed for %s\r\n", msg.hash().toHex().c_str());
+    if (msg.destination_hash().size() == 0) {
+      // Hash-only placeholder (DIRECT delivery proofs, incl. every Resource
+      // send - long text and voice): saving it would index a bogus empty-peer
+      // conversation, and it holds none of the real content anyway.
+      // Reconstruct the real message from what was retained at send time.
+      if (!messenger_save_sent_from_packed(msg.hash())) {
+        DEBUG_LOG("[Messenger] delivered: placeholder for %s, nothing retained to save\r\n", msg.hash().toHex().c_str());
+      }
+    } else {
+      // See messenger_on_delivery()'s own comment (this file) for why -
+      // same flash-I/O-vs-DIO0-ISR hazard.
+      LoRa->maskDio0();
+      bool saved = urns_message_store->save_message(msg);
+      LoRa->unmaskDio0();
+      if (!saved) {
+        DEBUG_LOG("[Messenger] delivered: save_message failed for %s\r\n", msg.hash().toHex().c_str());
+      }
     }
     msngr_send_needs_cache_refresh = true;
 
@@ -1619,10 +1667,16 @@
       // visible from this file (included first, same layering split as
       // everywhere else in this function) but would hold the same value.
       RNS::Identity dest_identity = RNS::Identity::recall(msngr_send_pending_dest_hash);
-      if (dest_identity) {
+      if (messenger_save_sent_from_packed(msg.hash())) {
+        // Saved exactly as sent (including any voice field) - nothing to rebuild.
+      } else if (dest_identity) {
         RNS::Destination dest(dest_identity, RNS::Type::Destination::OUT, RNS::Type::Destination::SINGLE, "lxmf", "delivery");
         LXMF::LXMessage saved_msg(dest, urns_lxmf_router->delivery_destination(),
           RNS::bytesFromString(msngr_send_pending_content), RNS::Bytes(), LXMF::Type::Message::PROPAGATED);
+        if (msngr_send_pending_audio.size()) {
+          const uint8_t audio_key = LXMF::FIELD_AUDIO;
+          saved_msg.fields_set(RNS::Bytes(&audio_key, 1), msngr_send_pending_audio);
+        }
         saved_msg.hash(msngr_send_message_hash);
         // _timestamp defaults to 0.0 and is normally only ever assigned
         // inside pack() at actual send time (LXMessage.h's own comment) -
@@ -1706,6 +1760,10 @@
     }
     LXMF::LXMessage msg(dest, urns_lxmf_router->delivery_destination(), RNS::bytesFromString(content),
       RNS::Bytes(), desired_method);
+    if (msngr_send_pending_audio.size()) {
+      const uint8_t audio_key = LXMF::FIELD_AUDIO;
+      msg.fields_set(RNS::Bytes(&audio_key, 1), msngr_send_pending_audio);
+    }
     urns_lxmf_router->handle_outbound(msg);
     // handle_outbound() calls pack() synchronously before queueing
     // (LXMRouter.cpp), so msg.method() already reflects OPPORTUNISTIC vs
@@ -1724,6 +1782,7 @@
     // cpp) fires later, asynchronously, if and when the recipient's proof
     // makes it back.
     msngr_send_message_hash = msg.hash();
+    msngr_send_pending_packed = msg.packed();
     msngr_send_state = MSNGR_SEND_PENDING;
     msngr_send_started_ms = millis();
     msngr_send_stamp_seen = false;
@@ -1808,7 +1867,7 @@
   // destination hash instead of the hardcoded Phase 1 test one. Persists
   // the sent message to urns_message_store on success so it shows up in
   // that peer's thread alongside anything they send back.
-  uint8_t messenger_send_lxmf(const RNS::Bytes &dest_hash, const char *content, uint8_t forced_method = 0) {
+  uint8_t messenger_send_lxmf(const RNS::Bytes &dest_hash, const char *content, uint8_t forced_method = 0, bool keep_audio = false) {
     // Let the confirm-click that triggered this Send finish playing
     // before the TX below can freeze it mid-note - see
     // buzzer_wait_for_melody()'s own comment (Utilities.h).
@@ -1823,6 +1882,9 @@
     // having to keep its own copy around. forced_method rides along the
     // same way - see msngr_send_pending_forced_method's own comment.
     msngr_send_pending_dest_hash = dest_hash;
+    // Text sends drop any leftover voice payload; messenger_send_voice() and
+    // Menu.h's Retry rows (re-sending whatever is pending) pass keep_audio.
+    if (!keep_audio) msngr_send_pending_audio = RNS::Bytes();
     strncpy(msngr_send_pending_content, content, MSNGR_SEND_CONTENT_MAX_LEN);
     msngr_send_pending_content[MSNGR_SEND_CONTENT_MAX_LEN] = 0;
     msngr_send_pending_forced_method = forced_method;
@@ -1850,6 +1912,17 @@
     messenger_send_lxmf_resolved(dest_hash, dest_identity, content, forced_method);
     return URNS_LXMF_SEND_OK;
   }
+
+  #if HAS_AUDIO == true
+    // Voice message: empty text plus FIELD_AUDIO [mode, codec2 frames]. Always
+    // larger than one packet, so LXMRouter upgrades it to a DIRECT Resource
+    // (or PROPAGATED, per the peer's delivery-mode setting) by itself.
+    uint8_t messenger_send_voice(const RNS::Bytes &dest_hash, uint8_t mode, const uint8_t *data, size_t len, const char *text = "") {
+      msngr_send_pending_audio = LXMF::build_audio_field(mode, data, len);
+      msngr_send_pending_audio_mode = mode;
+      return messenger_send_lxmf(dest_hash, text ? text : "", 0, true);
+    }
+  #endif
 
   // "Ping" - not an LXMF message at all, an RNS::Link established directly
   // to the peer's lxmf.delivery destination, torn down again once its RTT
@@ -2198,6 +2271,13 @@
     uint8_t retry_delay_raw = EEPROM.read(ADDR_CONF_MSNGR_RETRY_DELAY);
     if (retry_delay_raw >= 1 && retry_delay_raw <= 60) msngr_retry_delay_s = retry_delay_raw;
     if (urns_lxmf_router) urns_lxmf_router->set_outbound_retry_delay((double)msngr_retry_delay_s);
+
+    #if HAS_AUDIO == true
+      // ADDR_CONF_MSNGR_PLAYBACK_VOLUME (ROM.h) - erased/out-of-range keeps
+      // the compiled default.
+      uint8_t pbvol_raw = EEPROM.read(ADDR_CONF_MSNGR_PLAYBACK_VOLUME);
+      if (pbvol_raw >= 10 && pbvol_raw <= 100 && pbvol_raw % 10 == 0) msngr_playback_volume_pct = pbvol_raw;
+    #endif
 
     // ADDR_CONF_MSNGR_ANNOUNCE_AT_START (ROM.h) - only ENABLE_BYTE/
     // DISABLE_BYTE are valid, so anything else (including erased 0xFF)

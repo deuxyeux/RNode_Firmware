@@ -302,6 +302,9 @@
   #define MENU_STATE_MSNGR_DELETE_CONFIRM 39 // DELETE/CANCEL list before a single message is actually deleted - same pattern as MENU_STATE_FWUPD_CONFIRM
   #define MENU_STATE_MSNGR_CLEAR_CONFIRM  40 // CLEAR/CANCEL list before a whole conversation is actually cleared - same pattern as MENU_STATE_FWUPD_CONFIRM
   #define MENU_STATE_MSNGR_TEXT_ENTRY     41 // on-screen keyboard for composing a free-text message, opened from MSNGR_PEER_FIXED_ACTION_SEND_CUSTOM
+  #if HAS_AUDIO == true
+    #define MENU_STATE_MSNGR_VOICE 74 // record/preview/send a Codec2 voice message to the active peer, opened from MSNGR_PEER_FIXED_ACTION_VOICE
+  #endif
   #define MENU_STATE_MSNGR_DISCARD_CONFIRM 42 // DISCARD/CANCEL list before leaving MENU_STATE_MSNGR_TEXT_ENTRY with unsent text - same pattern as MENU_STATE_FWUPD_CONFIRM
   #define MENU_STATE_MSNGR_PING_RESULT 43 // live status + BACK, opened from MSNGR_PEER_FIXED_ACTION_PING (Messenger.h's messenger_ping_start()), auto-dismisses on Success (msngr_ping_result_process(), polled from loop(), reuses MSNGR_SEND_RESULT_POPUP_MS) - Timeout/No Identity/Failed still need manual BACK, same as MSNGR_SEND_RESULT's own error states
   #define MENU_STATE_URNS_PATH_HASH_VIEW 44 // full path hash, two plain lines, no captions - opened from MENU_STATE_URNS_PATH_DETAIL's Hash row, dismissed by any input
@@ -1072,10 +1075,16 @@
     #define MSNGR_SETTINGS_ITEM_SYNC_INTERVAL     5 // stepped preset incl. Off - msngr_sync_interval_presets_s[] (Messenger.h)
     #define MSNGR_SETTINGS_ITEM_SYNC_LIMIT        6 // stepped 0-254, 0=unlimited (Messenger.h)
     #define MSNGR_SETTINGS_ITEM_STAMP_COST        7 // stepped 0-255, 0=disabled (Messenger.h)
-    #define MSNGR_SETTINGS_ITEM_DISPLAY_NAME      8 // opens MENU_STATE_MSNGR_TEXT_ENTRY (reused from the message composer), not MSNGR_SETTINGS_EDIT
-    #define MSNGR_SETTINGS_ITEM_PRESETS           9 // opens MENU_STATE_MSNGR_PRESETS
-    #define MSNGR_SETTINGS_ITEM_BACK              10
-    #define MSNGR_SETTINGS_ITEM_COUNT             11
+    #if HAS_AUDIO == true
+      #define MSNGR_SETTINGS_ITEM_PLAYBACK_VOLUME 8 // stepped 10-100% in 10s, voice-message playback level (Messenger.h)
+      #define MSNGR_SETTINGS_AUDIO_SHIFT          1
+    #else
+      #define MSNGR_SETTINGS_AUDIO_SHIFT          0
+    #endif
+    #define MSNGR_SETTINGS_ITEM_DISPLAY_NAME      (8 + MSNGR_SETTINGS_AUDIO_SHIFT) // opens MENU_STATE_MSNGR_TEXT_ENTRY (reused from the message composer), not MSNGR_SETTINGS_EDIT
+    #define MSNGR_SETTINGS_ITEM_PRESETS           (9 + MSNGR_SETTINGS_AUDIO_SHIFT) // opens MENU_STATE_MSNGR_PRESETS
+    #define MSNGR_SETTINGS_ITEM_BACK              (10 + MSNGR_SETTINGS_AUDIO_SHIFT)
+    #define MSNGR_SETTINGS_ITEM_COUNT             (11 + MSNGR_SETTINGS_AUDIO_SHIFT)
 
     // "ANNOUNCED" has nothing to acknowledge (unlike "NOT READY", which
     // stays up until dismissed - same success/error asymmetry as NTP sync's
@@ -1129,19 +1138,25 @@
     // msngr_peer_row_count() and the draw/confirm handling for exactly
     // where the two pieces join.
     #define MSNGR_PEER_FIXED_ACTION_SEND_CUSTOM 0 // opens MENU_STATE_MSNGR_TEXT_ENTRY
-    #define MSNGR_PEER_FIXED_ACTION_PING        1 // opens MENU_STATE_MSNGR_PING_RESULT
+    #if HAS_AUDIO == true
+      #define MSNGR_PEER_FIXED_ACTION_VOICE     1 // opens MENU_STATE_MSNGR_VOICE
+      #define MSNGR_PEER_AUDIO_SHIFT            1
+    #else
+      #define MSNGR_PEER_AUDIO_SHIFT            0
+    #endif
+    #define MSNGR_PEER_FIXED_ACTION_PING        (1 + MSNGR_PEER_AUDIO_SHIFT) // opens MENU_STATE_MSNGR_PING_RESULT
     // Toggles the peer's outbound send method - label switches Send Direct
     // (OPPORTUNISTIC, silently upgraded to DIRECT for oversized content)/
     // Send Propagated (skips straight to the active propagation node,
     // no direct attempt at all) - messenger_toggle_delivery_mode()
     // (Messenger.h). Persisted per-bookmark; session-only for a peer
     // that isn't bookmarked - see that function's own comment.
-    #define MSNGR_PEER_FIXED_ACTION_DELIVERY_MODE 2
-    #define MSNGR_PEER_FIXED_ACTION_BOOKMARK    3 // label switches Add/Remove Bookmark
+    #define MSNGR_PEER_FIXED_ACTION_DELIVERY_MODE (2 + MSNGR_PEER_AUDIO_SHIFT)
+    #define MSNGR_PEER_FIXED_ACTION_BOOKMARK    (3 + MSNGR_PEER_AUDIO_SHIFT) // label switches Add/Remove Bookmark
     // Opens MENU_STATE_URNS_PATH_HASH_VIEW (reused as-is) against
     // msngr_active_peer_hash - same full two-line hex view MSNGR_PEER_PROP_
     // ACTION_SHOW_HASH already uses for a Propagation-type bookmark.
-    #define MSNGR_PEER_FIXED_ACTION_SHOW_HASH   4
+    #define MSNGR_PEER_FIXED_ACTION_SHOW_HASH   (4 + MSNGR_PEER_AUDIO_SHIFT)
     #define MSNGR_PEER_FIXED_ACTION_CLEAR       (MSNGR_PEER_FIXED_ACTION_SHOW_HASH + 1) // opens MENU_STATE_MSNGR_CLEAR_CONFIRM
     #if HAS_BLE_HID_HOST == true
       // Opens MENU_STATE_MSNGR_CHAT - leaner BLE-keyboard-only compose view
@@ -1264,6 +1279,7 @@
     #define MSNGR_TEXT_ENTRY_PURPOSE_IDENTITY_RESTORE 5 // URNS_KEYS_ITEM_RESTORE - typing the raw 64-byte identity private key as its VAULT_IDENTITY_KEY_BASE32_LEN-char Base32 encoding (IdentityTransfer.h), using its own dedicated MSNGR_KB_LAYOUT_BASE32 grid (not the hex one - identity keys aren't hex)
     #define MSNGR_TEXT_ENTRY_PURPOSE_WIFI_SSID       6 // WIFI_ITEM_SSID (MENU_STATE_WIFI_LIST) - reuses this same on-screen keyboard for WiFi SSID entry instead of the old character-wheel dialog, available whenever HAS_WIFI is true regardless of HAS_LXMF (see the widened-guard comments throughout this file's keyboard mechanics)
     #define MSNGR_TEXT_ENTRY_PURPOSE_WIFI_PSK        7 // WIFI_ITEM_PSK (MENU_STATE_WIFI_LIST) - same as WIFI_SSID above, for the passphrase field
+    #define MSNGR_TEXT_ENTRY_PURPOSE_VOICE_TEXT      8 // MENU_STATE_MSNGR_VOICE's Add/Edit Text row (HAS_AUDIO) - the text that rides along with a voice message
     uint8_t msngr_text_entry_purpose = MSNGR_TEXT_ENTRY_PURPOSE_MESSAGE;
 
     // MENU_STATE_MSNGR_TEXT_ENTRY - linear (row-major) cursor into
@@ -2470,6 +2486,55 @@
     uint8_t msngr_bookmarks_cursor = 0;
     uint8_t msngr_announces_cursor = 0;
     uint8_t msngr_peer_cursor = 0;
+    #if HAS_AUDIO == true
+      // MENU_STATE_MSNGR_VOICE: the row set depends on recorder/player state,
+      // so rows are built as a list of kinds (msngr_voice_build_rows()) and
+      // the confirm/draw handlers both go through it - they can't disagree.
+      enum MsngrVoiceRow : uint8_t { MV_RECORD, MV_STOP, MV_ENCODING, MV_SEND, MV_PLAY, MV_PLAY_STOP, MV_RERECORD, MV_ADD_TEXT, MV_BACK };
+      // Text that rides along with the voice message (real UTF-8, same as
+      // the on-air content); staged by MSNGR_TEXT_ENTRY_PURPOSE_VOICE_TEXT.
+      char msngr_voice_text[MSNGR_TEXT_ENTRY_MAX_LEN * 2 + 1] = "";
+      #define MSNGR_VOICE_MAX_ROWS 6
+      uint8_t msngr_voice_cursor = 0;
+      uint8_t msngr_voice_sig = 0xFF;
+      uint8_t msngr_voice_build_rows(MsngrVoiceRow *rows) {
+        uint8_t n = 0;
+        AudioRecState rs = audio_record_state();
+        if (rs == REC_RECORDING) {
+          rows[n++] = MV_STOP;
+        } else if (rs == REC_ENCODING) {
+          // Status shows in the footer hint bar ("Encoding..."), not as a row.
+          rows[n++] = MV_BACK;
+        } else if (rs == REC_READY) {
+          rows[n++] = MV_SEND;
+          rows[n++] = (audio_state() == AUDIO_IDLE) ? MV_PLAY : MV_PLAY_STOP;
+          rows[n++] = MV_RERECORD;
+          rows[n++] = MV_ADD_TEXT;
+          rows[n++] = MV_BACK;
+        } else {
+          rows[n++] = MV_RECORD;
+          rows[n++] = MV_ADD_TEXT;
+          rows[n++] = MV_BACK;
+        }
+        return n;
+      }
+      // Row sets change under the cursor (recording ends on its own at the
+      // time limit, encoding finishes, preview ends) - restart at the top
+      // whenever the shape changes so the cursor can't land on a stale row.
+      uint8_t msngr_voice_row_count() {
+        MsngrVoiceRow rows[MSNGR_VOICE_MAX_ROWS];
+        uint8_t n = msngr_voice_build_rows(rows);
+        uint8_t sig = (uint8_t)(audio_record_state() * 4 + (audio_state() == AUDIO_IDLE ? 0 : 1));
+        if (sig != msngr_voice_sig) { msngr_voice_sig = sig; msngr_voice_cursor = 0; }
+        if (msngr_voice_cursor >= n) msngr_voice_cursor = n - 1;
+        return n;
+      }
+      void msngr_voice_leave() {
+        audio_play_stop();
+        audio_record_discard();
+        menu_state = MENU_STATE_MSNGR_PEER;
+      }
+    #endif
     uint8_t msngr_msg_detail_cursor = 0;
     uint8_t msngr_settings_cursor = 0;
     uint8_t msngr_presets_cursor = 0;
@@ -2486,6 +2551,9 @@
     // msngr_* globals (Messenger.h) in menu_stage_from_live().
     uint8_t staged_msngr_max_retries = MSNGR_MAX_RETRIES_DEFAULT;
     uint8_t staged_msngr_retry_delay_s = MSNGR_RETRY_DELAY_DEFAULT;
+    #if HAS_AUDIO == true
+      uint8_t staged_msngr_playback_volume_pct = MSNGR_PLAYBACK_VOLUME_DEFAULT;
+    #endif
     bool staged_msngr_announce_at_start = true;
     uint8_t staged_msngr_announce_interval_idx = 0;
     bool staged_msngr_propagate_on_fail = false;
@@ -3710,6 +3778,9 @@
     uint8_t msngr_text_entry_return_state() {
       if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME) return MENU_STATE_MSNGR_SETTINGS;
       if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_PRESET) return MENU_STATE_MSNGR_PRESETS;
+      #if HAS_AUDIO == true
+        if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_VOICE_TEXT) return MENU_STATE_MSNGR_VOICE;
+      #endif
       if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH) return MENU_STATE_MSNGR_BOOKMARKS;
       if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_IDENTITY_RESTORE) return MENU_STATE_URNS_KEYS;
       if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_WIFI_SSID ||
@@ -3895,6 +3966,15 @@
         messenger_bookmark_rename(msngr_active_peer_hash, msngr_text_entry_buf);
         msngr_text_entry_buf[0] = 0;
         menu_state = MENU_STATE_MSNGR_PEER;
+      #if HAS_AUDIO == true
+      } else if (msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_VOICE_TEXT) {
+        // Local staging only - nothing goes out until the voice screen's
+        // Send. Expanded to real UTF-8 here (it's the on-air text), and
+        // an empty buffer is allowed: that clears the text again.
+        msngr_kb_expand_utf8(msngr_text_entry_buf, msngr_voice_text, sizeof(msngr_voice_text));
+        msngr_text_entry_buf[0] = 0;
+        menu_state = MENU_STATE_MSNGR_VOICE;
+      #endif
       } else if (text_len > 0 && msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_PRESET) {
         // No UTF-8 expansion needed here unlike the display-name/message
         // branches - this text never leaves the device, same reasoning
@@ -4444,6 +4524,18 @@
         staged_msngr_retry_delay_s = (uint8_t)v;
       }
 
+      #if HAS_AUDIO == true
+        // Messenger Settings > Playback Volume (MENU_STATE_MSNGR_SETTINGS_EDIT)
+        // - 10-100% in 10% steps, clamped (wrapping 100->10 would turn
+        // "a bit louder" into near-silence).
+        void step_msngr_playback_volume(int8_t dir, bool wrap = false) {
+          int v = (int)staged_msngr_playback_volume_pct + (dir > 0 ? 10 : -10);
+          if (v < 10) v = 10;
+          if (v > 100) v = 100;
+          staged_msngr_playback_volume_pct = (uint8_t)v;
+        }
+      #endif
+
       // Messenger Settings > Auto Announce (MENU_STATE_MSNGR_SETTINGS_EDIT) -
       // steps through msngr_announce_interval_presets_s's index range
       // (Messenger.h: Off/15m/30m/1h/2h/3h/6h/12h). Same "always clamped,
@@ -4858,6 +4950,9 @@
     #if HAS_LXMF == true
       staged_msngr_max_retries = msngr_max_retries;
       staged_msngr_retry_delay_s = msngr_retry_delay_s;
+      #if HAS_AUDIO == true
+        staged_msngr_playback_volume_pct = msngr_playback_volume_pct;
+      #endif
       staged_msngr_announce_at_start = msngr_announce_at_start;
       staged_msngr_announce_interval_idx = msngr_announce_interval_idx;
       staged_msngr_propagate_on_fail = msngr_propagate_on_fail;
@@ -5385,6 +5480,17 @@
     // existed to show; this covers the still-PENDING wait beforehand).
     // MSNGR_PING_RESULT included for the same reason, even though a ping
     // rarely runs long enough to hit this in practice.
+    #if HAS_AUDIO == true
+      // The voice screen itself, plus any time a clip is being recorded,
+      // encoded, decoded or played (e.g. Play from a message's detail
+      // screen) - same "watching, not touching" reasoning as below.
+      if (menu_state == MENU_STATE_MSNGR_VOICE ||
+          audio_state() != AUDIO_IDLE ||
+          audio_record_state() == REC_RECORDING || audio_record_state() == REC_ENCODING) {
+        display_unblank();
+        return;
+      }
+    #endif
     if (menu_state == MENU_STATE_MSNGR_SEND_RESULT || menu_state == MENU_STATE_MSNGR_PING_RESULT) {
       display_unblank();
       return;
@@ -5661,6 +5767,22 @@
       } else if (menu_state == MENU_STATE_MSNGR_PEER) {
         buzzer_encoder_tick_melody();
         msngr_peer_cursor = menu_clamp_cursor(msngr_peer_cursor, dir, msngr_peer_row_count(), wrap);
+        #if HAS_AUDIO == true
+          // The Voice message row is hidden when no codec was found at boot
+          // (the draw code compacts it out) - step over it.
+          if (!audio_available() && !messenger_bookmark_is_prop_node(msngr_active_peer_hash) &&
+              msngr_peer_cursor == msngr_peer_msg_row_count() + msngr_preset_count + MSNGR_PEER_FIXED_ACTION_VOICE) {
+            msngr_peer_cursor = menu_clamp_cursor(msngr_peer_cursor, dir, msngr_peer_row_count(), wrap);
+          }
+        #endif
+      #if HAS_AUDIO == true
+      } else if (menu_state == MENU_STATE_MSNGR_VOICE) {
+        // Tick beep like every other list - except during a live recording,
+        // where it would bleed into the clip (that state has a single row,
+        // so there's nothing to scroll anyway).
+        if (audio_record_state() != REC_RECORDING) buzzer_encoder_tick_melody();
+        msngr_voice_cursor = menu_clamp_cursor(msngr_voice_cursor, dir, msngr_voice_row_count(), wrap);
+      #endif
       } else if (menu_state == MENU_STATE_MSNGR_MSG_DETAIL) {
         buzzer_encoder_tick_melody();
         msngr_msg_detail_cursor = menu_clamp_cursor(msngr_msg_detail_cursor, dir, msngr_msg_detail_row_count(), wrap);
@@ -5682,6 +5804,12 @@
       } else if (menu_state == MENU_STATE_MSNGR_SETTINGS) {
         buzzer_encoder_tick_melody();
         msngr_settings_cursor = menu_clamp_cursor(msngr_settings_cursor, dir, MSNGR_SETTINGS_ITEM_COUNT, wrap);
+        #if HAS_AUDIO == true
+          // Playback Volume is hidden when no codec was found at boot.
+          if (!audio_available() && msngr_settings_cursor == MSNGR_SETTINGS_ITEM_PLAYBACK_VOLUME) {
+            msngr_settings_cursor = menu_clamp_cursor(msngr_settings_cursor, dir, MSNGR_SETTINGS_ITEM_COUNT, wrap);
+          }
+        #endif
       } else if (menu_state == MENU_STATE_MSNGR_SETTINGS_EDIT) {
         buzzer_encoder_tick_melody();
         // Cursor-dispatched, same shape as URNS_RADIO_EDIT/URNS_EDIT below -
@@ -5698,6 +5826,9 @@
         else if (msngr_settings_cursor == MSNGR_SETTINGS_ITEM_SYNC_INTERVAL) step_msngr_sync_interval(dir, wrap);
         else if (msngr_settings_cursor == MSNGR_SETTINGS_ITEM_SYNC_LIMIT) step_msngr_sync_limit(dir, wrap);
         else if (msngr_settings_cursor == MSNGR_SETTINGS_ITEM_STAMP_COST) step_msngr_stamp_cost(dir, wrap);
+        #if HAS_AUDIO == true
+        else if (msngr_settings_cursor == MSNGR_SETTINGS_ITEM_PLAYBACK_VOLUME) step_msngr_playback_volume(dir, wrap);
+        #endif
       } else if (menu_state == MENU_STATE_MSNGR_PRESETS) {
         buzzer_encoder_tick_melody();
         msngr_presets_cursor = menu_clamp_cursor(msngr_presets_cursor, dir, msngr_presets_row_count(), wrap);
@@ -7067,6 +7198,9 @@
             msngr_settings_cursor == MSNGR_SETTINGS_ITEM_PROP_ON_FAIL ||
             msngr_settings_cursor == MSNGR_SETTINGS_ITEM_SYNC_INTERVAL ||
             msngr_settings_cursor == MSNGR_SETTINGS_ITEM_SYNC_LIMIT ||
+            #if HAS_AUDIO == true
+            msngr_settings_cursor == MSNGR_SETTINGS_ITEM_PLAYBACK_VOLUME ||
+            #endif
             msngr_settings_cursor == MSNGR_SETTINGS_ITEM_STAMP_COST) {
           menu_state = MENU_STATE_MSNGR_SETTINGS_EDIT;
         } else if (msngr_settings_cursor == MSNGR_SETTINGS_ITEM_DISPLAY_NAME) {
@@ -7096,6 +7230,11 @@
           if (staged_msngr_retry_delay_s != msngr_retry_delay_s) {
             msngr_retry_delay_conf_save(staged_msngr_retry_delay_s);
           }
+          #if HAS_AUDIO == true
+          if (staged_msngr_playback_volume_pct != msngr_playback_volume_pct) {
+            msngr_playback_volume_conf_save(staged_msngr_playback_volume_pct);
+          }
+          #endif
           if (staged_msngr_announce_at_start != msngr_announce_at_start) {
             msngr_announce_at_start_conf_save(staged_msngr_announce_at_start);
           }
@@ -7302,6 +7441,14 @@
             uint8_t fixed_action = action - msngr_preset_count;
             if (fixed_action == MSNGR_PEER_FIXED_ACTION_BACK) {
               menu_state = msngr_peer_return_state;
+            #if HAS_AUDIO == true
+            } else if (fixed_action == MSNGR_PEER_FIXED_ACTION_VOICE) {
+              audio_record_discard();
+              msngr_voice_text[0] = 0;
+              msngr_voice_sig = 0xFF;
+              msngr_voice_cursor = 0;
+              menu_state = MENU_STATE_MSNGR_VOICE;
+            #endif
             } else if (fixed_action == MSNGR_PEER_FIXED_ACTION_BOOKMARK) {
               if (messenger_bookmark_find(msngr_active_peer_hash) >= 0) {
                 messenger_bookmark_remove(msngr_active_peer_hash);
@@ -7444,6 +7591,69 @@
         } else { // CANCEL
           menu_state = MENU_STATE_MSNGR_PEER;
         }
+      #if HAS_AUDIO == true
+      } else if (menu_state == MENU_STATE_MSNGR_VOICE) {
+        MsngrVoiceRow rows[MSNGR_VOICE_MAX_ROWS];
+        uint8_t n = msngr_voice_row_count();
+        (void)n;
+        msngr_voice_build_rows(rows);
+        switch (rows[msngr_voice_cursor]) {
+          case MV_RECORD:
+          case MV_RERECORD:
+            // Let this click's confirm melody finish first - a tone in
+            // flight would be recorded.
+            #if HAS_BUZZER == true
+              buzzer_wait_for_melody();
+            #endif
+            audio_play_stop();
+            if (!audio_record_start()) { menu_open_popup("Mic busy", MENU_STATE_MSNGR_VOICE); menu_popup_auto_dismiss_at = millis() + ACTION_POPUP_MS; }
+            break;
+          case MV_STOP:
+            audio_record_stop();
+            break;
+          case MV_PLAY:
+            audio_record_preview(msngr_playback_volume_pct);
+            break;
+          case MV_PLAY_STOP:
+            audio_play_stop();
+            break;
+          case MV_SEND: {
+            uint8_t *clip = nullptr;
+            size_t clip_len = 0;
+            uint8_t clip_mode = 0;
+            audio_play_stop();
+            if (audio_record_take(&clip, &clip_len, &clip_mode)) {
+              msngr_last_send_result = messenger_send_voice(msngr_active_peer_hash, clip_mode, clip, clip_len, msngr_voice_text);
+              free(clip);
+              if (msngr_last_send_result == URNS_LXMF_SEND_OK || msngr_last_send_result == URNS_LXMF_SEND_RESOLVING) {
+                msngr_send_result_cursor = 1;
+                menu_state = MENU_STATE_MSNGR_SEND_RESULT;
+              } else {
+                menu_open_popup(urns_lxmf_send_result_text(msngr_last_send_result), MENU_STATE_MSNGR_PEER);
+                menu_popup_auto_dismiss_at = millis() + ACTION_POPUP_MS;
+              }
+            }
+            break;
+          }
+          case MV_ADD_TEXT:
+            // Opens the on-screen keyboard, pre-filled with the current text
+            // (converted back from UTF-8 to the keyboard's glyph codes), so
+            // the same row both adds and edits.
+            audio_play_stop();
+            msngr_text_entry_purpose = MSNGR_TEXT_ENTRY_PURPOSE_VOICE_TEXT;
+            msngr_kb_cursor = 0;
+            msngr_kb_shift_on = false;
+            msngr_kb_lang_ru = false;
+            msngr_kb_decode_utf8(msngr_voice_text, msngr_text_entry_buf, sizeof(msngr_text_entry_buf));
+            menu_state = MENU_STATE_MSNGR_TEXT_ENTRY;
+            break;
+          case MV_BACK:
+            msngr_voice_leave();
+            break;
+          case MV_ENCODING:
+            break;
+        }
+      #endif
       } else if (menu_state == MENU_STATE_MSNGR_PING_RESULT) {
         // Row 0 (status) is read-only - only BACK does anything, and it
         // doubles as Cancel while a ping's still in flight.
@@ -7470,14 +7680,14 @@
           // (msngr_send_pending_dest_hash/_content, Messenger.h, populated
           // unconditionally by every messenger_send_lxmf() call) rather
           // than making the user back out and retype the message.
-          messenger_send_lxmf(msngr_send_pending_dest_hash, msngr_send_pending_content);
+          messenger_send_lxmf(msngr_send_pending_dest_hash, msngr_send_pending_content, 0, true);
         } else if (send_result_actionable && msngr_send_result_cursor == 2) {
           // Retry via Prop - same re-fire, but forces PROPAGATED for this
           // one send regardless of the peer's Send Direct/Send Propagated
           // setting (messenger_send_lxmf()'s forced_method, Messenger.h) -
           // useful when a direct/opportunistic attempt just timed out and
           // a propagation node is known to be reachable instead.
-          messenger_send_lxmf(msngr_send_pending_dest_hash, msngr_send_pending_content, LXMF::Type::Message::PROPAGATED);
+          messenger_send_lxmf(msngr_send_pending_dest_hash, msngr_send_pending_content, LXMF::Type::Message::PROPAGATED, true);
         } else if (msngr_send_result_cursor == back_row) {
           // BACK. If the packet's already gone out (PENDING/DELIVERED/
           // TIMEOUT) there's nothing to tear down, same as Ping - this just
@@ -7851,6 +8061,9 @@
         else if (menu_state == MENU_STATE_MSNGR_CLEAR_CONFIRM)    msngr_clear_confirm_cursor = 1;
         else if (menu_state == MENU_STATE_MSNGR_DISCARD_CONFIRM)  msngr_discard_confirm_cursor = 1;
         else if (menu_state == MENU_STATE_MSNGR_PING_RESULT)      msngr_ping_result_cursor = 1;
+        #if HAS_AUDIO == true
+        else if (menu_state == MENU_STATE_MSNGR_VOICE)            msngr_voice_cursor = msngr_voice_row_count() - 1;
+        #endif
         else if (menu_state == MENU_STATE_MSNGR_SEND_RESULT)      msngr_send_result_cursor = msngr_send_result_row_count() - 1;
         else if (menu_state == MENU_STATE_MSNGR_SETTINGS)         msngr_settings_cursor = MSNGR_SETTINGS_ITEM_COUNT - 1;
         else if (menu_state == MENU_STATE_MSNGR_PRESETS)          msngr_presets_cursor = msngr_presets_row_count() - 1;
@@ -9190,7 +9403,7 @@
       // column's width basis, "SAVE"-narrow vs "SPACE"-wide) - only in
       // save_not_send, just below, which picks the Send/Save key's label.
       const bool save_label_mode = hex_mode || base32_mode;
-      const bool save_not_send = save_label_mode || wifi_mode;
+      const bool save_not_send = save_label_mode || wifi_mode || msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_VOICE_TEXT;
       MENU_GFX.setFont(MENU_FONT);
       MENU_GFX.setTextSize(1);
       MENU_GFX.setTextColor(SSD1306_WHITE);
@@ -9203,6 +9416,7 @@
       MENU_GFX.setCursor(6, header_y);
       MENU_GFX.print(msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_DISPLAY_NAME ? "Name" :
                      msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_PRESET ? "Preset" :
+                     msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_VOICE_TEXT ? "Voice Text" :
                      msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_HASH ? "Add Hash" :
                      msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_BOOKMARK_RENAME ? "Rename" :
                      msngr_text_entry_purpose == MSNGR_TEXT_ENTRY_PURPOSE_IDENTITY_RESTORE ? "Restore Key" :
@@ -11434,19 +11648,23 @@
             snprintf(windowed, sizeof(windowed), "%s", full);
           }
 
+          // A voice message swaps the direction arrow for the speaker icon
+          // (HAS_AUDIO or not - it's just a marker): direction still reads
+          // from the alignment, incoming left / outgoing right.
+          const bool voice = msngr_peer_cache[i].voice;
           if (msngr_peer_cache[i].incoming) {
             snprintf(label_bufs[i], sizeof(label_bufs[i]), "%s", windowed);
             labels[i] = label_bufs[i];
             valbufs[i][0] = 0;
-            icons[i] = bm_menu_icon_msngr_msg_incoming;
-            icon_widths[i] = MENU_ICON_W_MSNGR_MSG_INCOMING;
+            icons[i] = voice ? bm_menu_icon_msngr_speaker : bm_menu_icon_msngr_msg_incoming;
+            icon_widths[i] = voice ? MENU_ICON_W_MSNGR_SPEAKER : MENU_ICON_W_MSNGR_MSG_INCOMING;
             icon_dx[i] = -2;
             text_dx[i] = -4;
           } else {
             labels[i] = "";
             snprintf(valbufs[i], 24, "%s", windowed);
-            right_icons[i] = bm_menu_icon_msngr_msg_outgoing;
-            right_icon_widths[i] = MENU_ICON_W_MSNGR_MSG_OUTGOING;
+            right_icons[i] = voice ? bm_menu_icon_msngr_speaker : bm_menu_icon_msngr_msg_outgoing;
+            right_icon_widths[i] = voice ? MENU_ICON_W_MSNGR_SPEAKER : MENU_ICON_W_MSNGR_MSG_OUTGOING;
             right_dx[i] = 2;
           }
         }
@@ -11462,6 +11680,12 @@
         labels[fixed_base + MSNGR_PEER_FIXED_ACTION_SEND_CUSTOM] = "Compose message"; valbufs[fixed_base + MSNGR_PEER_FIXED_ACTION_SEND_CUSTOM][0] = 0;
         icons[fixed_base + MSNGR_PEER_FIXED_ACTION_SEND_CUSTOM] = bm_menu_icon_msngr_compose;
         icon_widths[fixed_base + MSNGR_PEER_FIXED_ACTION_SEND_CUSTOM] = MENU_ICON_W_MSNGR_COMPOSE;
+        #if HAS_AUDIO == true
+          labels[fixed_base + MSNGR_PEER_FIXED_ACTION_VOICE] = "Voice message"; valbufs[fixed_base + MSNGR_PEER_FIXED_ACTION_VOICE][0] = 0;
+          icons[fixed_base + MSNGR_PEER_FIXED_ACTION_VOICE] = bm_menu_icon_msngr_mic;
+          icon_widths[fixed_base + MSNGR_PEER_FIXED_ACTION_VOICE] = MENU_ICON_W_MSNGR_MIC;
+          icon_dx[fixed_base + MSNGR_PEER_FIXED_ACTION_VOICE] = 1;
+        #endif
         labels[fixed_base + MSNGR_PEER_FIXED_ACTION_PING] = "Ping"; valbufs[fixed_base + MSNGR_PEER_FIXED_ACTION_PING][0] = 0;
         icons[fixed_base + MSNGR_PEER_FIXED_ACTION_PING] = bm_menu_icon_msngr_ping;
         icon_widths[fixed_base + MSNGR_PEER_FIXED_ACTION_PING] = MENU_ICON_W_MSNGR_PING;
@@ -11508,7 +11732,30 @@
         // message/Ping/Send Direct-Propagated/Bookmark/Clear Conversation
         // action rows above opted into icons[]/right_icons[], the
         // remaining action rows stay at the plain x=8 they always used.
-        draw_menu_list_disp(title, labels, valbufs, row_count, msngr_peer_cursor, icons, icon_widths, icon_dx, false, text_dx, right_icons, right_icon_widths, right_dx, msg_rows);
+        uint8_t draw_count = row_count;
+        uint8_t draw_cursor = msngr_peer_cursor;
+        #if HAS_AUDIO == true
+          if (!audio_available()) {
+            // No codec found at boot: drop the Voice message row from what's
+            // shown (the logical cursor/row indices elsewhere stay as they
+            // are - navigation steps over the hidden slot).
+            const uint8_t v = fixed_base + MSNGR_PEER_FIXED_ACTION_VOICE;
+            for (uint8_t k = v; k + 1 < row_count; k++) {
+              labels[k] = labels[k + 1];
+              memcpy(valbufs[k], valbufs[k + 1], sizeof(valbufs[k]));
+              icons[k] = icons[k + 1];
+              icon_widths[k] = icon_widths[k + 1];
+              icon_dx[k] = icon_dx[k + 1];
+              text_dx[k] = text_dx[k + 1];
+              right_icons[k] = right_icons[k + 1];
+              right_icon_widths[k] = right_icon_widths[k + 1];
+              right_dx[k] = right_dx[k + 1];
+            }
+            draw_count = row_count - 1;
+            if (draw_cursor > v) draw_cursor--;
+          }
+        #endif
+        draw_menu_list_disp(title, labels, valbufs, draw_count, draw_cursor, icons, icon_widths, icon_dx, false, text_dx, right_icons, right_icon_widths, right_dx, msg_rows);
       } else if (menu_state == MENU_STATE_MSNGR_MSG_DETAIL && msngr_msg_view_active) {
         // draw_delete_confirm=false - this screen's own Delete row is a
         // full MENU_STATE_MSNGR_DELETE_CONFIRM screen, reached after
@@ -11529,6 +11776,7 @@
         // Reply/Delete/Full Message (icons[i] set, below) and BACK (its
         // own auto-icon path) are unaffected, left at 0/default.
         int8_t text_dx[MSNGR_MSG_DETAIL_MAX_LINES + 5] = { 0 };
+        int8_t icon_dx[MSNGR_MSG_DETAIL_MAX_LINES + 5] = { 0 };
 
         // msngr_msg_detail_wrapped_lines (populated by msngr_msg_detail_
         // refresh_wrap_cache() when the message row was selected, above) -
@@ -11551,17 +11799,13 @@
         #if HAS_AUDIO == true
         if (voice_rows) {
           AudioState as = audio_state();
-          if (as == AUDIO_IDLE) {
-            labels[lines] = "Play";
-            valbufs[lines][0] = 0;
-          } else if (as == AUDIO_DECODING) {
-            labels[lines] = "Stop";
-            snprintf(valbufs[lines], sizeof(valbufs[lines]), "decoding");
-          } else {
-            labels[lines] = "Stop";
-            snprintf(valbufs[lines], sizeof(valbufs[lines]), "%u/%us",
-                     (unsigned)(audio_play_elapsed_ms() / 1000), (unsigned)((audio_play_total_ms() + 500) / 1000));
-          }
+          labels[lines] = (as == AUDIO_IDLE) ? "Play" : "Stop";
+          valbufs[lines][0] = 0;
+          icons[lines] = (as == AUDIO_IDLE) ? bm_menu_icon_msngr_play : bm_menu_icon_msngr_pause;
+          icon_widths[lines] = (as == AUDIO_IDLE) ? MENU_ICON_W_MSNGR_PLAY : MENU_ICON_W_MSNGR_PAUSE;
+          if (as == AUDIO_IDLE) icon_dx[lines] = 1;
+          // Decoding.../Playing... X/Ys is shown in the footer hint bar
+          // (see the draw call below), not on this row.
         }
         #endif
         const uint8_t t = lines + voice_rows;
@@ -11611,7 +11855,18 @@
         // above). separator_before=lines - same "divide content from
         // commands" dashed rule as MENU_STATE_MSNGR_PEER's own boundary
         // between messages and Compose message/Ping/.../BACK.
-        draw_menu_list_disp(title, labels, valbufs, row_count, msngr_msg_detail_cursor, icons, icon_widths, nullptr, false, text_dx, nullptr, nullptr, nullptr, lines);
+        char detail_footer_buf[32];
+        const char *detail_footer = nullptr;
+        #if HAS_AUDIO == true
+          if (voice_rows && audio_state() == AUDIO_DECODING) {
+            detail_footer = "Decoding...";
+          } else if (voice_rows && audio_state() == AUDIO_PLAYING) {
+            snprintf(detail_footer_buf, sizeof(detail_footer_buf), "Playing... %u/%us",
+                     (unsigned)(audio_play_elapsed_ms() / 1000), (unsigned)((audio_play_total_ms() + 500) / 1000));
+            detail_footer = detail_footer_buf;
+          }
+        #endif
+        draw_menu_list_disp(title, labels, valbufs, row_count, msngr_msg_detail_cursor, icons, icon_widths, icon_dx, false, text_dx, nullptr, nullptr, nullptr, lines, detail_footer);
       } else if (menu_state == MENU_STATE_MSNGR_DELETE_CONFIRM) {
         // Plain 2-item list, same draw_menu_list_disp() as everywhere else -
         // same pattern as F/W Update's UPDATE/CANCEL (MENU_STATE_FWUPD_CONFIRM).
@@ -11782,6 +12037,72 @@
 
           if (msngr_chat_delete_confirm_pending) draw_msngr_chat_delete_confirm_box();
         }
+      #endif
+      #if HAS_AUDIO == true
+      else if (menu_state == MENU_STATE_MSNGR_VOICE) {
+        MsngrVoiceRow rows[MSNGR_VOICE_MAX_ROWS];
+        uint8_t n = msngr_voice_row_count();
+        msngr_voice_build_rows(rows);
+        const char *labels[MSNGR_VOICE_MAX_ROWS];
+        char valbufs[MSNGR_VOICE_MAX_ROWS][24];
+        const uint8_t *icons[MSNGR_VOICE_MAX_ROWS] = { nullptr };
+        uint8_t icon_widths[MSNGR_VOICE_MAX_ROWS] = { 0 };
+        int8_t icon_dx[MSNGR_VOICE_MAX_ROWS] = { 0 };
+        for (uint8_t i = 0; i < n; i++) {
+          valbufs[i][0] = 0;
+          switch (rows[i]) {
+            case MV_RECORD:
+              labels[i] = (audio_record_state() == REC_FAILED) ? "Record (retry)" : "Record";
+              icons[i] = bm_menu_icon_msngr_mic; icon_widths[i] = MENU_ICON_W_MSNGR_MIC;
+              break;
+            case MV_STOP: {
+              labels[i] = "Stop";
+              icons[i] = bm_menu_icon_msngr_pause; icon_widths[i] = MENU_ICON_W_MSNGR_PAUSE;
+              break;
+            }
+            case MV_ENCODING: labels[i] = ""; break;
+            case MV_SEND:
+              labels[i] = "Send";
+              icons[i] = bm_menu_icon_messenger; icon_widths[i] = MENU_ICON_W_MESSENGER;
+              snprintf(valbufs[i], sizeof(valbufs[i]), "%us %uB",
+                       (unsigned)((audio_record_clip_ms() + 500) / 1000), (unsigned)audio_record_clip_bytes());
+              break;
+            case MV_PLAY:
+              labels[i] = "Play";
+              icons[i] = bm_menu_icon_msngr_play; icon_widths[i] = MENU_ICON_W_MSNGR_PLAY;
+              icon_dx[i] = 1;
+              break;
+            case MV_PLAY_STOP:
+              labels[i] = "Stop";
+              icons[i] = bm_menu_icon_msngr_pause; icon_widths[i] = MENU_ICON_W_MSNGR_PAUSE;
+              // Decoding.../Playing... X/Ys is shown in the footer hint bar.
+              break;
+            case MV_RERECORD:
+              labels[i] = "Record again";
+              icons[i] = bm_menu_icon_msngr_mic; icon_widths[i] = MENU_ICON_W_MSNGR_MIC;
+              break;
+            case MV_ADD_TEXT:
+              labels[i] = msngr_voice_text[0] ? "Edit Text" : "Add Text";
+              icons[i] = bm_menu_icon_msngr_compose; icon_widths[i] = MENU_ICON_W_MSNGR_COMPOSE;
+              break;
+            case MV_BACK: labels[i] = "BACK"; break;
+          }
+        }
+        char footer_buf[32];
+        const char *footer = nullptr;
+        if (audio_record_state() == REC_RECORDING) {
+          snprintf(footer_buf, sizeof(footer_buf), "Recording... %u/%us",
+                   (unsigned)(audio_record_elapsed_ms() / 1000), (unsigned)AUDIO_REC_MAX_SECONDS);
+          footer = footer_buf;
+        } else if (audio_record_state() == REC_ENCODING) footer = "Encoding...";
+        else if (audio_state() == AUDIO_DECODING) footer = "Decoding...";
+        else if (audio_state() == AUDIO_PLAYING) {
+          snprintf(footer_buf, sizeof(footer_buf), "Playing... %u/%us",
+                   (unsigned)(audio_play_elapsed_ms() / 1000), (unsigned)((audio_play_total_ms() + 500) / 1000));
+          footer = footer_buf;
+        }
+        draw_menu_list_disp("VOICE MESSAGE", labels, valbufs, n, msngr_voice_cursor, icons, icon_widths, icon_dx, false, nullptr, nullptr, nullptr, nullptr, -1, footer);
+      }
       #endif
       else if (menu_state == MENU_STATE_MSNGR_PING_RESULT) {
         // Reads msngr_ping_state/msngr_ping_rtt fresh on every redraw -
@@ -12044,6 +12365,10 @@
         if (staged_msngr_stamp_cost == 0) sprintf(valbufs[MSNGR_SETTINGS_ITEM_STAMP_COST], "OFF");
         else sprintf(valbufs[MSNGR_SETTINGS_ITEM_STAMP_COST], "%u", (unsigned)staged_msngr_stamp_cost);
 
+        #if HAS_AUDIO == true
+          labels[MSNGR_SETTINGS_ITEM_PLAYBACK_VOLUME] = "Playback Volume";
+          sprintf(valbufs[MSNGR_SETTINGS_ITEM_PLAYBACK_VOLUME], "%u%%", (unsigned)staged_msngr_playback_volume_pct);
+        #endif
         labels[MSNGR_SETTINGS_ITEM_DISPLAY_NAME] = "Name";
         // Not staged (opens the on-screen keyboard directly, not MSNGR_
         // SETTINGS_EDIT - see that item's own OK-button comment), so this
@@ -12068,7 +12393,19 @@
         labels[MSNGR_SETTINGS_ITEM_BACK] = "BACK";
         valbufs[MSNGR_SETTINGS_ITEM_BACK][0] = 0;
 
-        draw_menu_list_disp("MESSENGER SETTINGS", labels, valbufs, MSNGR_SETTINGS_ITEM_COUNT, msngr_settings_cursor);
+        uint8_t settings_draw_count = MSNGR_SETTINGS_ITEM_COUNT;
+        uint8_t settings_draw_cursor = msngr_settings_cursor;
+        #if HAS_AUDIO == true
+          if (!audio_available()) {
+            for (uint8_t k = MSNGR_SETTINGS_ITEM_PLAYBACK_VOLUME; k + 1 < MSNGR_SETTINGS_ITEM_COUNT; k++) {
+              labels[k] = labels[k + 1];
+              memcpy(valbufs[k], valbufs[k + 1], sizeof(valbufs[k]));
+            }
+            settings_draw_count = MSNGR_SETTINGS_ITEM_COUNT - 1;
+            if (settings_draw_cursor > MSNGR_SETTINGS_ITEM_PLAYBACK_VOLUME) settings_draw_cursor--;
+          }
+        #endif
+        draw_menu_list_disp("MESSENGER SETTINGS", labels, valbufs, settings_draw_count, settings_draw_cursor);
       } else if (menu_state == MENU_STATE_MSNGR_SETTINGS_EDIT) {
         char valbuf[24];
         if (msngr_settings_cursor == MSNGR_SETTINGS_ITEM_RETRIES) {
@@ -12093,6 +12430,11 @@
           if (staged_msngr_sync_limit == 0) sprintf(valbuf, "Unlimited");
           else sprintf(valbuf, "%u", (unsigned)staged_msngr_sync_limit);
           draw_menu_edit_disp("SYNC LIMIT", valbuf);
+        #if HAS_AUDIO == true
+        } else if (msngr_settings_cursor == MSNGR_SETTINGS_ITEM_PLAYBACK_VOLUME) {
+          sprintf(valbuf, "%u%%", (unsigned)staged_msngr_playback_volume_pct);
+          draw_menu_edit_disp("PLAYBACK VOLUME", valbuf);
+        #endif
         } else {
           if (staged_msngr_stamp_cost == 0) sprintf(valbuf, "OFF");
           else sprintf(valbuf, "%u", (unsigned)staged_msngr_stamp_cost);
