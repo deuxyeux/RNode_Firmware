@@ -146,6 +146,29 @@ namespace LXMF {
 		inline bool has_valid_stamp() const { return _stamp_valid; }
 
 		/**
+		 * @brief True while a required stamp is still to be generated
+		 *
+		 * Set by LXMRouter::handle_outbound() when async stamp generation is
+		 * enabled; LXMRouter::process_outbound() mines the stamp on the
+		 * LXStamper worker before the message is allowed to send.
+		 */
+		inline bool stamp_pending() const { return _stamp_pending; }
+		inline void set_stamp_pending(bool pending) { _stamp_pending = pending; }
+
+		/**
+		 * @brief Attach a stamp mined elsewhere (async worker) and mark it valid
+		 *
+		 * Invalidates the packed form so the next pack() appends it. The
+		 * message hash does not change (it never covers the stamp).
+		 */
+		inline void apply_generated_stamp(const RNS::Bytes& stamp) {
+			_stamp = stamp;
+			_stamp_valid = true;
+			_stamp_pending = false;
+			_packed_valid = false;
+		}
+
+		/**
 		 * @brief Get the attached stamp
 		 */
 		inline const RNS::Bytes& stamp() const { return _stamp; }
@@ -469,6 +492,7 @@ namespace LXMF {
 		RNS::Bytes _stamp;                    // 32-byte stamp for direct messages
 		RNS::Bytes _propagation_stamp;        // 32-byte stamp for propagation delivery
 		bool _stamp_valid = false;            // Whether stamp has been validated
+		bool _stamp_pending = false;          // Stamp required but not yet generated (async path)
 		uint8_t _stamp_cost = 0;              // Required stamp cost (0 = no stamp needed)
 
 		// Cached propagation data (to ensure stamp matches encrypted content)

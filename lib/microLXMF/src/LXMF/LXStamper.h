@@ -125,6 +125,14 @@ namespace LXMF {
 		static bool is_async_done();
 
 		/**
+		 * @brief Message id the async slot was started for (empty when idle)
+		 *
+		 * Lets a consumer confirm a finished result belongs to its own
+		 * message rather than a stale one left behind by an abandoned send.
+		 */
+		static RNS::Bytes async_message_id();
+
+		/**
 		 * @brief Take the result of the most recent async stamp.
 		 *
 		 * Resets the done state so a new async run can start. Returns

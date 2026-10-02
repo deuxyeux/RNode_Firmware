@@ -11871,7 +11871,7 @@
             } else if (urns_lxmf_router && urns_lxmf_router->pending_outbound_stamp_running_for(msngr_send_message_hash)) {
               icons[0] = bm_menu_icon_msngr_waiting;
               icon_widths[0] = MENU_ICON_W_MSNGR_WAITING;
-              snprintf(status_buf, sizeof(status_buf), "Generating Stamp (%u)", (unsigned)urns_lxmf_router->outbound_propagation_stamp_cost());
+              snprintf(status_buf, sizeof(status_buf), "Generating Stamp (%u)", (unsigned)urns_lxmf_router->pending_outbound_stamp_cost_for(msngr_send_message_hash));
             } else if (msngr_send_router_state == LXMF::Type::Message::SENT) {
               // Same left-prefix icon convention as the OK/FAIL icons
               // below (bm_menu_icon_msngr_ping_ok/_fail) - narrower than

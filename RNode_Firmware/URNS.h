@@ -677,6 +677,10 @@ void urns_init() {
   });
 
   std::string display_name = urns_lxmf_display_name();
+  // Mine required stamps on the LXStamper worker instead of blocking
+  // loop() inside handle_outbound() - keeps the UI/serial/watchdog alive
+  // and lets the Messenger screens show "Generating Stamp".
+  urns_lxmf_router->set_async_stamp_generation(true);
   urns_lxmf_router->set_display_name(display_name);
   DEBUG_LOG("[URNS] step 15b: LXMF display name set to \"%s\"\r\n", display_name.c_str());
   // msngr_max_retries (Messenger.h) can't be referenced here - Utilities.h

@@ -218,6 +218,30 @@ namespace LXMF {
 		/** Return the latest advertised stamp cost, or zero when none is cached. */
 		uint8_t get_outbound_stamp_cost(const RNS::Bytes& destination_hash) const;
 
+		/**
+		 * @brief Stamp cost to use for an outbound send to destination_hash
+		 *
+		 * Same as get_outbound_stamp_cost(), but on a RAM-table miss falls back
+		 * to the announce app_data RNS persists across reboots
+		 * (Identity::recall_app_data) and caches what it decodes. Without this
+		 * a freshly booted node reads every peer's cost as 0 until that peer
+		 * happens to announce again, and silently sends unstamped messages
+		 * that the receiver acks but then drops.
+		 */
+		uint8_t resolve_outbound_stamp_cost(const RNS::Bytes& destination_hash);
+
+		/**
+		 * @brief Mine required outbound stamps on the LXStamper worker
+		 *
+		 * Off by default: handle_outbound() then generates the stamp
+		 * synchronously, so callers (and the conformance tests) see a stamped
+		 * message the moment it returns. On, handle_outbound() only marks the
+		 * message stamp_pending() and process_outbound() mines it in the
+		 * background - the loop stays responsive and a UI can show the
+		 * "generating stamp" phase (pending_outbound_stamp_running_for()).
+		 */
+		void set_async_stamp_generation(bool enabled) { _async_stamp_generation = enabled; }
+
 		/** Process app data received by the lxmf.delivery announce adapter. */
 		void on_delivery_announce(const RNS::Bytes& destination_hash, const RNS::Bytes& app_data);
 
@@ -674,6 +698,26 @@ namespace LXMF {
 		}
 
 		/**
+		 * @brief Stamp cost being mined for the front message, if it is message_hash
+		 *
+		 * Direct/opportunistic sends carry their own per-message cost; this
+		 * falls back to the propagation node's cost for PROPAGATED ones.
+		 */
+		uint8_t pending_outbound_stamp_cost_for(const RNS::Bytes& message_hash) {
+			LXMessage* front = pending_outbound_front();
+			if (front && front->hash() == message_hash && front->stamp_cost() > 0) {
+				return front->stamp_cost();
+			}
+			return _outbound_propagation_stamp_cost;
+		}
+
+		/** @brief True if message_hash is at the front of the queue and still awaiting its stamp. */
+		bool pending_outbound_front_stamp_pending_for(const RNS::Bytes& message_hash) {
+			LXMessage* front = pending_outbound_front();
+			return front && front->hash() == message_hash && front->stamp_pending();
+		}
+
+		/**
 		 * @brief Whether a still-in-flight outbound message is currently
 		 * grinding its PROPAGATED proof-of-work stamp
 		 *
@@ -695,7 +739,10 @@ namespace LXMF {
 		bool pending_outbound_stamp_running_for(const RNS::Bytes& message_hash) {
 			LXMessage* front = pending_outbound_front();
 			if (front && front->hash() == message_hash) {
-				return front->is_propagation_stamp_running();
+				// stamp_pending() covers the gap before the worker spawns and
+				// after it finishes, until process_outbound() consumes the
+				// result (direct/opportunistic async stamping).
+				return front->is_propagation_stamp_running() || front->stamp_pending();
 			}
 			return false;
 		}
@@ -727,7 +774,7 @@ namespace LXMF {
 		 */
 		bool pending_outbound_front_stamp_running() {
 			LXMessage* front = pending_outbound_front();
-			return front && front->is_propagation_stamp_running();
+			return front && (front->is_propagation_stamp_running() || front->stamp_pending());
 		}
 
 		/**
@@ -1134,6 +1181,11 @@ namespace LXMF {
 			}
 		};
 		OutboundStampCostSlot _outbound_stamp_costs[OUTBOUND_STAMP_COSTS_SIZE];
+		bool _async_stamp_generation = false;
+		// How often process_outbound() re-checks a stamp being mined - far
+		// shorter than _outbound_retry_delay so the UI phase and the send
+		// itself both follow the worker closely.
+		static constexpr double STAMP_POLL_INTERVAL = 0.25;
 		uint32_t _outbound_stamp_costs_sequence = 0;
 
 		// Internal state

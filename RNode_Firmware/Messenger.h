@@ -1405,6 +1405,7 @@
   // no other signal back to the UI in between the PENDING and final
   // DELIVERED/FAILED states. 1 means "first attempt, no retry yet".
   uint8_t msngr_send_attempt = 1;
+  bool msngr_send_stamp_seen = false; // this send's stamp was observed being mined - see messenger_send_process()
   // Which method LXMessage::pack() actually resolved this send to
   // (LXMF::Type::Message::OPPORTUNISTIC, ::DIRECT, or ::PROPAGATED) - read
   // straight off the local msg object in messenger_send_lxmf_resolved()
@@ -1627,6 +1628,17 @@
     if (desired_method == LXMF::Type::Message::PROPAGATED) {
       messenger_refresh_prop_node_stamp_cost();
     }
+    // No stored announce app_data for this peer means its stamp cost can't
+    // be known (LXMRouter::resolve_outbound_stamp_cost() reads it from
+    // there) - this send may go out unstamped and be silently dropped by a
+    // stamp-enforcing receiver even though its packet proof still comes
+    // back as "Delivered". Ask the mesh for a fresh announce so the next
+    // send knows; not worth blocking this one on (a peer that truly has no
+    // app_data would otherwise stall every send).
+    if (desired_method != LXMF::Type::Message::PROPAGATED && !RNS::Identity::recall_app_data(dest_hash)) {
+      DEBUG_LOG("[Messenger] send: no announce app_data for %s, stamp cost unknown - requesting path\r\n", dest_hash.toHex().c_str());
+      RNS::Transport::request_path(dest_hash);
+    }
     LXMF::LXMessage msg(dest, urns_lxmf_router->delivery_destination(), RNS::bytesFromString(content),
       RNS::Bytes(), desired_method);
     urns_lxmf_router->handle_outbound(msg);
@@ -1649,6 +1661,7 @@
     msngr_send_message_hash = msg.hash();
     msngr_send_state = MSNGR_SEND_PENDING;
     msngr_send_started_ms = millis();
+    msngr_send_stamp_seen = false;
     msngr_send_attempt = 1;
     msngr_send_router_state = LXMF::Type::Message::OUTBOUND;
 
@@ -1696,6 +1709,17 @@
       // still genuinely, successfully grinding in the background whenever
       // the active propagation node requires a stamp.
       if (msngr_send_method == LXMF::Type::Message::PROPAGATED && urns_lxmf_router->outbound_propagation_stamp_cost() > 0) {
+        effective_timeout_ms += MSNGR_SEND_STAMP_GRIND_BUDGET_MS;
+      }
+      // Direct/opportunistic sends to a stamp-requiring peer mine their
+      // stamp on the LXStamper worker before any transmit, not covered by
+      // retry_budget_ms either. Latched once seen (the router drops the
+      // pending flag the moment the stamp lands) so the extra budget stays
+      // for the rest of this send instead of vanishing mid-proof-wait.
+      if (urns_lxmf_router->pending_outbound_front_stamp_pending_for(msngr_send_message_hash)) {
+        msngr_send_stamp_seen = true;
+      }
+      if (msngr_send_stamp_seen) {
         effective_timeout_ms += MSNGR_SEND_STAMP_GRIND_BUDGET_MS;
       }
       if (millis() - msngr_send_started_ms > effective_timeout_ms) {

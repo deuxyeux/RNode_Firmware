@@ -1,4 +1,5 @@
 #include "LXMRouter.h"
+#include "LXStamper.h"
 #include <microReticulum/Log.h>
 #include <microReticulum/Utilities/OS.h>
 #include <microReticulum/Packet.h>
@@ -836,7 +837,7 @@ void LXMRouter::handle_outbound(LXMessage& message) {
 	// required-stamp failure cannot be reported as a successful send.
 	bool generate_auto_stamp = false;
 	if (message.method() != Type::Message::PROPAGATED && message.stamp_cost() == 0) {
-		const uint8_t announced_cost = get_outbound_stamp_cost(message.destination_hash());
+		const uint8_t announced_cost = resolve_outbound_stamp_cost(message.destination_hash());
 		if (announced_cost > MAX_AUTO_OUTBOUND_STAMP_COST) {
 			throw std::runtime_error("Peer-advertised stamp cost exceeds local automatic generation limit");
 		}
@@ -849,8 +850,14 @@ void LXMRouter::handle_outbound(LXMessage& message) {
 	}
 
 	if (generate_auto_stamp && !message.has_valid_stamp()) {
+		// pack() first: the stamp is mined against the message hash.
 		message.pack();
-		if (!message.generate_stamp()) {
+		if (_async_stamp_generation) {
+			// Mined on the LXStamper worker by process_outbound(), which
+			// holds the message back (without charging a delivery attempt)
+			// until the stamp lands.
+			message.set_stamp_pending(true);
+		} else if (!message.generate_stamp()) {
 			throw std::runtime_error("Failed to generate required LXMF stamp");
 		}
 	}
@@ -913,6 +920,21 @@ uint8_t LXMRouter::get_outbound_stamp_cost(const Bytes& destination_hash) const 
 	for (size_t i = 0; i < OUTBOUND_STAMP_COSTS_SIZE; ++i) {
 		const auto& slot = _outbound_stamp_costs[i];
 		if (slot.in_use && slot.destination_hash_equals(destination_hash)) return slot.cost;
+	}
+	return 0;
+}
+
+uint8_t LXMRouter::resolve_outbound_stamp_cost(const Bytes& destination_hash) {
+	const uint8_t cached = get_outbound_stamp_cost(destination_hash);
+	if (cached > 0) return cached;
+
+	const Bytes app_data = Identity::recall_app_data(destination_hash);
+	uint8_t cost = 0;
+	bool has_cost = false;
+	if (app_data && decode_announce_stamp_cost(app_data, cost, has_cost) && has_cost) {
+		update_stamp_cost(destination_hash, cost);
+		DEBUG("  Recovered stamp cost " + std::to_string(cost) + " from persisted announce app_data");
+		return cost;
 	}
 	return 0;
 }
@@ -980,6 +1002,49 @@ void LXMRouter::process_outbound() {
 	// sitting there awaiting an async event, not actually being retried.
 	if (message.state() == Type::Message::SENT) {
 		return;
+	}
+
+	// Stamp still to be mined (handle_outbound() with async generation on).
+	// Handled ahead of the attempt budget on purpose: grinding isn't a
+	// delivery attempt, so it must not burn one.
+	if (message.stamp_pending()) {
+		const Bytes owner = LXStamper::async_message_id();
+		const bool ours = (owner == message.hash());
+		if (LXStamper::is_async_done()) {
+			// take_async_result() resets the slot either way; only a result
+			// that belongs to this message is used (a stale one left by an
+			// abandoned send would carry a stamp for a different hash).
+			auto [stamp, value] = LXStamper::take_async_result();
+			if (ours && stamp.size() == LXStamper::STAMP_SIZE) {
+				INFO("Stamp with value " + std::to_string(value) + " mined for message " + message.hash().toHex());
+				message.apply_generated_stamp(stamp);
+				message.pack();
+				// Fall through and send now - nothing left to wait for.
+			} else if (ours) {
+				ERROR("Stamp generation failed for message " + message.hash().toHex());
+				message.set_stamp_pending(false);
+				message.state(Type::Message::FAILED);
+				if (_failed_callback) {
+					_failed_callback(message);
+				}
+				failed_outbound_push(message);
+				LXMessage dummy;
+				pending_outbound_pop(dummy);
+				return;
+			} else {
+				// Discarded someone else's stale result; start ours next poll.
+				_next_outbound_process_time = now + STAMP_POLL_INTERVAL;
+				return;
+			}
+		} else {
+			if (!LXStamper::is_async_running()) {
+				if (!LXStamper::start_async(message.hash(), message.stamp_cost())) {
+					WARNING("Could not start stamp worker, will retry");
+				}
+			}
+			_next_outbound_process_time = now + STAMP_POLL_INTERVAL;
+			return;
+		}
 	}
 
 	snprintf(buf, sizeof(buf), "Processing outbound message to %s", message.destination_hash().toHex().c_str());

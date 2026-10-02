@@ -17,6 +17,7 @@
 #endif
 
 #include <atomic>
+#include <vector>
 #include <mutex>
 
 using namespace LXMF;
@@ -88,19 +89,28 @@ Bytes LXStamper::msgpack_pack_uint16(uint16_t n) {
 	return result;
 }
 
-// Generate workblock from message ID using HKDF expansion
-Bytes LXStamper::stamp_workblock(const Bytes& material, uint16_t expand_rounds) {
-	DEBUG("Generating stamp workblock with " + std::to_string(expand_rounds) + " rounds");
+#ifdef ESP_PLATFORM
+// esp_task_wdt_reset() logs "task not found" on every call from a task that
+// isn't subscribed to the TWDT - true of the lxstamp worker, but not of
+// loopTask (the synchronous path), which does need feeding.
+static inline void feed_wdt_if_subscribed() {
+	if (esp_task_wdt_status(nullptr) == ESP_OK) {
+		esp_task_wdt_reset();
+	}
+}
+#endif
 
-	// Pre-allocate for efficiency
-	// Each round produces 256 bytes
-	size_t total_size = 256 * expand_rounds;
-	Bytes workblock;
-	workblock.reserve(total_size);
-
+// Produce the workblock one 256-byte chunk at a time, handing each to `sink`.
+// The workblock is 768KB at the direct-message round count; building it with
+// Bytes::append() reallocated and copied the whole growing buffer every round
+// (Bytes::append reserves the exact new size), ~1GB of PSRAM memcpy that
+// blocked loopTask past the task watchdog. Streaming also lets
+// generate_stamp() skip materialising it at all.
+template <typename Sink>
+static void stamp_workblock_stream(const Bytes& material, uint16_t expand_rounds, Sink&& sink) {
 	for (uint16_t n = 0; n < expand_rounds; n++) {
 		// Pack n with msgpack (matches Python: msgpack.packb(n))
-		Bytes packed_n = msgpack_pack_uint16(n);
+		Bytes packed_n = LXStamper::msgpack_pack_uint16(n);
 
 		// salt = full_hash(material + msgpack.packb(n))
 		Bytes salt_input;
@@ -109,10 +119,31 @@ Bytes LXStamper::stamp_workblock(const Bytes& material, uint16_t expand_rounds) 
 
 		// chunk = hkdf(length=256, derive_from=material, salt=salt, context=None)
 		Bytes chunk = Cryptography::hkdf(256, material, salt, {});
+		sink(chunk.data(), chunk.size());
 
-		workblock << chunk;
+#ifdef ESP_PLATFORM
+		// Runs on loopTask when called from the Messenger send path.
+		if (n % 50 == 49) {
+			vTaskDelay(1);
+			feed_wdt_if_subscribed();
+		}
+#endif
 	}
+}
 
+// Generate workblock from message ID using HKDF expansion
+Bytes LXStamper::stamp_workblock(const Bytes& material, uint16_t expand_rounds) {
+	DEBUG("Generating stamp workblock with " + std::to_string(expand_rounds) + " rounds");
+
+	// Each round produces 256 bytes. A plain vector reserved once - not
+	// Bytes - so appends never reallocate (see stamp_workblock_stream()).
+	std::vector<uint8_t> buffer;
+	buffer.reserve((size_t)256 * expand_rounds);
+	stamp_workblock_stream(material, expand_rounds, [&buffer](const uint8_t* data, size_t len) {
+		buffer.insert(buffer.end(), data, data + len);
+	});
+
+	Bytes workblock(buffer.data(), buffer.size());
 	DEBUG("Workblock generated: " + std::to_string(workblock.size()) + " bytes");
 	return workblock;
 }
@@ -165,14 +196,15 @@ std::pair<Bytes, uint8_t> LXStamper::generate_stamp(
 {
 	INFO("Generating stamp with cost " + std::to_string(stamp_cost) + " for " + message_id.toHex());
 
-	// Generate workblock
-	Bytes workblock = stamp_workblock(message_id, expand_rounds);
-
 	// OPTIMIZATION: Pre-hash the workblock once and save the SHA256 state
-	// This avoids re-hashing 256KB for every stamp attempt
+	// This avoids re-hashing the whole workblock for every stamp attempt.
+	// Streamed straight into the hasher - the workblock itself is never
+	// needed again, so don't build (or hold) it.
 	SHA256 base_hash;
 	base_hash.reset();
-	base_hash.update(workblock.data(), workblock.size());
+	stamp_workblock_stream(message_id, expand_rounds, [&base_hash](const uint8_t* data, size_t len) {
+		base_hash.update(data, len);
+	});
 
 	uint32_t rounds = 0;
 	double start_time = Utilities::OS::time();
@@ -238,7 +270,7 @@ std::pair<Bytes, uint8_t> LXStamper::generate_stamp(
 #ifdef ESP_PLATFORM
 		if (rounds % 10 == 0) {
 			vTaskDelay(1);        // Yield for 1 tick
-			esp_task_wdt_reset(); // Feed watchdog during long operations
+			feed_wdt_if_subscribed(); // Feed watchdog during long operations
 		}
 #endif
 	}
@@ -387,6 +419,11 @@ bool LXStamper::start_async(
 bool LXStamper::is_async_running() {
 	return g_async_stamp.state.load(std::memory_order_acquire)
 	       == AsyncState::RUNNING;
+}
+
+Bytes LXStamper::async_message_id() {
+	std::lock_guard<std::mutex> lk(g_async_stamp.slot_mutex);
+	return g_async_stamp.message_id;
 }
 
 bool LXStamper::is_async_done() {
